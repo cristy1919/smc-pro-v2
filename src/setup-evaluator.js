@@ -127,17 +127,21 @@ function evaluate(input, engine) {
   if (sweep && displacementEvent && triggerEvent?.direction === direction && triggerEvent?.type === "CHoCH" && triggerEvent?.mss === true && fvg) add("sweep", ["LIQUIDITY_SWEEP", "DISPLACEMENT_MSS", "FVG_RETEST"], fvg);
   if (breaker) add("breaker", ["BREAKER_RETEST"], breaker);
   if (displacementEvent && triggerEvent?.direction === direction && triggerEvent?.type === "BOS" && triggerEvent?.displacement === true) add("bos", ["BOS_CLOSE", "DISPLACEMENT"]);
-  if (deviation) add(engine === "scalp" ? "range" : "range", ["RANGE_DEVIATION_REENTRY"]);
+  if (deviation) {
+    const candleRange = entryCandles.at(-1).high - entryCandles.at(-1).low;
+    const rangeZone = { low: deviation.level - candleRange * 0.25, high: deviation.level + candleRange * 0.25, type: "RANGE_REENTRY" };
+    add("range", ["RANGE_DEVIATION_REENTRY"], rangeZone);
+  }
   if (engine === "scalp") {
-    if (sweep && entryF.lastEvent?.direction === direction && entryF.lastEvent.type === "CHoCH") add("failed", ["FAILED_BREAKOUT", "SWEEP", "CHOCH"]);
+    if (sweep && triggerEvent?.direction === direction && triggerEvent.type === "CHoCH" && triggerEvent.mss === true) add("failed", ["FAILED_BREAKOUT", "SWEEP", "CHOCH"]);
     if (ob) add("ob", ["OB_REACTION"], ob);
   } else {
     if (midOb) add("ob", ["HTF_OB_REVERSAL"], midOb);
     if (midSupplyDemand) add("supply", ["SUPPLY_DEMAND_REACTION"], midSupplyDemand);
-    if (sweep && entryF.lastEvent?.direction === direction && entryF.lastEvent.type === "CHoCH") add("sweep", ["LIQUIDITY_SWEEP", "CHOCH"]);
+    if (sweep && triggerEvent?.direction === direction && triggerEvent.type === "CHoCH" && triggerEvent.mss === true) add("sweep", ["LIQUIDITY_SWEEP", "CHOCH"]);
     if (crt) add("crt", ["CRT_SWEEP_REENTRY"]);
     if (inOte) add("ote", ["OTE_RETRACE"], ote);
-    if (displacementEvent && entryF.lastEvent?.type === "BOS") add("bos", ["BOS_CONTINUATION", "DISPLACEMENT"]);
+    if (displacementEvent && triggerEvent?.direction === direction && triggerEvent.type === "BOS" && triggerEvent.displacement === true) add("bos", ["BOS_CONTINUATION", "DISPLACEMENT"]);
   }
   const unique = new Map();
   for (const item of candidates) if (!unique.has(item.setupId)) unique.set(item.setupId, item);
