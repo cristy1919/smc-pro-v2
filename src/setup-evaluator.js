@@ -42,7 +42,7 @@ function features(candles) {
   const fvgs = detectFairValueGaps(candles);
   const obs = detectOrderBlocks(candles, s.events);
   const breakers = detectBreakerBlocks(candles, obs);
-  const range = detectRange(candles);
+  const range = detectRange(candles.slice(0, -1));
   const deviations = range ? detectRangeDeviations(candles, { ...range, endIndex: candles.length - 2 }) : [];
   const crt = detectCRT(candles);
   return { ...s, pools, sweeps, fvgs, obs, breakers, range, deviations, crt };
@@ -106,13 +106,13 @@ function evaluate(input, engine) {
   if (direction === "NEUTRAL") return [];
   const price = entryCandles.at(-1).close;
   const candidates = [];
-  const sweep = latest(entryF.sweeps, x => x.direction === direction);
+  const sweep = latest(entryF.sweeps, x => x.direction === direction && x.index >= entryCandles.length - 4);
   const displacementEvent = latest(entryF.events, x => x.direction === direction && x.displacement);
   const fvg = zoneAtPrice(entryF.fvgs.filter(x => x.status !== "FILLED"), price, direction);
   const breaker = entryF.breakers.find(x => x.direction === direction && price >= x.low && price <= x.high);
   const ob = entryF.obs.find(x => x.direction === direction && x.status === "ACTIVE" && price >= x.low && price <= x.high);
-  const deviation = latest(entryF.deviations, x => x.direction === direction);
-  const crt = entryF.crt.find(x => x.direction === direction);
+  const deviation = latest(entryF.deviations, x => x.direction === direction && x.index >= entryCandles.length - 3);
+  const crt = entryF.crt.find(x => x.direction === direction && x.index === entryCandles.length - 1);
   const midOb = middle.obs.find(x => x.direction === direction && x.status === "ACTIVE" && price >= x.low && price <= x.high);
   const impulseEvent = latest(middle.events, x => x.direction === direction && x.displacement);
   const ote = impulseEvent ? detectOTE({ direction, startPrice: middle.pivots.filter(p => p.type === (direction === "BULLISH" ? "LOW" : "HIGH") && p.confirmedAt <= impulseEvent.index).at(-1)?.price ?? price, endPrice: impulseEvent.level }) : null;
