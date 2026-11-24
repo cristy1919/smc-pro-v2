@@ -15,7 +15,7 @@ export class PaperExecutionAdapter {
   if(!Number.isFinite(mark)||mark<=0)throw new Error("MARK_PRICE_UNAVAILABLE");
   const side=candidate.direction==="BULLISH"?"LONG":"SHORT";
   const calc=calculatePosition({currentEquity:balance.equity,riskMultiple,entry:mark,stop:candidate.stopLoss,target:candidate.takeProfit,side,feeRate,slippageRate,fundingRate});
-  const p={id:candidate.id+":"+this.clock(),candidateId:candidate.id,engine:candidate.engine,symbol:candidate.symbol,side,entry:mark,stopLoss:candidate.stopLoss,takeProfit:candidate.takeProfit,quantity:calc.quantity,riskBudget:calc.riskBudget,riskUnitUsd:calc.riskUnitUsd,currentEquityAtEntry:balance.equity,state:"OPEN",openedAt:this.clock(),mode:"PAPER_SIMULATION_NOT_EXCHANGE"};
+  const p={id:candidate.id+":"+this.clock(),candidateId:candidate.id,engine:candidate.engine,symbol:candidate.symbol,side,entry:mark,stopLoss:candidate.stopLoss,takeProfit:candidate.takeProfit,quantity:calc.quantity,riskBudget:calc.riskBudget,riskUnitUsd:calc.riskUnitUsd,currentEquityAtEntry:balance.equity,marginMode:candidate.marginMode??"ISOLATED",leverage:candidate.leverage??null,state:"OPEN",openedAt:this.clock(),mode:"PAPER_SIMULATION_NOT_EXCHANGE"};
   await this.store.savePosition(p);return p;
  }
  async close(positionId,price,reason="MANUAL"){if(!Number.isFinite(price)||price<=0)throw new Error("INVALID_EXIT_PRICE");const p=await this.store.getPosition(positionId);if(!p||p.state!=="OPEN")throw new Error("POSITION_NOT_OPEN");const pnl=(price-p.entry)*(p.side==="LONG"?1:-1)*p.quantity;const closed={...p,state:"CLOSED",exit:price,exitReason:reason,closedAt:this.clock(),grossPnl:pnl};await this.store.saveTrade(closed);await this.store.deletePosition(positionId);return closed;}
