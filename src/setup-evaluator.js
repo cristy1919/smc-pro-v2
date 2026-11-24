@@ -1,6 +1,6 @@
 import { detectPivots, classifyStructure, detectStructureEvents } from "./market-structure.js";
 import { detectFairValueGaps, detectLiquidityPools, detectLiquiditySweeps } from "./zones.js";
-import { detectOrderBlocks, detectBreakers, detectSupplyDemand, detectRollingRanges, detectRangeDeviations, detectOTE as detectOTEZones, detectCRT } from "./advanced-zones.js";
+import { detectOrderBlocks, detectBreakers, detectSupplyDemand, detectRollingRanges, detectRangeDeviations, detectOTE as detectOTEZones, detectCRT, detectMitigations } from "./advanced-zones.js";
 import { validateCandles } from "./market-data.js";
 
 const WEIGHTS = {
@@ -37,9 +37,22 @@ function features(candles) {
   const s = structure(candles);
   const pools = detectLiquidityPools(s.pivots);
   const sweeps = detectLiquiditySweeps(candles, pools);
-  const fvgs = detectFairValueGaps(candles);
-  const obs = detectOrderBlocks(candles, { pivots: s.pivots, events: s.events });
-  const breakers = detectBreakers(candles, obs);
+  const fvgs = detectFairValueGaps(candles).map(z => {
+    const direction = z.type.startsWith("BULLISH") ? "BULLISH" : "BEARISH";
+    let mitigatedAt = null, filledAt = null;
+    for (let i = z.formedAt + 1; i < candles.length; i++) {
+      const candle = candles[i];
+      const touched = direction === "BULLISH" ? candle.low <= z.high : candle.high >= z.low;
+      if (!touched) continue;
+      mitigatedAt ??= i;
+      const filled = direction === "BULLISH" ? candle.low <= z.low : candle.high >= z.high;
+      if (filled) { filledAt = i; break; }
+    }
+    return { ...z, direction, mitigatedAt, filledAt, status: filledAt !== null ? "FILLED" : mitigatedAt !== null ? "MITIGATED" : "ACTIVE" };
+  });
+  const rawObs = detectOrderBlocks(candles, { pivots: s.pivots, events: s.events });
+  const obs = detectMitigations(candles, rawObs);
+  const breakers = detectBreakers(candles, rawObs);
   const supplyDemand = detectSupplyDemand(candles, { pivots: s.pivots });
   const ranges = detectRollingRanges(candles);
   const deviations = detectRangeDeviations(candles, ranges);
@@ -104,18 +117,21 @@ function validateInput(input, engine) {
 function evaluate(input, engine) {
   const [higherCandles, middleCandles, entryCandles] = validateInput(input, engine);
   const htf = features(higherCandles), middle = features(middleCandles), entryF = features(entryCandles);
-  const direction = candleDirection(entryCandles.at(-1));
-  if (direction === "NEUTRAL") return [];
   const price = entryCandles.at(-1).close;
-  const candidates = [];
-  const sweep = latest(entryF.sweeps, x => x.direction === direction && x.index >= entryCandles.length - 4);
+  const recentSweep = latest(entryF.sweeps, x => x.index >= entryCandles.length - 4);
+  const recentDeviation = latest(entryF.deviations, x => x.index >= entryCandles.length - 3);
+  const recentCrt = latest(entryF.crt, x => x.index === entryCandles.length - 1);
   const triggerEvent = latest(entryF.events, x => x.index >= entryCandles.length - 4);
+  const direction = recentSweep?.direction ?? recentDeviation?.direction ?? recentCrt?.direction ?? triggerEvent?.direction ?? candleDirection(entryCandles.at(-1));
+  if (direction === "NEUTRAL") return [];
+  const candidates = [];
+  const sweep = recentSweep?.direction === direction ? recentSweep : null;
   const displacementEvent = latest(entryF.events, x => x.direction === direction && x.displacement && x.index >= entryCandles.length - 4);
   const fvg = zoneAtPrice(entryF.fvgs.filter(x => x.status !== "FILLED"), price, direction);
   const breaker = entryF.breakers.find(x => x.direction === direction && price >= x.low && price <= x.high);
-  const ob = entryF.obs.find(x => x.direction === direction && x.status === "ACTIVE" && price >= x.low && price <= x.high);
-  const deviation = latest(entryF.deviations, x => x.direction === direction && x.index >= entryCandles.length - 3);
-  const crt = entryF.crt.find(x => x.direction === direction && x.index === entryCandles.length - 1);
+  const ob = entryF.obs.find(x => x.direction === direction && x.status !== "INVALIDATED" && price >= x.low && price <= x.high);
+  const deviation = recentDeviation?.direction === direction ? recentDeviation : null;
+  const crt = recentCrt?.direction === direction ? recentCrt : null;
   const midOb = middle.obs.find(x => x.direction === direction && x.status === "ACTIVE" && price >= x.low && price <= x.high);
   const midSupplyDemand = middle.supplyDemand.find(x => (direction === "BULLISH" ? x.type === "DEMAND" : x.type === "SUPPLY") && price >= x.low && price <= x.high);
   const ote = middle.otes.find(x => x.direction === direction && price >= x.low && price <= x.high);
