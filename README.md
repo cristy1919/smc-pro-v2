@@ -1,30 +1,35 @@
 # SMC PRO V2
 
-BingX USDT-M futures için bağımsız Scalp ve Swing price-action araştırma/tarama projesi.
+BingX USDT-M Futures için bağımsız Scalp ve Swing price-action motorları. Ana çalışma ortamı, mevcut ve korunacak Cloudflare Worker `smcprov2`'dir.
 
-## Güvenlik
-- Yalnızca PAPER / RESEARCH modunda çalışır; canlı emir adaptörü yoktur.
-- Gerçek BingX VST bakiye bağlantısı henüz kurulmadığı için paper pozisyon açma/kapatma devre dışıdır. Varsayılan veya tahmini bakiye kullanılmaz.
-- Market verisi BingX public API üzerinden alınır; özel API anahtarı gerekmez.
-- 1M ve 3M zaman dilimleri tarama motorlarına dahil değildir.
-- Yeni Cloudflare Worker `smc-pro-v2` ve ayrı KV namespace kullanır. Önceden var olan `smcprov2` Worker'ı değiştirilmez.
+## Üretim ortamı güvenliği
+- Mevcut `smcprov2` Worker sürüm 1889 ana üretim ortamıdır; yeni `smc-pro-v2` Worker üretim hedefi değildir.
+- Üretim Worker kaynak snapshot'ı ve altyapı denetimi `infra/archive-smcprov2-v1889` dalında `legacy/` altında arşivlenmiştir.
+- Üretim KV alanı ve Durable Object verisi korunur; mevcut 847 KV kaydı ve tek Durable Object nesnesi üzerinde sıfırlama/taşıma yapılmaz.
+- Canlı işlem kapalı kalır. Paper/VST yürütme, bakiye ve mevcut ledger semantiği doğrulanmadan açılmaz.
+- Yeni tarayıcı iskeleti, eski Worker'ın yerine doğrudan dağıtılamaz: mevcut üretim kodu `PAPER_STATE` ve `ENGINE_STATE` kullanır ve BingX VST emir/pozisyon yaşam döngüsünü içerir.
+- Bilinçli olarak Wrangler dağıtım dosyası tutulmuyor. Eski Worker ile uyumlu Durable Object/KV adapter ve secret-preserving deployment planı test edilmeden deploy yapılandırması eklenmeyecek.
 
-## Uygulanan tarama
-- 5 dakikalık cron; BingX USDT-M sözleşme ve ticker evreni.
-- Hacim ve bid/ask spread filtresi; tur başına 5 sembol ve KV'de cursor.
-- Scalp: 1H bias, 15M bölge, 5M giriş. Swing: 1D bias, 4H bölge, 15M giriş.
-- Aynı tarama turunda aynı sembol/zaman dilimi için mum verisi cache edilir.
-- Kapanmamış mumlar analiz dışında bırakılır.
-- Pivot tabanlı yapı bias'ı, likidite süpürmesi, displacement ve FVG koşullarıyla aday üretimi.
-- Adaylar Scalp/Swing etiketiyle ayrı listelenir; güven değeri örneklem oluşana kadar INSUFFICIENT_DATA'dır.
+## Motor gereksinimleri
+- Scalp: 1H yön, 15M likidite/bölge, 5M setup ve giriş.
+- Swing: 1D yön, 4H yapı/bölge, 1H teyit, 15M giriş.
+- 1M ve 3M yasak.
+- Market Structure: HH/HL/LH/LL, BOS, CHoCH, displacement ve MSB/MSS.
+- SMC bölgeleri: OB, FVG, Breaker, Mitigation, Supply/Demand, Range Deviation, OTE ve CRT.
+- İki motor bağımsız sinyal/istatistik üretir; portföy riski ortaktır.
+- Skor ve confidence ayrıdır; yetersiz örneklemde confidence `INSUFFICIENT_DATA` olur.
+- Eksik hacim delta, aggressor veya dominance verisi tahmin edilmez; `UNAVAILABLE` olarak kalır.
 
-## API
-- `GET /api/health`
-- `GET /api/data`
-- Tarama zamanlayıcısı: `*/5 * * * *`
+## Mevcut kod aşaması
+- `src/market-structure.js`: sağ pencere kapanmadan pivotu kullanmayan, onaylı pivot ve yapı kırılımı tespiti.
+- `src/zones.js`: FVG yaşam döngüsü, likidite havuzları/süpürmeleri, OB, mitigation/breaker, Supply/Demand, range deviation, OTE ve CRT.
+- `test/price-action.test.js`: gelecek veri sızıntısı ve temel bölge davranış testleri.
+- Scalp/Swing setup değerlendirmesi, gerçek backtest, VST paper yaşam döngüsü ve üretim dashboard entegrasyonu henüz tamamlanmış değildir.
 
-## Henüz tamamlanmayan aşamalar
-- VST kimlik doğrulaması ve bakiye okuma; bu nedenle paper execution kapalı.
-- Gelişmiş OB, Breaker, Mitigation, Supply/Demand, Range Deviation, CRT, OTE ve setup-specific retest doğrulaması.
-- Derinlik/order-book filtreleri, Durable Objects koordinasyonu, gerçek tarihsel arşiv ve 30/60/90 günlük maliyet dahil backtest.
-- Ayrı Scalp/Swing performans istatistikleri ve örneklem tabanlı confidence.
+## Test
+```bash
+npm test
+node --check worker/index.js
+```
+
+Bu dal araştırma/engine geliştirmesidir; üretim Worker'a deploy edilmez.
