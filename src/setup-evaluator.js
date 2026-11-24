@@ -95,7 +95,7 @@ function makeCandidate({ engine, symbol, direction, setupId, entryCandles, htf, 
   ];
   return {
     id: [engine, symbol, setupId, last.timestamp].join(":"),
-    engine, symbol, direction, setupId, state: rejected ? "REJECTED" : score >= 70 ? "QUALIFIED" : "WATCH",
+    engine, symbol, direction, setupId, state: rejected ? "REJECTED" : score >= 80 ? "QUALIFIED" : "WATCH",
     timeframe: engine === "scalp" ? "5m" : "1h",
     entry, stop, target, zoneBounds: zone ? { low: zone.low, high: zone.high, type: zone.type } : null, rewardRisk: Number(rr.toFixed(2)), score, band,
     entryConfirmation: { status: "PENDING", maxWaitBars: 6, method: zone ? "ZONE_RETEST_CLOSE" : "CLOSE_CONFIRMATION" },
