@@ -37,3 +37,20 @@ The bundled Worker also contains a storage-degraded fallback for the legacy pape
 5. Deploy a canary to the existing `smcprov2` Worker only after the above checks pass.
 
 No production Worker, Durable Object, KV, Cron, API secret or exchange order was modified by this branch.
+
+## Read-only production inspection (2026-11-24)
+
+The currently deployed Worker was inspected through Cloudflare's read-only script/settings endpoints. The observed bindings are:
+
+- `BINGX_TRADING_MODE=paper`, `PAPER_TRADING_ONLY=true`, `PAPER_START_BALANCE_USDT=1000`.
+- `DEMO_TRADING_ENABLED=false`, `LIVE_TRADING_ENABLED=false`, `ORDERFLOW_DEMO_EXECUTION_ENABLED=false`.
+- `EXCHANGE_DATA_SOURCE=BINGX_PUBLIC`.
+- `ENGINE_STATE` is the existing `EngineState` namespace; `PAPER_STATE` is the existing KV namespace.
+- The current Worker binding list contains no `BINGX_API_KEY` or `BINGX_API_SECRET` binding.
+- Cron remains `*/5 * * * *`.
+
+Consequently, the deployed Worker is currently in its internal paper-ledger mode, not verified BingX VST demo mode. Its `GET /api/paper/status` route reads the canonical Durable Object ledger and invokes the internal-paper account initialization guard; it does not establish a BingX VST balance. The dashboard `GET /api/data` aggregates this status route and related read endpoints; it does not invoke the scanner. Do not treat the displayed internal-paper equity as VST equity.
+
+The source confirms the existing dashboard endpoints and the Durable Object paper-state key allowlist. That allowlist still has no dedicated research-candidate key. Therefore the research adapter can map/read existing dashboard data, but candidate publication cannot safely be enabled against the current DO bridge until a separate versioned key/table and its persistence semantics are reviewed.
+
+The deployed public hostname returned a network-level `Forbidden` response from this execution environment, so live HTTP response payloads were not independently exercised here. No Cloudflare resource was changed.
