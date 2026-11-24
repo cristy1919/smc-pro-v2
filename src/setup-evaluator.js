@@ -94,7 +94,8 @@ function validateInput(input, engine) {
   if (!input || typeof input.symbol !== "string" || !input.symbol.trim()) throw new TypeError("symbol is required");
   const required = engine === "scalp" ? ["1h", "15m", "5m"] : ["1d", "4h", "1h"];
   for (const tf of required) {
-    validateCandles(input.timeframes?.[tf]);
+    if (!Array.isArray(input.timeframes?.[tf])) throw new Error("MISSING_TIMEFRAME_" + tf);
+    validateCandles(input.timeframes[tf]);
     if (input.timeframes[tf].length < 25) throw new Error(`INSUFFICIENT_CANDLES_${tf}`);
   }
   return required.map(tf => input.timeframes[tf]);
