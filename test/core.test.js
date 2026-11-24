@@ -1,0 +1,13 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {assertSupportedTimeframe,detectPivots,detectFairValueGaps,calculatePosition,enginePlan,scoreSetup,transitionSetup,CandleCache,validateCandles} from "../src/index.js";
+const candles=rows=>rows.map(([open,high,low,close],i)=>({timestamp:i+1,open,high,low,close,volume:100,closed:true}));
+test("1m and 3m forbidden",()=>{assert.throws(()=>assertSupportedTimeframe("1m"),/Forbidden/);assert.throws(()=>assertSupportedTimeframe("3m"),/Forbidden/);});
+test("engine timeframe plans",()=>{assert.deepEqual(enginePlan("scalp").allowed,["1h","15m","5m"]);assert.deepEqual(enginePlan("swing").allowed,["1d","4h","1h","15m"]);});
+test("pivot waits for right-side candle confirmation",()=>{const p=detectPivots(candles([[1,2,0,1],[1,3,1,2],[2,5,2,4],[2,4,1,3],[2,3,1,2]]),{leftBars:2,rightBars:2});assert.ok(p.some(x=>x.type==="HIGH"&&x.index===2&&x.confirmedAt===4));});
+test("rejects duplicate timestamps and unclosed candles",()=>{const d=candles([[1,2,0,1],[1,2,0,1]]);d[1].timestamp=d[0].timestamp;assert.throws(()=>validateCandles(d),/increasing/);d[1].timestamp=2;d[1].closed=false;assert.throws(()=>validateCandles(d),/closed/);});
+test("detects bullish FVG",()=>{const d=candles([[1,3,.5,2],[2,3.5,1,3],[3,5,3.2,4.5]]);assert.equal(detectFairValueGaps(d)[0].type,"BULLISH_FVG");});
+test("risk sizing enforces 1:2 RR",()=>{assert.throws(()=>calculatePosition({equity:1000,entry:100,stop:99,target:101}),/BELOW_2/);assert.equal(calculatePosition({equity:1000,entry:100,stop:99,target:102}).riskBudget,20);});
+test("score is separate from empirical confidence",()=>{const r=scoreSetup("scalp",{htf:100,liquidity:100,structure:100,zone:100,entry:100,volume:100});assert.equal(r.score,100);assert.equal(r.band,"HIGH_QUALITY");assert.equal(r.confidence,"INSUFFICIENT_DATA");});
+test("terminal setup cannot be reopened",()=>{const c=transitionSetup({state:"OPEN"},"CLOSED");assert.throws(()=>transitionSetup(c,"OPEN"),/Invalid/);});
+test("cache validates candles",()=>{const cache=new CandleCache(),d=candles([[1,2,0,1]]);cache.set("BTC-USDT","5m",d);assert.equal(cache.get("BTC-USDT","5m"),d);});
