@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { advanceEntryConfirmation } from "../src/entry-confirmation.js";
 import { BingXPublicKlineProvider, fetchEngineDataset } from "../src/bingx-market-data.js";
-import { runHistoricalBacktest } from "../src/backtest.js";
+import { runHistoricalBacktest } from "../src/multi-timeframe-backtest.js";
 import { createLegacyWorkerCompatibilityAdapter } from "../src/worker-compat.js";
 import { buildDashboardSnapshot, createDashboardActions } from "../src/dashboard-model.js";
 import { DASHBOARD_TABS } from "../src/config.js";
