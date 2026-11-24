@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { BingXPublicKlineProvider, fetchEngineDataset } from "../src/bingx-market-data.js";
 import { BingXVSTDemoAccount } from "../src/bingx-vst-account.js";
 import { evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
