@@ -20,3 +20,14 @@ export function analyzePriceAction(candles,{engine="scalp",volumeAvailable=false
  }
  return {engine,lastClosedCandle:c.timestamp,structure:{pivots:labels,events},liquidity:{pools,sweeps},zones:{fvg,orderBlocks:obs,breakers,supplyDemand:sd,ranges,rangeDeviations:deviations,ote,crt},candidates};
 }
+
+export function analyzeMultiTimeframe({engine="scalp",candlesByTimeframe,volumeAvailable=false}={}) {
+ const plan=ENGINE_CONFIG[engine];if(!plan)throw new Error("Unknown engine");
+ for(const tf of plan.allowed){if(!Array.isArray(candlesByTimeframe?.[tf])||candlesByTimeframe[tf].length<5)throw new Error("Insufficient closed candles for "+tf);}
+ const bias=analyzePriceAction(candlesByTimeframe[plan.bias],{engine,volumeAvailable});
+ const zoneTf=plan.liquidity??plan.zone,zone=analyzePriceAction(candlesByTimeframe[zoneTf],{engine,volumeAvailable});
+ const entry=analyzePriceAction(candlesByTimeframe[plan.entry],{engine,volumeAvailable});
+ const biasEvent=bias.structure.events.at(-1),biasDirection=biasEvent?.direction??null;
+ const candidates=entry.candidates.map(c=>{const liquidityConfirmed=zone.liquidity.sweeps.length>0||zone.zones.rangeDeviations.length>0||zone.zones.crt.length>0;const htfAligned=biasDirection===c.direction;return {...c,htfBias:biasDirection??"UNCONFIRMED",htfAligned,liquidityConfirmed:liquidityConfirmed||c.evidence.liquiditySweep||c.evidence.rangeDeviation||c.evidence.crt,status:htfAligned&&liquidityConfirmed?"WATCH":"WAIT",entryEligible:false,reason:!htfAligned?"HTF_ALIGNMENT_NOT_CONFIRMED":!liquidityConfirmed?"15M_OR_4H_LIQUIDITY_CONFIRMATION_MISSING":"RETEST_AND_RISK_CONFIRMATION_REQUIRED"};});
+ return {engine,timeframes:{bias:plan.bias,zone:zoneTf,entry:plan.entry},bias,zone,entry,candidates,executionEnabled:false};
+}
