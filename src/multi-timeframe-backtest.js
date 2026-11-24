@@ -25,10 +25,10 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
   if(!["scalp","swing"].includes(engine))throw new Error("INVALID_ENGINE");
   if(typeof evaluate!=="function")throw new TypeError("evaluate callback is required");
   if(!finite(initialEquity)||initialEquity<=0)throw new RangeError("VERIFIED_INITIAL_EQUITY_REQUIRED");
-  const entryTf=engine==="scalp"?"5m":"1h",entryRows=timeframes?.[entryTf];
+  const entryTf=engine==="scalp"?"5m":"15m",entryRows=timeframes?.[entryTf];
   for(const [tf,rows] of Object.entries(timeframes??{})){if(!TF_MS[tf])throw new Error("UNSUPPORTED_BACKTEST_TIMEFRAME_"+tf);assertCandles(rows,tf);}
   if(!entryRows)throw new Error("MISSING_ENTRY_TIMEFRAME_"+entryTf);
-  for(const tf of engine==="scalp"?["1h","15m","5m"]:["1d","4h","1h"])if(!timeframes[tf])throw new Error("MISSING_TIMEFRAME_"+tf);
+  for(const tf of engine==="scalp"?["1h","15m","5m"]:["1d","4h","1h","15m"])if(!timeframes[tf])throw new Error("MISSING_TIMEFRAME_"+tf);
   if(!Number.isInteger(maxHoldBars)||maxHoldBars<1)throw new RangeError("INVALID_MAX_HOLD_BARS");
   const reports=[];
   for(const days of periodDays){

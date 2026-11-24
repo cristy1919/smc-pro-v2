@@ -6,7 +6,7 @@ This branch adds a testable research layer. It is not a deployed trading bot.
 - Causal swing-pivot confirmation and BOS/CHoCH event primitives.
 - FVG, EQH/EQL liquidity pools and sweep detection.
 - Order block, breaker, supply/demand, mitigation, rolling range, range deviation, OTE and CRT primitives.
-- Separate Scalp (1H/15M/5M) and Swing (1D/4H/1H/15M) multi-timeframe analysis orchestration.
+- Separate Scalp (1H/15M/5M) and Swing (1D/4H/1H confirmation/15M entry) multi-timeframe analysis orchestration.
 - BingX VST public OHLCV history adapter; 1M and 3M are rejected; incomplete candles are discarded.
 - Read-only BingX VST USDT equity adapter. API credentials must be supplied as runtime secrets; no key material is committed.
 - Backtest engine with explicit starting equity, separate engine runs, 10-position cap, duplicate-symbol guard, fee/slippage/funding inputs, stop-first same-candle assumption, MAE/MFE in R, and 30/60/90-day report helper.
@@ -14,7 +14,7 @@ This branch adds a testable research layer. It is not a deployed trading bot.
 - SQLite Durable Object repository adapter and local paper-execution abstraction.
 
 ## Not implemented / not approved for deployment
-- Strategy-specific retest and closed-candle confirmation state machine is now implemented for research candidates; candidates remain non-executable until the separate risk and VST execution gates pass.
+- Strategy-specific retest and closed-candle confirmation state machine is implemented for research candidates. Swing now requires a recent direction-aligned 1H structure event and uses 15M as its entry/retest timeframe; candidates remain non-executable until separate risk and VST execution gates pass.
 - A read-only VST-backed 30/60/90-day workflow is now available, including historical candles and funding settlements. It has not yet been run because repository VST credentials are not configured. No profitability or drawdown claims are available.
 - The Durable Object adapter has not been mapped to the existing production EngineState SQL schema or deployed namespace. Do not add a new namespace or migration without the source/schema audit.
 - Existing production Worker source and its API routes have not been fully audited. Dashboard endpoint contracts remain unverified.

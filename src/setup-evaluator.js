@@ -96,7 +96,7 @@ function makeCandidate({ engine, symbol, direction, setupId, entryCandles, htf, 
   return {
     id: [engine, symbol, setupId, last.timestamp].join(":"),
     engine, symbol, direction, setupId, state: rejected ? "REJECTED" : score >= 80 ? "QUALIFIED" : "WATCH",
-    timeframe: engine === "scalp" ? "5m" : "1h",
+    timeframe: engine === "scalp" ? "5m" : "15m",
     entry, stop, target, stopLoss: stop, takeProfit: target, zoneBounds: zone ? { low: zone.low, high: zone.high, type: zone.type } : null, rewardRisk: Number(rr.toFixed(2)), score, band,
     entryConfirmation: { status: "PENDING", maxWaitBars: 6, method: zone ? "ZONE_RETEST_CLOSE" : "CLOSE_CONFIRMATION" },
     confidence: "INSUFFICIENT_DATA", factors, factorCoveragePct: Math.round(availableWeight),
@@ -106,7 +106,7 @@ function makeCandidate({ engine, symbol, direction, setupId, entryCandles, htf, 
 }
 function validateInput(input, engine) {
   if (!input || typeof input.symbol !== "string" || !input.symbol.trim()) throw new TypeError("symbol is required");
-  const required = engine === "scalp" ? ["1h", "15m", "5m"] : ["1d", "4h", "1h"];
+  const required = engine === "scalp" ? ["1h", "15m", "5m"] : ["1d", "4h", "1h", "15m"];
   for (const tf of required) {
     if (!Array.isArray(input.timeframes?.[tf])) throw new Error("MISSING_TIMEFRAME_" + tf);
     validateCandles(input.timeframes[tf]);
@@ -115,8 +115,12 @@ function validateInput(input, engine) {
   return required.map(tf => input.timeframes[tf]);
 }
 function evaluate(input, engine) {
-  const [higherCandles, middleCandles, entryCandles] = validateInput(input, engine);
+  const validated = validateInput(input, engine);
+  const [higherCandles, middleCandles] = validated;
+  const confirmationCandles = engine === "swing" ? validated[2] : null;
+  const entryCandles = validated.at(-1);
   const htf = features(higherCandles), middle = features(middleCandles), entryF = features(entryCandles);
+  const confirmationF = confirmationCandles ? features(confirmationCandles) : null;
   const price = entryCandles.at(-1).close;
   const recentSweep = latest(entryF.sweeps, x => x.index >= entryCandles.length - 4);
   const recentDeviation = latest(entryF.deviations, x => x.index >= entryCandles.length - 3);
@@ -124,6 +128,10 @@ function evaluate(input, engine) {
   const triggerEvent = latest(entryF.events, x => x.index >= entryCandles.length - 4);
   const direction = recentSweep?.direction ?? recentDeviation?.direction ?? recentCrt?.direction ?? triggerEvent?.direction ?? candleDirection(entryCandles.at(-1));
   if (direction === "NEUTRAL") return [];
+  if (engine === "swing") {
+    const confirmationEvent = latest(confirmationF.events, x => x.index >= confirmationCandles.length - 4);
+    if (!confirmationEvent || confirmationEvent.direction !== direction) return [];
+  }
   const candidates = [];
   const sweep = recentSweep?.direction === direction ? recentSweep : null;
   const displacementEvent = latest(entryF.events, x => x.direction === direction && x.displacement && x.index >= entryCandles.length - 4);
