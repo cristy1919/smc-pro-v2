@@ -5,3 +5,4 @@ export * from "./backtest.js";
 export * from "./historical-data.js";
 export * from "./paper-execution.js";
 export * from "./statistics.js";
+export * from "./bingx-vst-account.js";
