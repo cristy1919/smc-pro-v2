@@ -68,3 +68,14 @@ export function toLegacyDashboardCandidate(candidate) {
   const reason=setupReasons[candidate.setupId]??candidate.reasonTr??"Fiyat yapısı işlem adayı oluşturdu.";
   return {id:candidate.id,symbol:candidate.symbol,side:candidate.direction==="BULLISH"?"LONG":"SHORT",engine:candidate.engine,model:candidate.setupId,status:candidate.status??(candidate.entryEligible?"READY":"WAIT"),score:candidate.score,confidence:candidate.confidence??candidate.confidenceStatus??"Veri yetersiz",entry:candidate.entry,takeProfit:candidate.target,stopLoss:candidate.stop,currentPrice:candidate.currentPrice??null,setupReason:reason,reasonTr:reason,entryEligible:candidate.entryEligible===true,setupTimeframe:candidate.setupTimeframe??candidate.timeframe??null,entryTimeframe:candidate.entryTimeframe??null,structure:candidate.structure??candidate.structureType??null,evidence:candidate.evidence,createdAt:candidate.createdAt};
 }
+
+
+export function buildLegacyDashboardPayload({paperStatus={},analytics={},scalpCandidates=[],swingCandidates=[],systemHealth={},archiveHealth={},historyHealth={},cloudflareUsage={},tickerData={},universeData={},globalContext={}}={}) {
+  const scalp=scalpCandidates.map(toLegacyDashboardCandidate);
+  const swing=swingCandidates.map(toLegacyDashboardCandidate);
+  const setups=[...scalp,...swing];
+  return {
+    health:{...paperStatus,setups,scalpCandidates:scalp,swingCandidates:swing,scalpCandidateCount:scalp.length,swingCandidateCount:swing.length},
+    systemHealth,analytics,archiveHealth,historyHealth,cloudflareUsage,tickerData,universeData,globalContext
+  };
+}
