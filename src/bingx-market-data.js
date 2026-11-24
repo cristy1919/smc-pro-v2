@@ -52,4 +52,13 @@ export class BingXPublicKlineProvider {
     return result;
   }
 }
+
+export async function fetchEngineDataset({ provider, symbol, engine, startTime, endTime }) {
+  if (!provider || typeof provider.getCandles !== "function") throw new TypeError("provider.getCandles is required");
+  const timeframes = engine === "scalp" ? ["1h","15m","5m"] : engine === "swing" ? ["1d","4h","1h"] : null;
+  if (!timeframes) throw new Error("INVALID_ENGINE");
+  const result = {};
+  for (const timeframe of timeframes) result[timeframe] = await provider.getCandles({symbol,timeframe,startTime,endTime,limit:1440});
+  return result;
+}
 export { INTERVAL_MS };
