@@ -40,5 +40,5 @@ export function evaluateEntryEligibility(candidate,{
   if(!extra)reasons.push("EXTENDED_TARGET_NEEDS_HIGH_QUALITY_CONFIRMATION");
  }
  const eligible=reasons.length===0;
- return {eligible,reasons,marginMode:"ISOLATED",leverage:eligible?leverage:null,riskMultiple,currentEquity:Number.isFinite(currentEquity)?currentEquity:null,riskUnitUsd:sizing?.riskUnitUsd??null,riskBudget:sizing?.riskBudget??null,quantity:sizing?.quantity??null,approvedCandidate:eligible?{...candidate,entryEligible:true,status:"QUALIFIED"}:null};
+ return {eligible,reasons,marginMode:"ISOLATED",leverage:eligible?leverage:null,riskMultiple,currentEquity:Number.isFinite(currentEquity)?currentEquity:null,riskUnitUsd:sizing?.riskUnitUsd??null,riskBudget:sizing?.riskBudget??null,quantity:sizing?.quantity??null,approvedCandidate:eligible?{...candidate,entryEligible:true,status:"QUALIFIED",marginMode:"ISOLATED",leverage}:null};
 }
