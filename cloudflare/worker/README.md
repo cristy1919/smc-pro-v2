@@ -1,14 +1,14 @@
-# Deployed Cloudflare Worker source mirror
+# Cloudflare deployment notes
 
-This directory mirrors the TypeScript modules currently deployed to the existing Cloudflare Worker `smcprov2`.
+The production Worker is the existing Cloudflare script `smcprov2`. Its deployed code is managed directly in Cloudflare; this repository is not yet the Worker build/deployment source of truth.
 
-- Execution mode: BingX USDT-M VST Demo only.
-- Live trading flag remains disabled.
-- Cron remains `*/5 * * * *`.
-- Durable Object class: `EngineState` (SQLite).
-- KV namespace: `PAPER_STATE`.
-- BingX API credentials remain Cloudflare secrets and are not stored in this repository.
-- The deployed version captures the first verified BingX VST equity snapshot into Durable Object storage under `bingx-vst-risk-baseline-v1`. Fixed 1R is 2% of that initial equity and is never recalculated from later equity. If the balance cannot be read or the baseline cannot be persisted, new entries are blocked while existing-position reconciliation continues.
-- Reduced-risk setups use 0.5R. Normal target objective is 3.5R, with the engine's existing structural confirmation and risk filters.
+- Execution venue: BingX USDT-M VST Demo only.
+- `LIVE_TRADING_ENABLED=false`.
+- Cron: `*/5 * * * *` (preserved).
+- Durable Object: `EngineState` with SQLite.
+- KV binding: `PAPER_STATE`.
+- BingX credentials remain Cloudflare secrets and are never committed here.
+- The deployed risk update stores an immutable baseline in Durable Object storage under `bingx-vst-risk-baseline-v1`. It captures the first verified VST equity snapshot; 1R is 2% of that amount and does not compound or rebase. Reduced-risk setups use 0.5R. New entries fail closed if the balance or baseline storage cannot be verified.
+- Normal target objective: 3.5R when supported by the structure; minimum R:R: 1:1.
 
-This is a source mirror, not an automated deployment workflow. Production deployment remains managed through Cloudflare until the repository build/deployment pipeline is explicitly established and tested.
+The repository contains the strategy specification and independently testable risk helpers. A reproducible Wrangler build and deployment pipeline must be established before GitHub is used to deploy this Worker.
