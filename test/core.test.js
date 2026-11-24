@@ -15,3 +15,19 @@ test("dashboard tabs and waiting threshold are fixed",()=>{assert.deepEqual(DASH
 test("score is separate from empirical confidence",()=>{const r=scoreSetup("scalp",{htf:100,liquidity:100,structure:100,zone:100,entry:100,volume:100});assert.equal(r.score,100);assert.equal(r.band,"HIGH_QUALITY");assert.equal(r.confidence,"INSUFFICIENT_DATA");});
 test("terminal setup cannot be reopened",()=>{const c=transitionSetup({state:"OPEN"},"CLOSED");assert.throws(()=>transitionSetup(c,"OPEN"),/Invalid/);});
 test("cache validates candles",()=>{const cache=new CandleCache(),d=candles([[1,2,0,1]]);cache.set("BTC-USDT","5m",d);assert.equal(cache.get("BTC-USDT","5m"),d);});
+
+import { readCurrentBingXVSTRiskUnit } from "../src/index.js";
+test("new trade 1R is recalculated from current VST equity",async()=>{
+ const account={getBalance:async()=>({source:"BINGX_VST",asset:"USDT",equity:75000})};
+ const first=await readCurrentBingXVSTRiskUnit(account);
+ assert.equal(first.riskUnitUsd,1500);
+ account.getBalance=async()=>({source:"BINGX_VST",asset:"USDT",equity:60000});
+ const next=await readCurrentBingXVSTRiskUnit(account);
+ assert.equal(next.riskUnitUsd,1200);
+});
+test("position sizing uses current equity before any immutable baseline fallback",()=>{
+ const a=calculatePosition({currentEquity:75000,fixedRiskUnitUsd:1500,entry:100,stop:99,target:103.5,side:"LONG"});
+ const b=calculatePosition({currentEquity:60000,fixedRiskUnitUsd:1500,entry:100,stop:99,target:103.5,side:"LONG"});
+ assert.equal(a.riskBudget,1500);
+ assert.equal(b.riskBudget,1200);
+});
