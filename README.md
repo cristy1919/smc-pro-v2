@@ -1,25 +1,30 @@
 # SMC PRO V2
 
-Independent price-action Scalp and Swing futures research engines.
+BingX USDT-M futures için bağımsız Scalp ve Swing price-action araştırma/tarama projesi.
 
-## Safety status
-- PAPER / RESEARCH ONLY. No exchange order adapter is enabled.
-- Existing Cloudflare resources are not changed by this repository scaffold.
-- No API keys or secrets belong in Git.
+## Güvenlik
+- Yalnızca PAPER / RESEARCH modunda çalışır; canlı emir adaptörü yoktur.
+- Gerçek BingX VST bakiye bağlantısı henüz kurulmadığı için paper pozisyon açma/kapatma devre dışıdır. Varsayılan veya tahmini bakiye kullanılmaz.
+- Market verisi BingX public API üzerinden alınır; özel API anahtarı gerekmez.
+- 1M ve 3M zaman dilimleri tarama motorlarına dahil değildir.
+- Yeni Cloudflare Worker `smc-pro-v2` ve ayrı KV namespace kullanır. Önceden var olan `smcprov2` Worker'ı değiştirilmez.
 
-## Current repository scope
-- Provider-neutral closed-candle contract and shared in-process candle cache.
-- Causal pivot detection, basic market-structure labels/events, FVG and liquidity pool/sweep primitives.
-- Separate Scalp/Swing timeframe plans and setup catalogs.
-- Score framework, risk sizing guardrails and setup lifecycle primitives.
-- Node.js tests run in GitHub Actions.
+## Uygulanan tarama
+- 5 dakikalık cron; BingX USDT-M sözleşme ve ticker evreni.
+- Hacim ve bid/ask spread filtresi; tur başına 5 sembol ve KV'de cursor.
+- Scalp: 1H bias, 15M bölge, 5M giriş. Swing: 1D bias, 4H bölge, 15M giriş.
+- Aynı tarama turunda aynı sembol/zaman dilimi için mum verisi cache edilir.
+- Kapanmamış mumlar analiz dışında bırakılır.
+- Pivot tabanlı yapı bias'ı, likidite süpürmesi, displacement ve FVG koşullarıyla aday üretimi.
+- Adaylar Scalp/Swing etiketiyle ayrı listelenir; güven değeri örneklem oluşana kadar INSUFFICIENT_DATA'dır.
 
-## Timeframes
-- Scalp: 1H bias, 15M liquidity/zones, 5M entry.
-- Swing: 1D bias, 4H zones, 1H confirmation, 15M entry.
-- 1M and 3M are explicitly forbidden.
+## API
+- `GET /api/health`
+- `GET /api/data`
+- Tarama zamanlayıcısı: `*/5 * * * *`
 
-## Development
-Requires Node.js 20+. Run `npm test`.
-
-This is a staged foundation, not a production-ready trading bot. OB/Breaker/Supply-Demand/Range/CRT/OTE detection, validated signal composition, historical data adapter, backtest engine, durable state integration and dashboard remain subsequent milestones.
+## Henüz tamamlanmayan aşamalar
+- VST kimlik doğrulaması ve bakiye okuma; bu nedenle paper execution kapalı.
+- Gelişmiş OB, Breaker, Mitigation, Supply/Demand, Range Deviation, CRT, OTE ve setup-specific retest doğrulaması.
+- Derinlik/order-book filtreleri, Durable Objects koordinasyonu, gerçek tarihsel arşiv ve 30/60/90 günlük maliyet dahil backtest.
+- Ayrı Scalp/Swing performans istatistikleri ve örneklem tabanlı confidence.
