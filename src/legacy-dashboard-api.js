@@ -18,7 +18,8 @@ export class LegacySmcDashboardApi {
   getAnalytics(){return this.#request("/api/paper/analytics");}
   getKlines({symbol,interval="15m",limit=500,startTime,endTime}={}){
     if(!/^[A-Z0-9]+-USDT$/.test(String(symbol??"")))throw new Error("INVALID_USDT_PERPETUAL_SYMBOL");
-    if(["1m","3m"].includes(interval))throw new Error("FORBIDDEN_TIMEFRAME");
+    if(!["5m","15m","1h","4h","1d"].includes(interval))throw new Error("FORBIDDEN_OR_UNSUPPORTED_TIMEFRAME");
+    if(!Number.isInteger(limit)||limit<1||limit>1440)throw new RangeError("limit must be between 1 and 1440");
     const q=new URLSearchParams({symbol,interval,limit:String(limit)});
     if(startTime!==undefined)q.set("startTime",String(startTime));
     if(endTime!==undefined)q.set("endTime",String(endTime));
