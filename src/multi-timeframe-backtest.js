@@ -69,7 +69,7 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
         if(targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET";break;}
       }
       const grossR=(candidate.direction==="BULLISH"?exit-entry:entry-exit)/risk;
-      const feeSlippageR=(2*feeRate+slippageRate)*entry/risk;
+      const feeSlippageR=(2*feeRate+2*slippageRate)*entry/risk;
       const settlements=Array.isArray(fundingRates)?fundingRates.filter(x=>x.fundingTime>confirmation.confirmedAt&&x.fundingTime<=exitAt):[];
       const fundingR=settlements.length?settlements.reduce((sum,x)=>sum+x.fundingRate*(candidate.direction==="BULLISH"?1:-1),0)*entry/risk:fundingRate*(candidate.direction==="BULLISH"?1:-1)*entry/risk;
       const costR=feeSlippageR+fundingR;
