@@ -11,10 +11,10 @@ export class BingXPublicKlineProvider {
     this.fetchImpl = fetchImpl; this.baseUrl = baseUrl.replace(/\/$/, ""); this.now = now; this.sleep = sleep;
     this.minRequestIntervalMs = minRequestIntervalMs; this.lastRequestAt = 0; this.cache = new Map();
   }
-  async #request(params) {
+  async #request(params, path = "/openApi/swap/v3/quote/klines") {
     const wait = this.minRequestIntervalMs - (this.now() - this.lastRequestAt);
     if (wait > 0) await this.sleep(wait);
-    const url = new URL("/openApi/swap/v3/quote/klines", this.baseUrl);
+    const url = new URL(path, this.baseUrl);
     for (const [key,value] of Object.entries(params)) url.searchParams.set(key, String(value));
     this.lastRequestAt = this.now();
     const response = await this.fetchImpl(url.toString());
@@ -33,6 +33,24 @@ export class BingXPublicKlineProvider {
     catch (error) { this.cache.delete(key); throw error; }
   }
   clearCache() { this.cache.clear(); }
+
+  async getFundingRates({symbol,startTime,endTime,limit=100}){
+    if(!/^[A-Z0-9]+-USDT$/.test(symbol))throw new Error("INVALID_USDT_PERPETUAL_SYMBOL");
+    if(!Number.isFinite(startTime)||!Number.isFinite(endTime)||endTime<=startTime)throw new RangeError("INVALID_FUNDING_TIME_RANGE");
+    if(!Number.isInteger(limit)||limit<1||limit>100)throw new RangeError("FUNDING_LIMIT_MUST_BE_1_TO_100");
+    const rows=[];let cursor=startTime;
+    while(cursor<endTime){
+      const page=await this.#request({symbol,startTime:cursor,endTime,limit},"/openApi/swap/v2/quote/fundingRate");
+      if(!page.length)break;
+      const normalized=page.map(x=>({fundingTime:Number(x.fundingTime),fundingRate:Number(x.fundingRate)})).filter(x=>Number.isFinite(x.fundingTime)&&Number.isFinite(x.fundingRate)&&x.fundingTime>=startTime&&x.fundingTime<=endTime);
+      rows.push(...normalized);
+      const maxTime=Math.max(...normalized.map(x=>x.fundingTime));
+      if(!Number.isFinite(maxTime)||maxTime<cursor||page.length<limit)break;
+      cursor=maxTime+1;
+    }
+    return [...new Map(rows.map(x=>[x.fundingTime,x])).values()].sort((a,b)=>a.fundingTime-b.fundingTime);
+  }
+
   async #fetchCandles({ symbol, timeframe, startTime, endTime, limit = 1440, includeForming = false }) {
     if (!/^[A-Z0-9]+-USDT$/.test(symbol)) throw new Error("INVALID_USDT_PERPETUAL_SYMBOL");
     assertSupportedTimeframe(timeframe);
