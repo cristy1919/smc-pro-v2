@@ -14,8 +14,8 @@ This branch adds a testable research layer. It is not a deployed trading bot.
 - SQLite Durable Object repository adapter and local paper-execution abstraction.
 
 ## Not implemented / not approved for deployment
-- Strategy-specific confirmation and retest state machines are still research-level; candidates remain non-executable.
-- Backtest has not yet been run over a verified 90-day BingX data set. No profitability or drawdown claims are available.
+- Strategy-specific retest and closed-candle confirmation state machine is now implemented for research candidates; candidates remain non-executable until the separate risk and VST execution gates pass.
+- A read-only VST-backed 30/60/90-day workflow is now available, including historical candles and funding settlements. It has not yet been run because repository VST credentials are not configured. No profitability or drawdown claims are available.
 - The Durable Object adapter has not been mapped to the existing production EngineState SQL schema or deployed namespace. Do not add a new namespace or migration without the source/schema audit.
 - Existing production Worker source and its API routes have not been fully audited. Dashboard endpoint contracts remain unverified.
 - No BingX VST order placement, cancel/replace, TP/SL reconciliation, or account-position synchronization is enabled in this branch. The paper adapter does not call an exchange.
