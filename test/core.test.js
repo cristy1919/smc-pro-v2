@@ -11,7 +11,23 @@ test("1R is 2% of actual VST balance with no hardcoded bankroll",()=>{assert.equ
 test("VST baseline is captured once and never rebased",async()=>{let stored=null,reads=0;const deps={readVstEquity:async()=>{reads++;return 75000;},loadBaseline:async()=>stored,saveBaseline:async x=>{stored=x;}};const a=await initializeRiskBaseline(deps);const b=await initializeRiskBaseline({...deps,readVstEquity:async()=>{reads++;return 90000;}});assert.equal(a.fixedRiskUnitUsd,1500);assert.equal(b.fixedRiskUnitUsd,1500);assert.equal(reads,1);});
 test("missing VST baseline adapters fail closed",async()=>{await assert.rejects(()=>initializeRiskBaseline({loadBaseline:async()=>null,saveBaseline:async()=>{}}),/adapters are required/);});
 test("minimum RR 1:1 and extended targets need confirmations",()=>{assert.throws(()=>calculatePosition({fixedRiskUnitUsd:20,entry:100,stop:99,target:100.5}),/BELOW_MINIMUM/);assert.deepEqual(classifyTarget({rewardRisk:5}),{allowed:false,reason:"EXTENDED_TARGET_NEEDS_EXTRA_CONFIRMATION"});assert.equal(classifyTarget({rewardRisk:5,extraConfirmations:["mss","retest"],highVolume:true,structuralTargetFeasible:true}).classification,"EXTENDED_HIGH_QUALITY");assert.equal(classifyTarget({rewardRisk:3.5}).classification,"NORMAL");});
-test("dashboard tabs and waiting threshold are fixed",()=>{assert.deepEqual(DASHBOARD_TABS,["Market Overview","Açık İşlemler","Scalp Scanner","Swing Scanner","Positions","Statistics","İşlem Adayları","Trade History","Diagnostics","Grafik"]);assert.equal(SETUP_SCORE_MINIMUM,60);});
+test("dashboard tabs and waiting threshold are fixed",()=>{assert.deepEqual(DASHBOARD_TABS,["Market Overview","Açık İşlemler","Scalp Scanner","Swing Scanner","Positions","Statistics","Candidates (İşlem Adayları)","Trade History","Diagnostics","Grafik"]);assert.equal(SETUP_SCORE_MINIMUM,60);});
 test("score is separate from empirical confidence",()=>{const r=scoreSetup("scalp",{htf:100,liquidity:100,structure:100,zone:100,entry:100,volume:100});assert.equal(r.score,100);assert.equal(r.band,"HIGH_QUALITY");assert.equal(r.confidence,"INSUFFICIENT_DATA");});
 test("terminal setup cannot be reopened",()=>{const c=transitionSetup({state:"OPEN"},"CLOSED");assert.throws(()=>transitionSetup(c,"OPEN"),/Invalid/);});
 test("cache validates candles",()=>{const cache=new CandleCache(),d=candles([[1,2,0,1]]);cache.set("BTC-USDT","5m",d);assert.equal(cache.get("BTC-USDT","5m"),d);});
+
+import { readCurrentBingXVSTRiskUnit } from "../src/index.js";
+test("new trade 1R is recalculated from current VST equity",async()=>{
+ const account={getBalance:async()=>({source:"BINGX_VST",asset:"USDT",equity:75000})};
+ const first=await readCurrentBingXVSTRiskUnit(account);
+ assert.equal(first.riskUnitUsd,1500);
+ account.getBalance=async()=>({source:"BINGX_VST",asset:"USDT",equity:60000});
+ const next=await readCurrentBingXVSTRiskUnit(account);
+ assert.equal(next.riskUnitUsd,1200);
+});
+test("position sizing uses current equity before any immutable baseline fallback",()=>{
+ const a=calculatePosition({currentEquity:75000,fixedRiskUnitUsd:1500,entry:100,stop:99,target:103.5,side:"LONG"});
+ const b=calculatePosition({currentEquity:60000,fixedRiskUnitUsd:1500,entry:100,stop:99,target:103.5,side:"LONG"});
+ assert.equal(a.riskBudget,1500);
+ assert.equal(b.riskBudget,1200);
+});
