@@ -21,7 +21,7 @@ function summarize(engine,symbol,days,trades,initialEquity,skipped){
   const totalR=trades.reduce((s,t)=>s+t.netR,0);
   return {engine,symbol,periodDays:days,initialEquity,endingEquity:Number(equity.toFixed(4)),trades:trades.length,wins:wins.length,losses:losses.length,winRate:trades.length?wins.length/trades.length:0,profitFactor:grossLoss?grossWin/grossLoss:grossWin?Infinity:0,expectancyR:trades.length?totalR/trades.length:0,totalR,maxDrawdownPct:maxDrawdown*100,skipped,feesIncluded:true,confidence:trades.length<30?"INSUFFICIENT_DATA":"SAMPLE_AVAILABLE"};
 }
-export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],initialEquity,feeRate=0.0005,slippageRate=0.0002,fundingRate=0,maxHoldBars=500,maxWaitBars=6}){
+export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],initialEquity,feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars=500,maxWaitBars=6}){
   if(!["scalp","swing"].includes(engine))throw new Error("INVALID_ENGINE");
   if(typeof evaluate!=="function")throw new TypeError("evaluate callback is required");
   if(!finite(initialEquity)||initialEquity<=0)throw new RangeError("VERIFIED_INITIAL_EQUITY_REQUIRED");
@@ -69,12 +69,15 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
         if(targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET";break;}
       }
       const grossR=(candidate.direction==="BULLISH"?exit-entry:entry-exit)/risk;
-      const costR=(2*feeRate+slippageRate+Math.abs(fundingRate))*entry/risk;
+      const feeSlippageR=(2*feeRate+slippageRate)*entry/risk;
+      const settlements=Array.isArray(fundingRates)?fundingRates.filter(x=>x.fundingTime>confirmation.confirmedAt&&x.fundingTime<=exitAt):[];
+      const fundingR=settlements.length?settlements.reduce((sum,x)=>sum+x.fundingRate*(candidate.direction==="BULLISH"?1:-1),0)*entry/risk:fundingRate*(candidate.direction==="BULLISH"?1:-1)*entry/risk;
+      const costR=feeSlippageR+fundingR;
       const netR=grossR-costR;
-      trades.push({candidateId:candidate.id,setupId:candidate.setupId,direction:candidate.direction,signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,target,exit,exitAt,exitReason,grossR,estimatedCostR:costR,netR});
+      trades.push({candidateId:candidate.id,setupId:candidate.setupId,direction:candidate.direction,signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,target,exit,exitAt,exitReason,grossR,estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,netR});
       lastExit=exitAt;
     }
     reports.push({summary:summarize(engine,symbol,days,trades,initialEquity,skipped),trades});
   }
-  return {engine,symbol,periods:reports.map(r=>r.summary),tradesByPeriod:Object.fromEntries(reports.map(r=>[r.summary.periodDays,r.trades])),assumptions:{riskPerTrade:RISK_CONFIG.riskUnitFraction,compounding:"CURRENT_EQUITY",feeRate,slippageRate,fundingRate,stopFirstWhenStopAndTargetSameCandle:true,maxWaitBars,maxHoldBars,entryTimeframe:entryTf},dataRange:{start:entryRows[0].timestamp,end:entryRows.at(-1).timestamp}};
+  return {engine,symbol,periods:reports.map(r=>r.summary),tradesByPeriod:Object.fromEntries(reports.map(r=>[r.summary.periodDays,r.trades])),assumptions:{riskPerTrade:RISK_CONFIG.riskUnitFraction,compounding:"CURRENT_EQUITY",feeRate,slippageRate,fundingMode:fundingRates.length?"HISTORICAL_SETTLEMENTS":"FLAT_RATE_FALLBACK",fundingRateFallback:fundingRate,stopFirstWhenStopAndTargetSameCandle:true,maxWaitBars,maxHoldBars,entryTimeframe:entryTf},dataRange:{start:entryRows[0].timestamp,end:entryRows.at(-1).timestamp}};
 }
