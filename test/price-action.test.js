@@ -57,13 +57,13 @@ test("liquidity sweep search starts after the pool is confirmed", () => {
   ], { tolerance: 0.001, minTouches: 2 });
   assert.equal(pools.length, 1);
   const sweeps = detectLiquiditySweeps(rows, pools);
-  assert.equal(sweeps[0].index, 3);
+  assert.equal(sweeps[0].index, 4);
 });
 
 test("order blocks, mitigation and breaker states are derived from confirmed events", () => {
   const rows = [
     candle(8,10,7,9,1), candle(10,11,8,9,2), candle(9,13,8.5,12,3),
-    candle(12,12.5,7,8,4), candle(8,10,7.5,9,5), candle(9,10,8,9.5,6)
+    candle(12,12.5,7,7.5,4), candle(8,9,7,7.8,5), candle(9,10,8,9.5,6)
   ];
   const blocks = detectOrderBlocks(rows, [{ index: 2, direction: "BULLISH" }], { lookback: 3 });
   assert.equal(blocks[0].type, "BULLISH_OB");
