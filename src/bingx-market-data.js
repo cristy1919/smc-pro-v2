@@ -66,8 +66,10 @@ export async function fetchEngineDataset({ provider, symbol, engine, startTime, 
   if (!provider || typeof provider.getCandles !== "function") throw new TypeError("provider.getCandles is required");
   const timeframes = engine === "scalp" ? ["1h","15m","5m"] : engine === "swing" ? ["1d","4h","1h"] : null;
   if (!timeframes) throw new Error("INVALID_ENGINE");
+  const warmupMs = engine === "swing" ? 30 * 86400000 : 2 * 86400000;
+  const requestStart = Math.max(0, startTime - warmupMs);
   const result = {};
-  for (const timeframe of timeframes) result[timeframe] = await provider.getCandles({symbol,timeframe,startTime,endTime,limit:1440});
+  for (const timeframe of timeframes) result[timeframe] = await provider.getCandles({symbol,timeframe,startTime:requestStart,endTime,limit:1440});
   return result;
 }
 export { INTERVAL_MS };
