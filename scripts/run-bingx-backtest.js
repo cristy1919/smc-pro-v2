@@ -17,7 +17,8 @@ if(balance.source!=="BINGX_VST"||balance.readOnly!==true||balance.asset!=="USDT"
 const provider=new BingXPublicKlineProvider();
 const timeframes=await fetchEngineDataset({provider,symbol,engine,startTime,endTime:now});
 const evaluate=engine==="scalp"?evaluateScalp:evaluateSwing;
-const report=runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays:[30,60,90],initialEquity:balance.equity,feeRate:Number(process.env.FEE_RATE??0.0005),slippageRate:Number(process.env.SLIPPAGE_RATE??0.0002),fundingRate:Number(process.env.FUNDING_RATE??0)});
+const fundingRates=await provider.getFundingRates({symbol,startTime,endTime:now,limit:100});
+const report=runHistoricalBacktest({engine,symbol,timeframes,evaluate,fundingRates,periodDays:[30,60,90],initialEquity:balance.equity,feeRate:Number(process.env.FEE_RATE??0.0005),slippageRate:Number(process.env.SLIPPAGE_RATE??0.0002),fundingRate:Number(process.env.FUNDING_RATE??0)});
 const output={account:{source:balance.source,asset:balance.asset,equity:balance.equity,availableMargin:balance.availableMargin,fetchedAt:balance.fetchedAt},report};
 const serialized=JSON.stringify(output,null,2);
 await writeFile("backtest-report.json",serialized+"\n",{encoding:"utf8"});
