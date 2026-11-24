@@ -54,3 +54,12 @@ This is a read-only audit of the existing `smcprov2` Worker. No Worker, KV, Dura
 - Worker code contains `NEW_PAPER_ENTRIES_ENABLED=true` and `STRATEGY_GENERATION_ENABLED=true`; however, BingX Demo API configuration requires both `BINGX_API_KEY` and `BINGX_API_SECRET`, and the observed Worker bindings did not expose either binding. No private credentials were retrieved. The current persisted queues are therefore not evidence of currently executable exchange orders.
 
 These findings are state snapshots only. Do not automatically cancel, execute, clear, or requeue these records based on KV contents alone.
+
+## Paper mode clarification
+- Worker variables are `BINGX_TRADING_MODE=paper`, `PAPER_TRADING_ONLY=true`, `DEMO_TRADING_ENABLED=false`, and `LIVE_TRADING_ENABLED=false`.
+- The code's BingX VST Demo configuration predicate requires `BINGX_TRADING_MODE=demo`, `DEMO_TRADING_ENABLED=true`, and both `BINGX_API_KEY` / `BINGX_API_SECRET`. The observed settings do not satisfy this predicate.
+- Therefore the current runtime configuration is the Worker's internal paper mode, not a verified BingX VST Demo connection. Internal paper new-entry flags are compiled as enabled, while exchange Demo and live order routes are disabled by the observed environment configuration.
+- The KV `engine-state` snapshot showed an internal paper balance/equity of 1000 USDT, runnerEnabled=true, zero open positions, zero setups and no lastScanAt value at the time read. This is a persisted KV snapshot, not a live Durable Object or exchange account read.
+- The internal paper account initializer derives its reset ID from that 1000 USDT value. Do not replace it with a guessed VST balance or alter it before reading the canonical Durable Object state.
+
+This distinction is a production blocker for the requested BingX VST-only mode. A verified read-only VST connection and canonical equity read are required before switching the runtime mode or enabling exchange Demo execution.
