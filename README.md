@@ -9,8 +9,11 @@ Independent price-action Scalp and Swing futures research engines.
 
 ## Current repository scope
 - Provider-neutral closed-candle contract and shared in-process candle cache.
-- Causal pivot detection, basic market-structure labels/events, FVG and liquidity pool/sweep primitives.
-- Separate Scalp/Swing timeframe plans and setup catalogs.
+- Causal pivot detection, market-structure labels/events, FVG, liquidity sweeps, OB/Breaker/Supply-Demand, Range/Deviation, CRT and OTE primitives.
+- Separate Scalp/Swing multi-timeframe analysis orchestration and setup catalogs.
+- BingX VST public OHLCV history and read-only VST equity adapters.
+- Separate backtest engine, 30/60/90-day report helper, fees/funding/slippage, MAE/MFE and confidence calibration.
+- SQLite Durable Object repository adapter and local paper-only execution abstraction.
 - Score framework, risk sizing guardrails and setup lifecycle primitives.
 - Node.js tests run in GitHub Actions.
 
@@ -22,4 +25,4 @@ Independent price-action Scalp and Swing futures research engines.
 ## Development
 Requires Node.js 20+. Run `npm test`.
 
-This is a staged foundation, not a production-ready trading bot. OB/Breaker/Supply-Demand/Range/CRT/OTE detection, validated signal composition, historical data adapter, backtest engine, durable state integration and dashboard remain subsequent milestones.
+See [research implementation status](docs/research-implementation.md) for implemented modules, remaining integration gates and deployment restrictions. This is not yet a production-ready or exchange-executing trading bot.
