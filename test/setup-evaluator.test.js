@@ -28,7 +28,7 @@ test("candidate confidence remains insufficient without a trade sample history",
   assert.ok(result.every(x => x.confidence === "INSUFFICIENT_DATA"));
 });
 test("missing required timeframe is rejected rather than silently substituted", () => {
-  assert.throws(() => evaluateScalp({ symbol: "BTC-USDT", timeframes: { "1h": series(), "15m": series() } }), /5m/);
+  assert.throws(() => evaluateScalp({ symbol: "BTC-USDT", timeframes: { "1h": series(), "15m": series() } }), /MISSING_TIMEFRAME_5m/);
 });
 test("unavailable optional volume is explicit and not fabricated", () => {
   const result = evaluateSwing(input);
