@@ -1,0 +1,20 @@
+import { BingXPublicKlineProvider, fetchEngineDataset } from "../src/bingx-market-data.js";
+import { BingXVSTDemoAccount } from "../src/bingx-vst-account.js";
+import { evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
+import { runHistoricalBacktest } from "../src/multi-timeframe-backtest.js";
+
+const engine=String(process.env.ENGINE??"scalp").toLowerCase();
+const symbol=String(process.env.SYMBOL??"BTC-USDT").toUpperCase();
+const apiKey=process.env.BINGX_API_KEY;
+const secretKey=process.env.BINGX_SECRET_KEY??process.env.BINGX_API_SECRET;
+if(!apiKey||!secretKey)throw new Error("BINGX_VST_READ_ONLY_SECRETS_REQUIRED: set BINGX_API_KEY and BINGX_SECRET_KEY as runtime secrets");
+if(!["scalp","swing"].includes(engine))throw new Error("ENGINE must be scalp or swing");
+const now=Date.now(),startTime=now-90*86400000;
+const account=new BingXVSTDemoAccount({apiKey,secretKey});
+const balance=await account.getBalance();
+if(balance.source!=="BINGX_VST"||balance.readOnly!==true||balance.asset!=="USDT")throw new Error("UNVERIFIED_BINGX_VST_ACCOUNT");
+const provider=new BingXPublicKlineProvider();
+const timeframes=await fetchEngineDataset({provider,symbol,engine,startTime,endTime:now});
+const evaluate=engine==="scalp"?evaluateScalp:evaluateSwing;
+const report=runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays:[30,60,90],initialEquity:balance.equity,feeRate:Number(process.env.FEE_RATE??0.0005),slippageRate:Number(process.env.SLIPPAGE_RATE??0.0002),fundingRate:Number(process.env.FUNDING_RATE??0)});
+process.stdout.write(JSON.stringify({account:{source:balance.source,asset:balance.asset,equity:balance.equity,availableMargin:balance.availableMargin,fetchedAt:balance.fetchedAt},report},null,2)+"\n");
