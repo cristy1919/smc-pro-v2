@@ -85,7 +85,7 @@ function makeCandidate({ engine, symbol, direction, setupId, entryCandles, htf, 
     engine, symbol, direction, setupId, state: rejected ? "REJECTED" : score >= 70 ? "QUALIFIED" : "WATCH",
     timeframe: engine === "scalp" ? "5m" : "1h",
     entry, stop, target, zoneBounds: zone ? { low: zone.low, high: zone.high, type: zone.type } : null, rewardRisk: Number(rr.toFixed(2)), score, band,
-    confidence: "INSUFFICIENT_DATA", factors, factorCoveragePct: Math.round(availableWeight),
+    entryConfirmation: { status: "PENDING", maxWaitBars: 6, method: zone ? "ZONE_RETEST_CLOSE" : "CLOSE_CONFIRMATION" },\n    confidence: "INSUFFICIENT_DATA", factors, factorCoveragePct: Math.round(availableWeight),
     hardFilters, evidence: reasons, createdAt: last.timestamp,
     dataStatus: { relativeVolume: volumeAvailable ? "AVAILABLE" : "UNAVAILABLE" }
   };
