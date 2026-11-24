@@ -50,7 +50,7 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
       if(Object.values(sliced).some(rows=>rows.length<25)){skipped++;continue;}
       let candidates;
       try{candidates=evaluate({symbol,timeframes:sliced});}catch{skipped++;continue;}
-      const candidate=candidates.find(c=>c.state!=="REJECTED"&&c.score>=70&&c.hardFilters?.validStop&&c.hardFilters?.minimumRR);
+      const candidate=candidates.find(c=>c.state==="QUALIFIED"&&c.score>=80&&c.hardFilters?.validStop&&c.hardFilters?.minimumRR);
       if(!candidate||seen.has(candidate.id))continue;
       seen.add(candidate.id);
       const future=entryRows.slice(i+1,i+1+maxWaitBars);
