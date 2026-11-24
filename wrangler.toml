@@ -2,15 +2,14 @@ name = "smc-pro-v2"
 main = "worker/index.js"
 compatibility_date = "2026-11-24"
 
-[assets]
-directory = "./public"
-binding = "ASSETS"
-
 [[kv_namespaces]]
 binding = "SMC_STATE"
-id = "REPLACE_WITH_NEW_KV_NAMESPACE_ID"
+id = "c1aceaba00e449d0a552314a5e5e4a08"
+
+[triggers]
+crons = ["*/5 * * * *"]
 
 [vars]
 TRADING_MODE = "paper"
 LIVE_TRADING_ENABLED = "false"
-DEMO_ORDER_EXECUTION_ENABLED = "false"
+PAPER_EXECUTION_ENABLED = "false"
