@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { detectOrderBlocks,detectBreakers,detectSupplyDemand,detectRollingRanges,detectRangeDeviations,detectOTE,detectCRT,runBacktest,splitBacktestWindows,HistoricalDataAdapter,analyzePriceAction,separateEngineReports,PaperExecutionAdapter } from "../src/index.js";
+import { detectOrderBlocks,detectBreakers,detectSupplyDemand,detectRollingRanges,detectRangeDeviations,detectOTE,detectCRT,runBacktest,splitBacktestWindows,HistoricalDataAdapter,analyzePriceAction,separateEngineReports,PaperExecutionAdapter,calculatePosition } from "../src/index.js";
 const mk=(rows)=>rows.map(([open,high,low,close],i)=>({timestamp:(i+1)*60000,open,high,low,close,volume:100,closed:true}));
 test("order block is anchored to the last opposing candle before a confirmed structure break",()=>{const c=mk([[10,11,9,10],[10,11,8,9],[9,10,8,8.5],[9,12,9,11],[11,14,11,13]]);const z=detectOrderBlocks(c,{pivots:[],events:[{index:4,type:"BOS",direction:"BULLISH",level:12}]});assert.equal(z.length,1);assert.equal(z[0].formedAt,2);assert.equal(z[0].confirmedAt,4);assert.equal(z[0].type,"BULLISH_OB");});
 test("breaker is only confirmed after a later close invalidates the source order block",()=>{const c=mk([[10,11,9,10],[9,10,8,9],[8,9,7,7.5],[7,8,5,6]]);const z=detectBreakers(c,[{type:"BULLISH_OB",direction:"BULLISH",low:8,high:9,formedAt:1,confirmedAt:1}]);assert.equal(z[0].type,"BEARISH_BREAKER");assert.equal(z[0].confirmedAt,2);});
