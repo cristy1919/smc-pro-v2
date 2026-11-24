@@ -9,7 +9,7 @@ export class BingXPublicKlineProvider {
   constructor({ fetchImpl = fetch, baseUrl = BASE_URL, now = () => Date.now(), sleep = sleepDefault, minRequestIntervalMs = 1050 } = {}) {
     if (typeof fetchImpl !== "function") throw new TypeError("fetchImpl is required");
     this.fetchImpl = fetchImpl; this.baseUrl = baseUrl.replace(/\/$/, ""); this.now = now; this.sleep = sleep;
-    this.minRequestIntervalMs = minRequestIntervalMs; this.lastRequestAt = 0;
+    this.minRequestIntervalMs = minRequestIntervalMs; this.lastRequestAt = 0; this.cache = new Map();
   }
   async #request(params) {
     const wait = this.minRequestIntervalMs - (this.now() - this.lastRequestAt);
@@ -24,7 +24,16 @@ export class BingXPublicKlineProvider {
     if (!Array.isArray(payload.data)) throw new Error("BINGX_INVALID_KLINE_PAYLOAD");
     return payload.data;
   }
-  async getCandles({ symbol, timeframe, startTime, endTime, limit = 1440, includeForming = false }) {
+  async getCandles(args) {
+    const key = [args.symbol,args.timeframe,args.startTime,args.endTime,args.limit ?? 1440,args.includeForming === true].join(":");
+    if (this.cache.has(key)) return this.cache.get(key);
+    const pending = this.#fetchCandles(args);
+    this.cache.set(key,pending);
+    try { const rows = await pending; this.cache.set(key,rows); return rows; }
+    catch (error) { this.cache.delete(key); throw error; }
+  }
+  clearCache() { this.cache.clear(); }
+  async #fetchCandles({ symbol, timeframe, startTime, endTime, limit = 1440, includeForming = false }) {
     if (!/^[A-Z0-9]+-USDT$/.test(symbol)) throw new Error("INVALID_USDT_PERPETUAL_SYMBOL");
     assertSupportedTimeframe(timeframe);
     const duration = INTERVAL_MS[timeframe];
