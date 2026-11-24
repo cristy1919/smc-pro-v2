@@ -29,7 +29,7 @@ W01 HTF OB Reversal; W02 Supply/Demand Reversal; W03 Sweep + CHoCH; W04 Breaker 
 BTC bullish: prefer altcoin longs; shorts need stronger countertrend confirmation. BTC bearish: prefer shorts; longs need stronger confirmation. Neutral/range: assess each altcoin independently. Volume, Relative Volume, VWAP, ATR and RSI divergence are context only. OI, funding, volume delta/aggressor flow and dominance are optional; unavailable data is marked UNAVAILABLE. No indicator-only entries.
 
 ## Score and confidence
-Scalp weights: HTF 15, liquidity 20, structure 20, zone 15, entry 20, volume 10. Swing weights: HTF 20, liquidity 15, structure 20, zone 20, entry 15, volume 10. Bands: 0–59 RED; 60–69 WAIT; 70–79 WATCH; 80–89 QUALIFIED; 90–100 HIGH QUALITY. Confidence is independently calibrated from historical outcomes; low samples show INSUFFICIENT DATA. Hard filters override score: invalid stop, RR below 1:1, poor liquidity, bad/stale candles, contradictory direction, excessive slippage, missed/invalidated zone, portfolio cap or unsafe liquidation distance.
+Scalp weights: HTF 15, liquidity 20, structure 20, zone 15, entry 20, volume 10. Swing weights: HTF 20, liquidity 15, structure 20, zone 20, entry 15, volume 10. Bands: 0–59 RED; 60–64 WAIT; 65–69 WATCH; 70–83 QUALIFIED; 84–100 HIGH QUALITY. Hard filters override score. Confidence is independently calibrated only when sufficient closed-trade samples exist; otherwise INSUFFICIENT DATA. Confidence is independently calibrated from historical outcomes; low samples show INSUFFICIENT DATA. Hard filters override score: invalid stop, RR below 1:1, poor liquidity, bad/stale candles, contradictory direction, excessive slippage, missed/invalidated zone, portfolio cap or unsafe liquidation distance.
 
 ## Risk and BingX VST execution
 - Read the actual available VST equity from BingX once when the new execution system is initialized. Persist an immutable risk baseline in Durable Object storage.
@@ -49,7 +49,7 @@ DETECTED → WATCH → QUALIFIED → ENTRY_PENDING → OPEN → TP1/MANAGEMENT �
 Run engines separately over 30/60/90 days, include fees/funding/slippage and realistic fills, use closed candles only, assume adverse SL-first if TP and SL touch same candle without intrabar data. Report win rate, PF, expectancy, max DD, average R, recovery factor, frequency, MAE/MFE and costs. Acceptance: zero lookahead, duplicate positions or invalid stops; positive expectancy after costs; tolerable drawdown; separate engine reports.
 
 ## Dashboard
-Exactly eight tabs: Anasayfa, Açık İşlemler, Grafik, İstatistik, Scanner, Bekleyen Setup, İşlem Adayları, Diagnostik. Scanner displays both engines; dashboard refresh never triggers scans. Positions, stats and histories remain separated by engine.
+Exactly ten tabs: Market Overview, Açık İşlemler, Scalp Scanner, Swing Scanner, Positions, Statistics, İşlem Adayları, Trade History, Diagnostics, Grafik. Dashboard refresh never triggers scans. Scalp/Swing positions, statistics and histories remain independently filterable; shared exposure controls do not merge engine results.
 
 ## Infrastructure constraints
 Audit and reuse existing Cloudflare Worker, Durable Object SQLite, KV and Cron; no D1. Preserve existing Cron and scanner. BingX credentials stay in Cloudflare secrets. Do not deploy or change production execution flags until the legacy-vs-new execution routing is audited and explicitly approved.
