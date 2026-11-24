@@ -43,3 +43,14 @@ This is a read-only audit of the existing `smcprov2` Worker. No Worker, KV, Dura
 4. Do not change the paper ledger key / baseline or initialize a new ledger until its current value and account semantics are understood.
 5. Do not deploy the new repository's current `worker/index.js` to `smcprov2`: it uses a different KV binding and has no equivalent Durable Object / existing order lifecycle.
 6. Implement and test maintainable Scalp/Swing modules separately, then integrate them into the old Worker through an explicit compatibility adapter and staged version deployment.
+
+## Additional reconciliation findings (read-only)
+- `bingx-demo-pending-limit-entries`: 10 persisted pending-entry records.
+- `bingx-vst-entry-queue-v1`: 324 persisted queued entries.
+- `bingx-vst-closed-trades-v1`: 80 persisted closed-trade records.
+- `bingx-demo-order-history-v1`: 713 order-history rows in the stored snapshot (138 FILLED, 535 CANCELLED, 40 FAILED). The stored snapshot timestamp is not a live exchange query; these counts do not prove current exchange order status.
+- The current code's allowlist contains S01-S06 and W01-W08, but persisted queue examples still contain older model identifiers such as `DISPLACEMENT_OB_RETEST_AND` and `DOW_DISPLACEMENT_OR`. The queue needs a controlled reconciliation before any new paper execution is enabled.
+- `ensureInternalPaperAccount` derives its reset ID from `PAPER_START_BALANCE_USDT` and invokes the Durable Object capital-adjustment endpoint when the ID differs. Changing the existing value can archive/reset the internal paper ledger. Keep the current value unchanged until the Durable Object ledger and BingX VST balance source are reconciled.
+- Worker code contains `NEW_PAPER_ENTRIES_ENABLED=true` and `STRATEGY_GENERATION_ENABLED=true`; however, BingX Demo API configuration requires both `BINGX_API_KEY` and `BINGX_API_SECRET`, and the observed Worker bindings did not expose either binding. No private credentials were retrieved. The current persisted queues are therefore not evidence of currently executable exchange orders.
+
+These findings are state snapshots only. Do not automatically cancel, execute, clear, or requeue these records based on KV contents alone.
