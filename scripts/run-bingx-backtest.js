@@ -18,4 +18,7 @@ const provider=new BingXPublicKlineProvider();
 const timeframes=await fetchEngineDataset({provider,symbol,engine,startTime,endTime:now});
 const evaluate=engine==="scalp"?evaluateScalp:evaluateSwing;
 const report=runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays:[30,60,90],initialEquity:balance.equity,feeRate:Number(process.env.FEE_RATE??0.0005),slippageRate:Number(process.env.SLIPPAGE_RATE??0.0002),fundingRate:Number(process.env.FUNDING_RATE??0)});
-process.stdout.write(JSON.stringify({account:{source:balance.source,asset:balance.asset,equity:balance.equity,availableMargin:balance.availableMargin,fetchedAt:balance.fetchedAt},report},null,2)+"\n");
+const output={account:{source:balance.source,asset:balance.asset,equity:balance.equity,availableMargin:balance.availableMargin,fetchedAt:balance.fetchedAt},report};
+const serialized=JSON.stringify(output,null,2);
+await writeFile("backtest-report.json",serialized+"\n",{encoding:"utf8"});
+process.stdout.write(serialized+"\n");
