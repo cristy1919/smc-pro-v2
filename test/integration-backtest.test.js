@@ -46,16 +46,19 @@ test("engine dataset fetch uses only independent approved timeframe sets",async(
   const provider={getCandles:async args=>{calls.push(args.timeframe);return [];}};
   await fetchEngineDataset({provider,symbol:"BTC-USDT",engine:"scalp",startTime:0,endTime:1000000});
   assert.deepEqual(calls,["1h","15m","5m"]);
+  calls.length=0;
+  await fetchEngineDataset({provider,symbol:"BTC-USDT",engine:"swing",startTime:0,endTime:1000000});
+  assert.deepEqual(calls,["1d","4h","1h","15m"]);
 });
 test("walk-forward backtest produces separate trade ledger and refuses missing 90d history",()=>{
   const hour=3600000, day=24*hour, start=Date.UTC(2026,0,1);
   const make=(n,step)=>Array.from({length:n},(_,i)=>({timestamp:start+i*step,open:100.1,high:101,low:100.2,close:100.8,volume:100,closed:true}));
-  const timeframes={"1d":make(32,day),"4h":make(192,4*hour),"1h":make(768,hour)};
+  const timeframes={"1d":make(32,day),"4h":make(192,4*hour),"1h":make(768,hour),"15m":make(32*96,15*60*1000)};
   let emitted=false; const fundingRates=[];
   const report=runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[30],initialEquity:10000,maxHoldBars:5,fundingRates,evaluate:({timeframes:tf})=>{
     if(emitted)return [];
     emitted=true;
-    const last=tf["1h"].at(-1); fundingRates.push({fundingTime:last.timestamp+2*hour,fundingRate:0.0001});
+    const last=tf["15m"].at(-1); fundingRates.push({fundingTime:last.timestamp+30*60*1000,fundingRate:0.0001});
     return [{id:"one-trade",engine:"swing",symbol:"BTC-USDT",direction:"BULLISH",setupId:"W01_HTF_OB_REVERSAL",state:"QUALIFIED",score:85,createdAt:last.timestamp,entry:100.8,stop:99,target:107.1,zoneBounds:{low:100,high:101},hardFilters:{validStop:true,minimumRR:true}}];
   }});
   assert.equal(report.periods.length,1);
