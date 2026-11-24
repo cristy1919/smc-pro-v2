@@ -82,7 +82,7 @@ export class BingXPublicKlineProvider {
 
 export async function fetchEngineDataset({ provider, symbol, engine, startTime, endTime }) {
   if (!provider || typeof provider.getCandles !== "function") throw new TypeError("provider.getCandles is required");
-  const timeframes = engine === "scalp" ? ["1h","15m","5m"] : engine === "swing" ? ["1d","4h","1h"] : null;
+  const timeframes = engine === "scalp" ? ["1h","15m","5m"] : engine === "swing" ? ["1d","4h","1h","15m"] : null;
   if (!timeframes) throw new Error("INVALID_ENGINE");
   const result = {};
   for (const timeframe of timeframes) {
