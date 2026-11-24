@@ -109,6 +109,7 @@ function evaluate(input, engine) {
   const price = entryCandles.at(-1).close;
   const candidates = [];
   const sweep = latest(entryF.sweeps, x => x.direction === direction && x.index >= entryCandles.length - 4);
+  const triggerEvent = latest(entryF.events, x => x.index >= entryCandles.length - 4);
   const displacementEvent = latest(entryF.events, x => x.direction === direction && x.displacement && x.index >= entryCandles.length - 4);
   const fvg = zoneAtPrice(entryF.fvgs.filter(x => x.status !== "FILLED"), price, direction);
   const breaker = entryF.breakers.find(x => x.direction === direction && price >= x.low && price <= x.high);
@@ -123,9 +124,9 @@ function evaluate(input, engine) {
     const item = makeCandidate({ engine, symbol: input.symbol, direction, setupId: SETUP_IDS[engine][key], entryCandles, htf, middle, entryFeatures: entryF, evidence, zone, volumeData: input.volumeData });
     if (item) candidates.push(item);
   };
-  if (sweep && displacementEvent && entryF.lastEvent?.type === "CHoCH" && fvg) add("sweep", ["LIQUIDITY_SWEEP", "DISPLACEMENT_MSS", "FVG_RETEST"], fvg);
+  if (sweep && displacementEvent && triggerEvent?.direction === direction && triggerEvent?.type === "CHoCH" && triggerEvent?.mss === true && fvg) add("sweep", ["LIQUIDITY_SWEEP", "DISPLACEMENT_MSS", "FVG_RETEST"], fvg);
   if (breaker) add("breaker", ["BREAKER_RETEST"], breaker);
-  if (displacementEvent && entryF.lastEvent?.type === "BOS") add("bos", ["BOS_CLOSE", "DISPLACEMENT"]);
+  if (displacementEvent && triggerEvent?.direction === direction && triggerEvent?.type === "BOS" && triggerEvent?.displacement === true) add("bos", ["BOS_CLOSE", "DISPLACEMENT"]);
   if (deviation) add(engine === "scalp" ? "range" : "range", ["RANGE_DEVIATION_REENTRY"]);
   if (engine === "scalp") {
     if (sweep && entryF.lastEvent?.direction === direction && entryF.lastEvent.type === "CHoCH") add("failed", ["FAILED_BREAKOUT", "SWEEP", "CHOCH"]);
