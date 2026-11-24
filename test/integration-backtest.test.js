@@ -51,16 +51,18 @@ test("walk-forward backtest produces separate trade ledger and refuses missing 9
   const hour=3600000, day=24*hour, start=Date.UTC(2026,0,1);
   const make=(n,step)=>Array.from({length:n},(_,i)=>({timestamp:start+i*step,open:100.1,high:101,low:100.2,close:100.8,volume:100,closed:true}));
   const timeframes={"1d":make(32,day),"4h":make(192,4*hour),"1h":make(768,hour)};
-  let emitted=false;
-  const report=runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[30],initialEquity:10000,maxHoldBars:5,evaluate:({timeframes:tf})=>{
+  let emitted=false; const fundingRates=[];
+  const report=runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[30],initialEquity:10000,maxHoldBars:5,fundingRates,evaluate:({timeframes:tf})=>{
     if(emitted)return [];
     emitted=true;
-    const last=tf["1h"].at(-1);
+    const last=tf["1h"].at(-1); fundingRates.push({fundingTime:last.timestamp+2*hour,fundingRate:0.0001});
     return [{id:"one-trade",engine:"swing",symbol:"BTC-USDT",direction:"BULLISH",setupId:"W01_HTF_OB_REVERSAL",state:"QUALIFIED",score:85,createdAt:last.timestamp,entry:100.8,stop:99,target:107.1,zoneBounds:{low:100,high:101},hardFilters:{validStop:true,minimumRR:true}}];
   }});
   assert.equal(report.periods.length,1);
   assert.equal(report.tradesByPeriod[30].length,1);
   assert.equal(report.tradesByPeriod[30][0].exitReason,"DATA_END");
+  assert.ok(report.tradesByPeriod[30][0].fundingR>0);
+  assert.equal(report.tradesByPeriod[30][0].fundingSettlements,1);
   assert.equal(report.assumptions.compounding,"CURRENT_EQUITY");
   assert.throws(()=>runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[90],initialEquity:10000,evaluate:()=>[]}),/INSUFFICIENT_PERIOD_HISTORY_90D/);
 });
@@ -85,4 +87,10 @@ test("dashboard close action validates partial close percentage and delegates",a
   await actions.close({positionId:"p1",closePercent:50});
   assert.deepEqual(request,{positionId:"p1",closePercent:50});
   await assert.rejects(()=>actions.close({positionId:"p1",closePercent:101}),/between 0 and 100/);
+});
+
+test("BingX public provider reads historical funding settlements with exact timestamps",async()=>{
+ const provider=new BingXPublicKlineProvider({fetchImpl:async url=>({ok:true,json:async()=>({code:0,data:[{fundingTime:600000,fundingRate:"0.0001"}]})}),now:()=>2000000,minRequestIntervalMs:0});
+ const rows=await provider.getFundingRates({symbol:"BTC-USDT",startTime:0,endTime:1000000,limit:100});
+ assert.deepEqual(rows,[{fundingTime:600000,fundingRate:0.0001}]);
 });
