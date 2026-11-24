@@ -2,7 +2,7 @@ import { RISK_CONFIG } from "./config.js";
 import { calculatePosition } from "./risk.js";
 
 export function evaluateEntryEligibility(candidate,{
- currentEquity,openPositions=[],riskMultiple=1,portfolioRiskCheck,liquidationCheck,highVolume=false,extraConfirmations=[]
+ currentEquity,openPositions=[],riskMultiple=1,portfolioRiskCheck,marketLiquidityCheck,liquidationCheck,highVolume=false,extraConfirmations=[]
 }={}){
  const reasons=[];
  if(!candidate||!["scalp","swing"].includes(candidate.engine))reasons.push("INVALID_ENGINE");
@@ -13,6 +13,8 @@ export function evaluateEntryEligibility(candidate,{
  if(Array.isArray(openPositions)&&openPositions.length>=RISK_CONFIG.maxOpenPositions)reasons.push("MAX_OPEN_POSITIONS");
  if(Array.isArray(openPositions)&&openPositions.some(p=>p.engine===candidate?.engine&&p.symbol===candidate?.symbol&&p.status==="OPEN"))reasons.push("DUPLICATE_ENGINE_SYMBOL_POSITION");
  if(!candidate?.hardFilters?.validStop||!candidate?.hardFilters?.minimumRR||!candidate?.hardFilters?.direction||!candidate?.hardFilters?.candle)reasons.push("CANDIDATE_HARD_FILTER_FAILED");
+ if(typeof marketLiquidityCheck!=="function")reasons.push("MARKET_LIQUIDITY_UNAVAILABLE");
+ else if(marketLiquidityCheck({candidate})!==true)reasons.push("MARKET_LIQUIDITY_REJECTED");
  if(typeof portfolioRiskCheck!=="function")reasons.push("PORTFOLIO_RISK_UNAVAILABLE");
  else if(portfolioRiskCheck({candidate,openPositions})!==true)reasons.push("PORTFOLIO_RISK_REJECTED");
  if(!liquidationCheck||liquidationCheck.available!==true||!Number.isFinite(liquidationCheck.distancePct)||!Number.isFinite(liquidationCheck.maxSafeLeverage))reasons.push("LIQUIDATION_DISTANCE_UNAVAILABLE");
