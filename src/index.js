@@ -13,3 +13,4 @@ export * from "./multi-timeframe-backtest.js";
 export * from "./setup-evaluator.js";
 export * from "./worker-compat.js";
 export * from "./dashboard-model.js";
+export * from "./legacy-dashboard-api.js";
