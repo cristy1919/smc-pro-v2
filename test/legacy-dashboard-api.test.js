@@ -18,7 +18,7 @@ test("legacy API adapter sends manual close through the existing confirmed close
 });
 test("legacy API adapter rejects forbidden chart intervals and invalid close portions",async()=>{
  const api=new LegacySmcDashboardApi({baseUrl:"https://smc.example",fetchImpl:async()=>{throw new Error("must not fetch");}});
- await assert.rejects(()=>api.getKlines({symbol:"BTC-USDT",interval:"1m"}),/FORBIDDEN/);
+ assert.throws(()=>api.getKlines({symbol:"BTC-USDT",interval:"1m"}),/FORBIDDEN/);
  await assert.rejects(()=>api.closePosition({positionId:"p1",closePercent:101}),/between 0 and 100/);
 });
 test("legacy dashboard candidates stay WAIT until a separate risk gate makes them entry eligible",()=>{
