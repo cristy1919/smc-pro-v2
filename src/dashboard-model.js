@@ -18,8 +18,7 @@ const normalizeCandidate = c => ({
 
 export function buildDashboardSnapshot({market={},positions=[],scalpCandidates=[],swingCandidates=[],pendingSetups=[],statistics={},diagnostics={},cloudflareUsage={},scanHealth={},runner={},historical={},tickerData={},globalContext={}}={}) {
   const open=openPositions(positions);
-  const scalp=scalpCandidates;
-  return {
+    return {
     generatedAt:Date.now(),
     tabs:[...DASHBOARD_TABS],
     marketOverview:{market,cloudflareUsage,scanHealth,globalContext,tickerData,
@@ -50,7 +49,7 @@ export function createDashboardActions({closePosition,openChart}={}) {
 
 export function toLegacyDashboardCandidate(candidate) {
   const setupReasons={
-    S01_SWEEP_MSS_FVG:"Likidite süpürüldü, piyasa yön değiştirdi ve fiyat boşluğu oluştu.",
+    S01_SWEEP_MSS_FVG:"Likidite süpürmesi gerçekleşti; piyasa yapısı dönüşü ve FVG oluşumu görüldü.",
     S02_BREAKER_RETEST:"Kırılan emir bloğu yeniden test edildi.",
     S03_BOS_DISPLACEMENT:"Önemli tepe/dip kırıldı ve güçlü fiyat hareketi geldi.",
     S04_RANGE_DEVIATION:"Fiyat aralık dışındaki likiditeyi alıp aralığa geri döndü.",
