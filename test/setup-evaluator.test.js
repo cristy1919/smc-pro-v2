@@ -18,10 +18,14 @@ test("Scalp evaluator consumes only 1h/15m/5m and returns a stable list", () => 
   assert.ok(Array.isArray(result));
   assert.ok(result.every(x => x.engine === "scalp" && x.timeframe === "5m"));
 });
-test("Swing evaluator consumes 1d/4h/1h independently", () => {
+test("Swing evaluator requires 1d/4h/1h confirmation and 15m entry", () => {
   const result = evaluateSwing(input);
   assert.ok(Array.isArray(result));
-  assert.ok(result.every(x => x.engine === "swing" && x.timeframe === "1h"));
+  assert.ok(result.every(x => x.engine === "swing" && x.timeframe === "15m"));
+});
+test("Swing evaluator rejects a missing 15m entry timeframe", () => {
+  const { "15m": _entry, ...timeframes } = input.timeframes;
+  assert.throws(() => evaluateSwing({ symbol: "BTC-USDT", timeframes }), /MISSING_TIMEFRAME_15m/);
 });
 test("candidate confidence remains insufficient without a trade sample history", () => {
   const result = evaluateScalp({ ...input, volumeData: { relativeVolume: 1.4 } });
