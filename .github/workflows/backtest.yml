@@ -39,3 +39,10 @@ jobs:
           BINGX_API_KEY: ${{ secrets.BINGX_API_KEY }}
           BINGX_SECRET_KEY: ${{ secrets.BINGX_SECRET_KEY }}
         run: node scripts/run-bingx-backtest.js
+      - name: Upload backtest report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bingx-vst-${{ inputs.engine }}-${{ inputs.symbol }}
+          path: backtest-report.json
+          if-no-files-found: error
+          retention-days: 30
