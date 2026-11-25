@@ -191,8 +191,8 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
   ledger.balance = round(ledger.balance + gross - exitFee - exitSlippage, 8);
   ledger.dailyPnl = round(ledger.dailyPnl + gross - exitFee - exitSlippage, 8);
   const initialQty = Number(p.initialQty ?? p.qty);
-  p.qty = round(Math.max(0, p.qty - closeQty), 8);
   const initialMargin = Number(p.initialMarginUsdt ?? p.marginUsdt ?? p.allocationUsdt ?? 0);
+  p.qty = round(Math.max(0, p.qty - closeQty), 8);
   if (Number.isFinite(initialMargin) && initialMargin >= 0) {
     p.initialMarginUsdt = initialMargin;
     const remainingRatio = initialQty > 0 ? Math.max(0, p.qty / initialQty) : 0;
@@ -206,7 +206,11 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
   p.lastMarkPrice = markPrice;
   p.markPrice = markPrice;
   p.markPriceAt = new Date(now).toISOString();
-  p.executionEvents = [...p.executionEvents ?? [], { event, ...stage ? { stage } : {}, triggerPrice, markPrice, executionPrice, qty: closeQty, at: now, closeReason: reason }];
+  const isTpEvent = /^TP[123]_TAKE_PROFIT$/.test(String(reason));
+  const tpAllocatedEntryFee = isTpEvent && initialQty > 0 ? round((Number(p.entryFeeUsdt) || 0) * closeQty / initialQty, 8) : 0;
+  const tpNetPnlUsdt = isTpEvent ? round(gross - exitFee - exitSlippage - tpAllocatedEntryFee, 8) : null;
+  const tpMarginUsdt = isTpEvent && initialQty > 0 && Number.isFinite(initialMargin) ? round(initialMargin * closeQty / initialQty, 8) : null;
+  p.executionEvents = [...p.executionEvents ?? [], { event, ...stage ? { stage } : {}, triggerPrice, markPrice, executionPrice, qty: closeQty, remainingQty: p.qty, at: now, closeReason: reason, ...(isTpEvent ? { netPnlUsdt: tpNetPnlUsdt, entryFeeAllocatedUsdt: tpAllocatedEntryFee, marginUsdt: tpMarginUsdt } : {}) }];
   console.info("Paper position execution", JSON.stringify({ at: new Date(now).toISOString(), symbol: p.symbol, model: p.model, side: p.side, event, stage: stage ?? null, triggerPrice, markPrice, executionPrice, priceDifference: round(executionPrice - triggerPrice, 10), qty: closeQty, remainingQty: p.qty, closeReason: reason, liquidation }));
   if (liquidation || p.qty <= 0) {
     p.status = "CLOSED";
@@ -291,16 +295,20 @@ function updatePositions(ledger, prices, now = Date.now(), _marketStopSymbols = 
       continue;
     }
     if (p.model === "TURTLE_SYSTEM_1") continue;
-    const first = p.tp1 ?? p.takeProfit, second = p.tp2, third = p.tp3;
-    if (!Number.isFinite(p.tp1) || !Number.isFinite(p.tp2)) {
-      const hitTP = isLong ? markPrice >= p.takeProfit : markPrice <= p.takeProfit;
-      if (hitTP) closePaperQuantity(ledger, p, p.qty, markPrice, now, "TAKE_PROFIT", p.takeProfit, markPrice, false, 1);
-      continue;
-    }
-    const orderedTargets = isLong ? Number(p.tp1) < Number(p.tp2) && (!Number.isFinite(third) || Number(p.tp2) < Number(third)) : Number(p.tp1) > Number(p.tp2) && (!Number.isFinite(third) || Number(p.tp2) > Number(third));
+    const first = Number(p.tp1 ?? p.takeProfit), second = Number(p.tp2), third = Number(p.tp3);
+    const orderedTargets = Number.isFinite(first) && Number.isFinite(second) && (isLong ? first < second && (!Number.isFinite(third) || second < third) : first > second && (!Number.isFinite(third) || second > third));
     if (!orderedTargets) {
-      const hitTP = isLong ? markPrice >= p.takeProfit : markPrice <= p.takeProfit;
-      if (hitTP) closePaperQuantity(ledger, p, p.qty, markPrice, now, "TAKE_PROFIT", p.takeProfit, markPrice);
+      const hitSingleTP1 = Number(p.targetStage) < 1 && Number.isFinite(first) && crossed(first);
+      if (hitSingleTP1) {
+        const baseQty = Number(p.initialQty) > 0 ? Number(p.initialQty) : Number(p.qty);
+        const closeQty = Math.min(p.qty, round(baseQty * 0.5, 8));
+        if (closeQty > 0) {
+          p.targetStage = 1;
+          p.targetStagesReached = [...new Set([...(Array.isArray(p.targetStagesReached) ? p.targetStagesReached : []), 1])].sort((a, b) => a - b);
+          closePaperQuantity(ledger, p, closeQty, markPrice, now, "TP1_TAKE_PROFIT", first, markPrice, false, 1);
+          if (p.status === "OPEN") p.stopLoss = p.entry;
+        }
+      }
       continue;
     }
     const maxStage = Number.isFinite(third) ? 3 : 2;
