@@ -127,7 +127,7 @@ export class BingXLiveExecutionAdapter {
       if (Number(verifiedLeverage) !== decision.leverage) throw new Error("LIVE_LEVERAGE_VERIFICATION_FAILED");
       const quantity = this.client.roundQuantity(decision.riskBudget, markPrice, candidate.stopLoss, contract, decision.leverage);
       if (!finitePositive(quantity) || quantity < Number(contract.minQty) ||
-          quantity % Number(contract.qtyStep) !== 0)
+          Math.abs(quantity / Number(contract.qtyStep) - Math.round(quantity / Number(contract.qtyStep))) > 1e-8)
         throw new Error("LIVE_ORDER_QUANTITY_INVALID");
       const bracket = {
         stopLoss: Number(candidate.stopLoss), takeProfit: Number(candidate.takeProfit),
@@ -159,6 +159,51 @@ export class BingXLiveExecutionAdapter {
       if (!accepted) await this.store.releaseIdempotencyKey(idempotencyKey);
       throw error;
     }
+  }
+
+  async updateProtection(position, { stopLoss, takeProfit } = {}) {
+    if (this.env.LIVE_TRADING_ENABLED !== "true" || !this.readiness().ready)
+      throw new Error("LIVE_PROTECTION_PATH_LOCKED");
+    if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
+      throw new Error("INVALID_LIVE_POSITION");
+    if (!finitePositive(stopLoss) || !finitePositive(takeProfit) || !finitePositive(position.entry))
+      throw new Error("INVALID_LIVE_PROTECTION_LEVELS");
+    if (position.side === "LONG" ? !(stopLoss < position.entry && takeProfit > position.entry) :
+      !(takeProfit < position.entry && stopLoss > position.entry))
+      throw new Error("LIVE_PROTECTION_DIRECTION_INVALID");
+    await this.client.setPositionProtection(position, {
+      stopLoss: Number(stopLoss), takeProfit: Number(takeProfit), workingType: "MARK_PRICE"
+    });
+    const check = await this.client.reconcilePosition(position.symbol, position.side);
+    if (!check?.position || check.protection?.stopLoss !== true || check.protection?.takeProfit !== true)
+      throw new Error("LIVE_PROTECTION_UPDATE_NOT_CONFIRMED");
+    const updated = { ...position, stopLoss: Number(stopLoss), takeProfit: Number(takeProfit), protectionVerifiedAt: this.clock() };
+    await this.store.saveLivePosition(updated);
+    return { ok: true, position: updated };
+  }
+
+  async partialClose(position, fraction) {
+    if (this.env.LIVE_TRADING_ENABLED !== "true" || !this.readiness().ready)
+      throw new Error("LIVE_PARTIAL_CLOSE_PATH_LOCKED");
+    if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
+      throw new Error("INVALID_LIVE_POSITION");
+    if (!Number.isFinite(fraction) || fraction <= 0 || fraction >= 1)
+      throw new Error("INVALID_PARTIAL_CLOSE_FRACTION");
+    const current = await this.client.getPosition(position.symbol, position.side);
+    const currentQty = Number(current?.positionAmt);
+    if (!finitePositive(currentQty)) throw new Error("LIVE_POSITION_QUANTITY_UNAVAILABLE");
+    const contract = await this.client.getContractRules(position.symbol);
+    if (!finitePositive(contract?.qtyStep)) throw new Error("LIVE_CONTRACT_STEP_UNAVAILABLE");
+    const rawQty = currentQty * fraction;
+    const quantity = Math.floor(rawQty / Number(contract.qtyStep) + 1e-10) * Number(contract.qtyStep);
+    if (!finitePositive(quantity) || quantity >= currentQty || quantity < Number(contract.minQty))
+      throw new Error("LIVE_PARTIAL_CLOSE_QUANTITY_INVALID");
+    const result = await this.client.reducePosition({ symbol: position.symbol, side: position.side, quantity });
+    const remaining = await this.client.getPosition(position.symbol, position.side);
+    if (!remaining || !Number.isFinite(Number(remaining.positionAmt)) || Number(remaining.positionAmt) < 0 ||
+        Number(remaining.positionAmt) >= currentQty)
+      throw new Error("LIVE_PARTIAL_CLOSE_NOT_CONFIRMED");
+    return { ok: true, result, remainingQuantity: Number(remaining.positionAmt) };
   }
 
   async close(position) {
