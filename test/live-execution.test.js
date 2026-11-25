@@ -482,8 +482,8 @@ test("BingX order lookup and cancel use a single order identifier", async () => 
   assert.equal(order.status, "FILLED");
   assert.equal(requests.length, 2);
   for (const request of requests) {
-    assert.equal(request.url.searchParams.get("orderId"), "123456789012345678");
-    assert.equal(request.url.searchParams.has("clientOrderId"), false);
+    assert.equal(request.url.searchParams.get("clientOrderId"), "smc-client-123456");
+    assert.equal(request.url.searchParams.has("orderId"), false);
   }
 });
 
