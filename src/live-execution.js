@@ -244,6 +244,10 @@ export class BingXLiveExecutionAdapter {
         clientOrderId: idempotencyKey
       });
       let orderStatus = String(orderState?.status ?? "").toUpperCase().replaceAll("_", "");
+      await this.store.saveLivePosition({
+        ...pendingRecord, entryOrderId: String(orderId ?? idempotencyKey),
+        exchangeOrderStatus: orderStatus || "UNKNOWN"
+      });
       if (["NEW", "PENDING", "PARTIALLYFILLED"].includes(orderStatus)) {
         await this.client.cancelOrder(symbol, {
           ...(orderId != null ? { orderId: String(orderId) } : {}),
@@ -255,8 +259,8 @@ export class BingXLiveExecutionAdapter {
         });
         orderStatus = String(orderState?.status ?? "").toUpperCase().replaceAll("_", "");
       }
-      const synced = await this.client.reconcilePosition(symbol, decision.side);
       const executedQuantity = Math.abs(Number(orderState?.executedQty ?? 0));
+      const synced = await this.client.reconcilePosition(symbol, decision.side);
       if (!synced?.position && ["CANCELLED", "CANCELED", "FAILED", "EXPIRED"].includes(orderStatus) && executedQuantity === 0) {
         await this.store.markLivePositionClosed(pendingId, {
           closedAt: this.clock(), closeReason: "ENTRY_ORDER_CANCELLED_WITHOUT_FILL",
