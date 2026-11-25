@@ -99,6 +99,7 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
         const updated = {
           ...position,
           quantity: partial.remainingQuantity,
+          qty: partial.remainingQuantity,
           stage: 1,
           tp1ReachedAt: clock(),
           lastManagedAt: clock()
