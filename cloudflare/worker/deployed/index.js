@@ -4371,12 +4371,18 @@ var EngineState = class {
       const targets = ledger.positions.filter((p) => p.status === "OPEN");
       const closedSymbols = [];
       const failures = [];
-      for (const position of targets) {
+      const exitQuotes = await Promise.all(targets.map(async (position) => {
         try {
-          const liveExitPrice = await getBingXMarkPrice(position.symbol, 1200);
-          const storedMark = Number(position.markPrice);
-          const exitPrice = liveExitPrice ?? (Number.isFinite(storedMark) && storedMark > 0 ? storedMark : Number.NaN);
-          const priceSource = liveExitPrice !== null ? "BINGX_MARK_PRICE" : Number.isFinite(storedMark) && storedMark > 0 ? "LAST_KNOWN_MARK_PRICE" : "UNAVAILABLE";
+          return { position, liveExitPrice: await getBingXMarkPrice(position.symbol, 1200) };
+        } catch {
+          return { position, liveExitPrice: null };
+        }
+      }));
+      for (const quote of exitQuotes) {
+        const { position, liveExitPrice } = quote;
+        try {
+          const exitPrice = liveExitPrice ?? Number.NaN;
+          const priceSource = liveExitPrice !== null ? "BINGX_MARK_PRICE" : "UNAVAILABLE";
           if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
             failures.push({ symbol: position.symbol, error: "No verified mark price is available; position left open" });
             continue;
