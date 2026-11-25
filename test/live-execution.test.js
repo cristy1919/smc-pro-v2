@@ -347,3 +347,77 @@ test("live readiness does not require unused demo private keys but refuses parti
   assert.equal(partialDemo.ready,false);
   assert.ok(partialDemo.blockers.includes("LIVE_CREDENTIALS_SEPARATE_FROM_DEMO"));
 });
+
+
+test("BingX position normalizer maps documented avgPrice to entryPrice and isolates side", async () => {
+  const client = new BingXLiveClient({
+    apiKey: "live", apiSecret: "secret",
+    fetchImpl: async url => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/positionSide/dual"))
+        return new Response(JSON.stringify({ code: 0, data: { dualSidePosition: true } }), { status: 200 });
+      if (parsed.pathname.endsWith("/user/positions"))
+        return new Response(JSON.stringify({ code: 0, data: [
+          { symbol: "BTC-USDT", positionSide: "LONG", positionAmt: "0.02", avgPrice: "100000", isolated: true }
+        ] }), { status: 200 });
+      throw new Error("unexpected request " + parsed.pathname);
+    }
+  });
+  const positions = await client.getOpenPositions();
+  assert.equal(positions[0].side, "LONG");
+  assert.equal(positions[0].entryPrice, 100000);
+  assert.equal(positions[0].marginType, "ISOLATED");
+  const position = await client.getPosition("BTC-USDT", "LONG");
+  assert.equal(position.entryPrice, 100000);
+});
+
+test("one-way position mode normalizes signed position and uses BOTH reduce-only close", async () => {
+  let orderBody = null;
+  const client = new BingXLiveClient({
+    apiKey: "live", apiSecret: "secret",
+    fetchImpl: async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/positionSide/dual"))
+        return new Response(JSON.stringify({ code: 0, data: { dualSidePosition: false } }), { status: 200 });
+      if (parsed.pathname.endsWith("/trade/order")) {
+        orderBody = new URLSearchParams(init.body);
+        return new Response(JSON.stringify({ code: 0, data: { orderID: "close-1" } }), { status: 200 });
+      }
+      throw new Error("unexpected request " + parsed.pathname);
+    }
+  });
+  await client.reducePosition({ symbol: "BTC-USDT", side: "SHORT", quantity: 0.01 });
+  assert.equal(orderBody.get("positionSide"), "BOTH");
+  assert.equal(orderBody.get("reduceOnly"), "true");
+  assert.equal(orderBody.get("side"), "BUY");
+});
+
+test("hedge-mode reduction uses the matching side and omits reduceOnly", async () => {
+  let orderBody = null;
+  const client = new BingXLiveClient({
+    apiKey: "live", apiSecret: "secret",
+    fetchImpl: async (url, init = {}) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/positionSide/dual"))
+        return new Response(JSON.stringify({ code: 0, data: { dualSidePosition: true } }), { status: 200 });
+      if (parsed.pathname.endsWith("/trade/order")) {
+        orderBody = new URLSearchParams(init.body);
+        return new Response(JSON.stringify({ code: 0, data: { orderID: "close-2" } }), { status: 200 });
+      }
+      throw new Error("unexpected request " + parsed.pathname);
+    }
+  });
+  await client.reducePosition({ symbol: "BTC-USDT", side: "LONG", quantity: 0.01 });
+  assert.equal(orderBody.get("positionSide"), "LONG");
+  assert.equal(orderBody.has("reduceOnly"), false);
+});
+
+test("live management refuses a reused or partial demo credential pair", () => {
+  const { getLiveManagementReadiness } = await import("../src/live-execution.js");
+  const reused = getLiveManagementReadiness({
+    BINGX_LIVE_API_KEY: "same", BINGX_LIVE_API_SECRET: "same-secret",
+    BINGX_API_KEY: "same", BINGX_API_SECRET: "same-secret", LIVE_CONTROL_TOKEN: "control"
+  });
+  assert.equal(reused.ready, false);
+  assert.ok(reused.blockers.includes("LIVE_CREDENTIALS_SEPARATE_FROM_DEMO"));
+});
