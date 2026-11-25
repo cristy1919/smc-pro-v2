@@ -76,4 +76,6 @@ The production resources are the existing Cloudflare Workers `smcprov2` and `smc
 - Unknown order outcomes remain durably PENDING and retain their reservation/idempotency claim. The scheduled position manager reconciles them, cancels stale unfilled orders, and only releases capacity after a verified zero-fill cancellation or a verified open position with both protective orders.
 - Stop-loss and take-profit values are rounded to the contract's price tick before risk validation and submission. Existing position average price (avgPrice) is normalized to the entry price used by post-fill risk checks.
 - Close and protective-order management support both hedge and one-way position-side semantics, while new entries still require hedge mode so Scalp and Swing can hold opposite sides independently.
-- CI currently reports 111 passing tests, including order status, pending-entry recovery, capacity reservation, credential separation, tick rounding, and protective-order serialization.
+- CI currently reports 113 passing tests, including order status, pending-entry recovery, capacity reservation, credential separation, tick rounding, and protective-order serialization.
+
+- TP1 50% scale-out uses a deterministic client order ID and a durable PENDING state before sending the reduce order. Recovery checks exchange order status and actual remaining position before marking TP1 complete, so a Worker restart or network timeout cannot blindly repeat the partial close.
