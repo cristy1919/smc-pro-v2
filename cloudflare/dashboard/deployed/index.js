@@ -28,6 +28,13 @@ export default {
    const upstream=await env.ENGINE.fetch(new Request(target,init)); const outHeaders=new Headers(upstream.headers); outHeaders.set("cache-control","no-store"); outHeaders.set("access-control-allow-origin",url.origin);
    return new Response(upstream.body,{status:upstream.status,statusText:upstream.statusText,headers:outHeaders});
   }
+  if (url.pathname === "/api/close-all" && request.method === "POST") {
+   const target = new URL("/api/paper/close-all" + url.search, API_ORIGIN);
+   const headers = new Headers(request.headers); headers.set("origin", API_ORIGIN); headers.delete("host"); headers.delete("content-length");
+   const init = {method:"POST",headers,redirect:"manual"}; init.body=request.body;
+   const upstream=await env.ENGINE.fetch(new Request(target,init)); const outHeaders=new Headers(upstream.headers); outHeaders.set("cache-control","no-store"); outHeaders.set("access-control-allow-origin",url.origin);
+   return new Response(upstream.body,{status:upstream.status,statusText:upstream.statusText,headers:outHeaders});
+  }
   if (url.pathname === "/") return new Response(DASHBOARD_HTML,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
   return new Response("Not found",{status:404});
  }
