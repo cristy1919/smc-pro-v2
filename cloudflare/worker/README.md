@@ -67,3 +67,13 @@ The production resources are the existing Cloudflare Workers `smcprov2` and `smc
 
 - Dashboard Diagnostics displays live readiness blockers and the separate activation state. The open-position views merge paper and authorized live positions; live close/partial-close buttons call the dedicated live management routes rather than paper endpoints.
 - Turning `LIVE_TRADING_ENABLED` off automatically invalidates the stored activation on the next scheduled run, preventing a later re-enable from silently resuming new live entries. Existing live position management and close operations remain available with the Live credentials.
+
+
+### Final live-order safety additions — 2026-11-25
+
+- Before a live order is sent, the system persists a PENDING position record and atomically reserves a global entry slot in the EngineStateV2 Durable Object. The reservation counts exchange positions, persisted pending/open positions, and other concurrent reservations against the hard 10-position cap; same-symbol/same-side pending entries are rejected.
+- Live market-order responses are not treated as fills. The adapter queries the order by exchange order ID or client order ID, cancels an unfilled/stale order, and reconciles the order state against the actual position and exchange-side stop/target orders before marking the position OPEN.
+- Unknown order outcomes remain durably PENDING and retain their reservation/idempotency claim. The scheduled position manager reconciles them, cancels stale unfilled orders, and only releases capacity after a verified zero-fill cancellation or a verified open position with both protective orders.
+- Stop-loss and take-profit values are rounded to the contract's price tick before risk validation and submission. Existing position average price (avgPrice) is normalized to the entry price used by post-fill risk checks.
+- Close and protective-order management support both hedge and one-way position-side semantics, while new entries still require hedge mode so Scalp and Swing can hold opposite sides independently.
+- CI currently reports 111 passing tests, including order status, pending-entry recovery, capacity reservation, credential separation, tick rounding, and protective-order serialization.
