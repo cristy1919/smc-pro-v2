@@ -4385,7 +4385,13 @@ var EngineState = class {
         if (supplied?.symbol === position.symbol && Number.isFinite(suppliedPrice) && suppliedPrice > 0 && Number.isFinite(suppliedAt) && age >= 0 && age <= 15e3) {
           return { position, liveExitPrice: suppliedPrice, priceSource: "DASHBOARD_MARK_SNAPSHOT" };
         }
-        const freshPrice = await getBingXMarkPrice(position.symbol, 800);
+        const storedPrice = Number(position.markPrice ?? position.currentPrice);
+        const storedAt = Date.parse(position.markPriceAt ?? position.livePriceAt ?? "");
+        const storedAge = Date.now() - storedAt;
+        if (Number.isFinite(storedPrice) && storedPrice > 0 && Number.isFinite(storedAt) && storedAge >= 0 && storedAge <= 15e3) {
+          return { position, liveExitPrice: storedPrice, priceSource: "LAST_KNOWN_VERIFIED_MARK" };
+        }
+        const freshPrice = await getBingXMarkPrice(position.symbol, 300);
         return { position, liveExitPrice: freshPrice, priceSource: freshPrice !== null ? "BINGX_MARK_PRICE" : "UNAVAILABLE" };
       }));
       for (const quote of exitQuotes) {
@@ -4463,12 +4469,14 @@ var EngineState = class {
       const requestedPrice = Number(body.requestedExitPrice);
       const requestedAge = Date.now() - requestedAt;
       const requestedFresh = Number.isFinite(requestedPrice) && requestedPrice > 0 && Number.isFinite(requestedAt) && requestedAge >= 0 && requestedAge <= 15e3;
-      const liveExitPrice = requestedFresh ? requestedPrice : await getBingXMarkPrice(position.symbol, 800);
-      const storedMark = Number(position.markPrice);
-      const storedAt = Date.parse(position.markPriceAt ?? "");
-      const storedFresh = Number.isFinite(storedAt) && Date.now() - storedAt >= 0 && Date.now() - storedAt <= 15e3;
-      const exitPrice = liveExitPrice ?? (storedFresh && Number.isFinite(storedMark) && storedMark > 0 ? storedMark : Number.NaN);
-      const priceSource = requestedFresh ? "DASHBOARD_MARK_SNAPSHOT" : liveExitPrice !== null ? "BINGX_MARK_PRICE" : storedFresh && Number.isFinite(storedMark) && storedMark > 0 ? "LAST_KNOWN_MARK_PRICE" : "UNAVAILABLE";
+      const storedMark = Number(position.markPrice ?? position.currentPrice);
+      const storedAt = Date.parse(position.markPriceAt ?? position.livePriceAt ?? "");
+      const storedAge = Date.now() - storedAt;
+      const storedFresh = Number.isFinite(storedMark) && storedMark > 0 && Number.isFinite(storedAt) && storedAge >= 0 && storedAge <= 15e3;
+      const immediatePrice = requestedFresh ? requestedPrice : storedFresh ? storedMark : null;
+      const liveExitPrice = immediatePrice ?? await getBingXMarkPrice(position.symbol, 300);
+      const exitPrice = liveExitPrice ?? Number.NaN;
+      const priceSource = requestedFresh ? "DASHBOARD_MARK_SNAPSHOT" : storedFresh && !requestedFresh ? "LAST_KNOWN_VERIFIED_MARK" : liveExitPrice !== null ? "BINGX_MARK_PRICE" : "UNAVAILABLE";
       if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
         console.warn("Paper close rejected because no verified mark price is available", JSON.stringify({ requestId, positionId, symbol: position.symbol }));
         return Response.json({ ok: false, code: "MARK_PRICE_UNAVAILABLE", error: "Güvenilir anlık fiyat alınamadı; pozisyon kapatılmadı.", requestId }, { status: 503, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
