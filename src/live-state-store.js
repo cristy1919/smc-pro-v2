@@ -50,6 +50,13 @@ export class DurableObjectLiveStore {
     await this.request("/live/activation", activation);
   }
 
+  async invalidateActivation() {
+    await this.request("/live/activation", {
+      active: false, id: "invalidated-" + this.now(), systemInvalidation: true,
+      confirmedByUser: false, confirmedAt: this.now()
+    });
+  }
+
   async listLivePositions() {
     const result = await this.request("/live/positions");
     return Array.isArray(result.positions) ? result.positions : [];
