@@ -127,8 +127,14 @@ test("durable live store uses dedicated DO routes and rejects invalid idempotenc
   assert.equal(await store.claimIdempotencyKey("live-order-key-001"), true);
   await store.saveLivePosition({ id: "p1", mode: "BINGX_LIVE", state: "OPEN" });
   await store.markLivePositionClosed("p1", { closedAt: 123 });
-  assert.equal(calls.length, 3);
+  assert.equal((await store.reserveEntrySlot("live-order-key-002", {
+    symbol: "BTC-USDT", side: "LONG", observedOpenPositions: 2, maxPositions: 10
+  })).claimed, true);
+  await store.releaseEntrySlot("live-order-key-002");
+  assert.equal(calls.length, 5);
   assert.ok(calls.some(c => c.url.endsWith("/live/idempotency/claim")));
+  assert.ok(calls.some(c => c.url.endsWith("/live/entry/reserve")));
+  assert.ok(calls.some(c => c.url.endsWith("/live/entry/release")));
   assert.ok(calls.some(c => c.url.endsWith("/live/positions")));
 });
 
@@ -259,7 +265,7 @@ test("live runner requires durable explicit activation and stays disabled by def
 });
 
 test("live adapter accepts a durable user activation for automated scanner entries", async () => {
-  let saved=null;
+  let saved=null, slotReleased=false;
   const env={LIVE_TRADING_ENABLED:"true",BINGX_API_KEY:"demo",BINGX_API_SECRET:"demo-secret",
     BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",LIVE_CONTROL_TOKEN:"control"};
   const client={
@@ -284,7 +290,7 @@ test("live adapter accepts a durable user activation for automated scanner entri
     releaseIdempotencyKey:async()=>{},
     saveLivePosition:async p=>{saved=p;},
     reserveEntrySlot:async()=>({claimed:true}),
-    releaseEntrySlot:async()=>{}
+    releaseEntrySlot:async()=>{slotReleased=true;}
   };
   const adapter=new BingXLiveExecutionAdapter({env,client,store,clock:()=>1700000000000});
   const result=await adapter.submit(baseCandidate(),{
@@ -295,6 +301,7 @@ test("live adapter accepts a durable user activation for automated scanner entri
   assert.equal(saved.mode,"BINGX_LIVE");
   assert.equal(saved.marginMode,"ISOLATED");
   assert.equal(saved.engine,"scalp");
+  assert.equal(slotReleased,true);
 });
 
 test("BingX live contract rules use public directional leverage caps and allow absent min-notional metadata", async () => {
