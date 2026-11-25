@@ -293,3 +293,20 @@ test("live adapter accepts a durable user activation for automated scanner entri
   assert.equal(saved.marginMode,"ISOLATED");
   assert.equal(saved.engine,"scalp");
 });
+
+test("BingX live contract rules use public directional leverage caps and allow absent min-notional metadata", async () => {
+  const client=new BingXLiveClient({
+    apiKey:"live",apiSecret:"secret",
+    fetchImpl:async()=>new Response(JSON.stringify({code:0,data:{
+      symbol:"BTC-USDT",quantityPrecision:3,pricePrecision:1,tradeMinQuantity:"0.001",
+      maxLongLeverage:"50",maxShortLeverage:"40"
+    }}),{status:200})
+  });
+  const rules=await client.getContractRules("BTC-USDT");
+  assert.equal(rules.minQty,0.001);
+  assert.equal(rules.qtyStep,0.001);
+  assert.equal(rules.tickSize,0.1);
+  assert.equal(rules.maxLongLeverage,50);
+  assert.equal(rules.maxShortLeverage,40);
+  assert.equal(rules.minNotional,0);
+});
