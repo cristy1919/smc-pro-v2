@@ -161,7 +161,7 @@ export class BingXLiveExecutionAdapter {
         id: String(synced.position.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
         candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
         quantity: Math.abs(Number(synced.position.positionAmt ?? quantity)), entry: Number(synced.position.entryPrice ?? markPrice),
-        stopLoss: bracket.stopLoss, takeProfit: bracket.takeProfit, leverage: decision.leverage,
+        stopLoss: bracket.stopLoss, takeProfit: bracket.takeProfit, tp1: Number(candidate.tp1 ?? candidate.takeProfit), tp2: Number(candidate.tp2 ?? candidate.takeProfit), stage: 0, leverage: decision.leverage,
         marginMode: "ISOLATED", riskMultiple, riskBudget: decision.riskBudget,
         mode: "BINGX_LIVE", state: "OPEN", openedAt: this.clock(),
         entryOrderId: String(order?.orderID ?? order?.orderId ?? idempotencyKey)
@@ -189,8 +189,8 @@ export class BingXLiveExecutionAdapter {
       throw new Error("INVALID_LIVE_POSITION");
     if (!finitePositive(stopLoss) || !finitePositive(takeProfit) || !finitePositive(position.entry))
       throw new Error("INVALID_LIVE_PROTECTION_LEVELS");
-    if (position.side === "LONG" ? !(stopLoss < position.entry && takeProfit > position.entry) :
-      !(takeProfit < position.entry && stopLoss > position.entry))
+    if (position.side === "LONG" ? !(stopLoss <= position.entry && takeProfit > position.entry && stopLoss < takeProfit) :
+      !(takeProfit < position.entry && stopLoss >= position.entry && stopLoss > takeProfit))
       throw new Error("LIVE_PROTECTION_DIRECTION_INVALID");
     await this.client.setPositionProtection(position, {
       stopLoss: Number(stopLoss), takeProfit: Number(takeProfit), workingType: "MARK_PRICE"
