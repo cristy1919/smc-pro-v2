@@ -197,7 +197,7 @@ export class BingXLiveClient {
     const closeSide = position.side === "LONG" ? "SELL" : "BUY";
     const common = { symbol: position.symbol, side: closeSide, positionSide: position.side,
       quantity: Math.abs(Number(current.position.positionAmt)), workingType: "MARK_PRICE", closePosition: "true" };
-    const old = current.openOrders ?? [];
+    const old = (current.openOrders ?? []).filter(order => ["STOP_MARKET", "TAKE_PROFIT_MARKET"].includes(String(order.type).toUpperCase()));
     const newSl = await this.privateRequest("POST", "/openApi/swap/v2/trade/order", {
       ...common, type: "STOP_MARKET", stopPrice: Number(stopLoss)
     });
