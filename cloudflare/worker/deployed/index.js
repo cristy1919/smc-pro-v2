@@ -3636,7 +3636,7 @@ var EngineState = class {
       }));
     }
     const isPaperScan = request.method === "POST" && path === "/paper/scan";
-    const mutatesPaperLedger = request.method === "PUT" && path === "/state" || request.method === "POST" && ["/paper/scan", "/paper/close", "/paper/close-all", "/paper/settings", "/paper/capital-adjustment", "/runner", "/live/idempotency/claim", "/live/idempotency/release", "/live/positions"].includes(path);
+    const mutatesPaperLedger = request.method === "PUT" && path === "/state" || request.method === "POST" && ["/paper/scan", "/paper/close", "/paper/close-all", "/paper/settings", "/paper/capital-adjustment", "/runner", "/live/idempotency/claim", "/live/idempotency/release", "/live/positions", "/live/activation"].includes(path);
     if (isPaperScan && this.scanInProgress) return Response.json({ ok: true, skipped: true, reason: "SCAN_ALREADY_IN_PROGRESS" }, { status: 202, headers: { "cache-control": "no-store" } });
     if (isPaperScan) { this.scanInProgress = true; this.scanStartedAt = Date.now(); }
     try {
@@ -4115,6 +4115,22 @@ var EngineState = class {
       const current = await this.state.storage.get(storageKey);
       if (current?.state === "CLAIMED") await this.state.storage.delete(storageKey);
       return Response.json({ ok: true, released: current?.state === "CLAIMED" });
+    }
+    if (request.method === "GET" && url.pathname === "/live/activation") {
+      const activation = await this.state.storage.get("live-activation-v1") ?? { active: false, id: null };
+      return Response.json({ ok: true, activation }, { headers: { "cache-control": "no-store" } });
+    }
+    if (request.method === "POST" && url.pathname === "/live/activation") {
+      const body = await request.json().catch(() => null);
+      if (typeof body?.active !== "boolean" || typeof body?.id !== "string" || body.id.length < 12 ||
+          body.confirmedByUser !== true || !Number.isFinite(Number(body.confirmedAt)))
+        return Response.json({ ok: false, error: "LIVE_ACTIVATION_RECORD_INVALID" }, { status: 400 });
+      const activation = {
+        active: body.active, id: body.id, confirmedByUser: true,
+        activatedAt: Number(body.confirmedAt), updatedAt: Date.now()
+      };
+      await this.state.storage.put("live-activation-v1", activation);
+      return Response.json({ ok: true, activation });
     }
     if ((request.method === "GET" || request.method === "POST") && url.pathname === "/live/positions") {
       const storageKey = "live-positions-v1";
