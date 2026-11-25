@@ -2,6 +2,30 @@ import { getLiveReadiness } from "./live-execution.js";
 
 const positive = value => Number.isFinite(Number(value)) && Number(value) > 0;
 
+export function findConfirmedTrailingStop(candles, side, currentStop, markPrice, tickSize, openedAt = 0) {
+  if (!Array.isArray(candles) || candles.length < 5 || !["LONG", "SHORT"].includes(side) ||
+      ![currentStop, markPrice, tickSize].every(positive)) return null;
+  let selected = null;
+  for (let i = 2; i + 2 < candles.length; i++) {
+    const pivot = candles[i], confirmation = candles[i + 2];
+    if (Number(confirmation.time) <= Number(openedAt)) continue;
+    if (side === "LONG") {
+      const isPivot = candles.slice(i - 2, i).every(x => pivot.low <= x.low) &&
+        candles.slice(i + 1, i + 3).every(x => pivot.low < x.low);
+      const stopPrice = Number(pivot.low) - Number(tickSize);
+      if (isPivot && stopPrice > currentStop && stopPrice < markPrice && (!selected || confirmation.time > selected.confirmedAt))
+        selected = { stopPrice, pivotTime: pivot.time, confirmedAt: confirmation.time };
+    } else {
+      const isPivot = candles.slice(i - 2, i).every(x => pivot.high >= x.high) &&
+        candles.slice(i + 1, i + 3).every(x => pivot.high > x.high);
+      const stopPrice = Number(pivot.high) + Number(tickSize);
+      if (isPivot && stopPrice < currentStop && stopPrice > markPrice && (!selected || confirmation.time > selected.confirmedAt))
+        selected = { stopPrice, pivotTime: pivot.time, confirmedAt: confirmation.time };
+    }
+  }
+  return selected;
+}
+
 export async function manageLivePositions({ env, client, store, adapter, clock = () => Date.now() } = {}) {
   const readiness = getLiveReadiness(env);
   if (!readiness.ready) return { ok: false, skipped: true, reason: "LIVE_READINESS_BLOCKED", blockers: readiness.blockers };
@@ -51,6 +75,22 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
         await store.saveLivePosition({ ...position, stopLoss: Number(position.entry), lastManagedAt: clock() });
         results.push({ id: position.id, action: "BREAKEVEN_PROTECTION_REPAIRED" });
         continue;
+      }
+      if (stage >= 1 && typeof client.getCandles === "function" && positive(position.stopLoss)) {
+        const interval = position.engine === "scalp" ? "15m" : "4h";
+        const candles = await client.getCandles(position.symbol, interval, 120);
+        const latestClosedTime = Number(candles.at(-1)?.time) || 0;
+        if (latestClosedTime > Number(position.lastTrailingCandleTime ?? 0)) {
+          const contract = await client.getContractRules(position.symbol);
+          const trailing = findConfirmedTrailingStop(candles, position.side, Number(position.stopLoss), markPrice, Number(contract.tickSize), Number(position.openedAt));
+          if (trailing) {
+            await adapter.updateProtection(position, { stopLoss: trailing.stopPrice, takeProfit: Number(position.takeProfit) });
+            await store.saveLivePosition({ ...position, stopLoss: trailing.stopPrice, lastTrailingCandleTime: latestClosedTime, lastManagedAt: clock() });
+            results.push({ id: position.id, action: "STRUCTURAL_TRAILING_STOP_UPDATED", stopLoss: trailing.stopPrice, confirmedAt: trailing.confirmedAt });
+            continue;
+          }
+          await store.saveLivePosition({ ...position, lastTrailingCandleTime: latestClosedTime });
+        }
       }
       const reachedTp1 = stage === 0 && positive(tp1) &&
         (position.side === "LONG" ? markPrice >= tp1 : markPrice <= tp1);
