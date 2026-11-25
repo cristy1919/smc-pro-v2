@@ -41,6 +41,15 @@ export class DurableObjectLiveStore {
     await this.request("/live/positions", { operation: "close", id, metadata });
   }
 
+  async getActivation() {
+    const result = await this.request("/live/activation");
+    return result.activation ?? { active: false, id: null };
+  }
+
+  async setActivation(activation) {
+    await this.request("/live/activation", activation);
+  }
+
   async listLivePositions() {
     const result = await this.request("/live/positions");
     return Array.isArray(result.positions) ? result.positions : [];
