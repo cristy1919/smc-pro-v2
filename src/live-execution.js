@@ -4,6 +4,17 @@ const LIVE_BASE = "https://open-api.bingx.com";
 const SYMBOL_RE = /^[A-Z0-9]{2,20}-USDT$/;
 const finitePositive = value => Number.isFinite(Number(value)) && Number(value) > 0;
 
+export function getLiveManagementReadiness(env = {}) {
+  const checks = [
+    ["LIVE_API_KEY", !!env.BINGX_LIVE_API_KEY],
+    ["LIVE_API_SECRET", !!env.BINGX_LIVE_API_SECRET],
+    ["LIVE_CONFIRMATION_SECRET", !!env.LIVE_CONTROL_TOKEN],
+    ["LIVE_BASE_URL_LOCKED", LIVE_BASE === "https://open-api.bingx.com"]
+  ];
+  const blockers = checks.filter(([, passed]) => !passed).map(([name]) => name);
+  return { ready: blockers.length === 0, blockers };
+}
+
 export function getLiveReadiness(env = {}) {
   const checks = [
     ["LIVE_API_KEY", !!env.BINGX_LIVE_API_KEY],
@@ -86,6 +97,7 @@ export class BingXLiveExecutionAdapter {
   }
 
   readiness() { return getLiveReadiness(this.env); }
+  managementReadiness() { return getLiveManagementReadiness(this.env); }
 
   async emergencyCloseAndVerify(record, exchangePosition, reason) {
     let persisted = false;
@@ -231,7 +243,7 @@ export class BingXLiveExecutionAdapter {
   }
 
   async updateProtection(position, { stopLoss, takeProfit } = {}) {
-    if (!this.readiness().ready)
+    if (!this.managementReadiness().ready)
       throw new Error("LIVE_PROTECTION_PATH_LOCKED");
     if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
       throw new Error("INVALID_LIVE_POSITION");
@@ -253,7 +265,7 @@ export class BingXLiveExecutionAdapter {
   }
 
   async partialClose(position, fraction) {
-    if (!this.readiness().ready)
+    if (!this.managementReadiness().ready)
       throw new Error("LIVE_PARTIAL_CLOSE_PATH_LOCKED");
     if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
       throw new Error("INVALID_LIVE_POSITION");
@@ -278,7 +290,7 @@ export class BingXLiveExecutionAdapter {
   }
 
   async close(position) {
-    if (!this.readiness().ready)
+    if (!this.managementReadiness().ready)
       throw new Error("LIVE_CLOSE_PATH_LOCKED");
     if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
       throw new Error("INVALID_LIVE_POSITION");
