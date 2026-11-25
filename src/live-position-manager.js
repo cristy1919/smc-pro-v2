@@ -47,7 +47,7 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
 
       const tp1 = Number(position.tp1);
       const stage = Number(position.stage ?? 0);
-      if (stage >= 1 && (position.side === "LONG" ? Number(position.stopLoss) > Number(position.entry) : Number(position.stopLoss) < Number(position.entry))) {
+      if (stage >= 1 && (position.side === "LONG" ? Number(position.stopLoss) < Number(position.entry) : Number(position.stopLoss) > Number(position.entry))) {
         await adapter.updateProtection(position, { stopLoss: Number(position.entry), takeProfit: Number(position.takeProfit) });
         await store.saveLivePosition({ ...position, stopLoss: Number(position.entry), lastManagedAt: clock() });
         results.push({ id: position.id, action: "BREAKEVEN_PROTECTION_REPAIRED" });
@@ -61,7 +61,6 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
           ...position,
           quantity: partial.remainingQuantity,
           stage: 1,
-          stopLoss: Number(position.entry),
           tp1ReachedAt: clock(),
           lastManagedAt: clock()
         };
