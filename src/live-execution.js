@@ -20,7 +20,7 @@ export function getLiveReadiness(env = {}) {
     liveTradingEnabled: env.LIVE_TRADING_ENABLED === "true",
     apiCredentialsConfigured: !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET,
     demoCredentialsIndependent: !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET &&
-      (env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY || env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET),
+      (env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY && env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET),
     checks: checks.map(([name, passed]) => ({ name, passed })),
     blockers
   };
@@ -42,7 +42,7 @@ export function validateLiveCandidate(candidate, {
   if (!Array.isArray(openPositions)) reasons.push("LIVE_POSITION_SNAPSHOT_UNAVAILABLE");
   else if (openPositions.length >= RISK_CONFIG.maxOpenPositions) reasons.push("MAX_OPEN_POSITIONS");
   if (Array.isArray(openPositions) && openPositions.some(p =>
-    p.symbol === candidate?.symbol && p.engine === candidate?.engine &&
+    p.symbol === candidate?.symbol &&
     p.side === (candidate?.direction === "BULLISH" || candidate?.direction === "LONG" ? "LONG" : "SHORT") && p.state === "OPEN"
   )) reasons.push("DUPLICATE_ENGINE_SYMBOL_SIDE");
   if (!finitePositive(markPrice)) reasons.push("LIVE_MARK_PRICE_UNAVAILABLE");
@@ -98,6 +98,8 @@ export class BingXLiveExecutionAdapter {
         this.clock() < confirmation.confirmedAt)
       throw new Error("LIVE_CONFIRMATION_INVALID_OR_EXPIRED");
     if (!this.client || !this.store) throw new Error("LIVE_EXECUTION_DEPENDENCIES_UNAVAILABLE");
+    if (typeof this.client.getPositionMode !== "function" || !(await this.client.getPositionMode()))
+      throw new Error("LIVE_HEDGE_MODE_REQUIRED");
     if (typeof this.store.claimIdempotencyKey !== "function" ||
         typeof this.store.releaseIdempotencyKey !== "function")
       throw new Error("LIVE_IDEMPOTENCY_STORE_REQUIRED");
@@ -125,8 +127,8 @@ export class BingXLiveExecutionAdapter {
       await this.client.setLeverage(symbol, leverageSide, decision.leverage);
       const verifiedLeverage = await this.client.getLeverage(symbol, leverageSide);
       if (Number(verifiedLeverage) !== decision.leverage) throw new Error("LIVE_LEVERAGE_VERIFICATION_FAILED");
-      const quantity = this.client.roundQuantity(decision.riskBudget, markPrice, candidate.stopLoss, contract, decision.leverage);
-      if (!finitePositive(quantity) || quantity < Number(contract.minQty) ||
+      const quantity = this.client.roundQuantity(decision.riskBudget, markPrice, candidate.stopLoss, contract, decision.leverage, account.availableMargin);
+      if (!finitePositive(quantity) || quantity < Number(contract.minQty) || quantity * Number(markPrice) < Number(contract.minNotional) ||
           Math.abs(quantity / Number(contract.qtyStep) - Math.round(quantity / Number(contract.qtyStep))) > 1e-8)
         throw new Error("LIVE_ORDER_QUANTITY_INVALID");
       const bracket = {
