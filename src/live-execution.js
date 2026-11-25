@@ -183,7 +183,7 @@ export class BingXLiveExecutionAdapter {
   }
 
   async updateProtection(position, { stopLoss, takeProfit } = {}) {
-    if (this.env.LIVE_TRADING_ENABLED !== "true" || !this.readiness().ready)
+    if (!this.readiness().ready)
       throw new Error("LIVE_PROTECTION_PATH_LOCKED");
     if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
       throw new Error("INVALID_LIVE_POSITION");
@@ -204,7 +204,7 @@ export class BingXLiveExecutionAdapter {
   }
 
   async partialClose(position, fraction) {
-    if (this.env.LIVE_TRADING_ENABLED !== "true" || !this.readiness().ready)
+    if (!this.readiness().ready)
       throw new Error("LIVE_PARTIAL_CLOSE_PATH_LOCKED");
     if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
       throw new Error("INVALID_LIVE_POSITION");
@@ -229,7 +229,7 @@ export class BingXLiveExecutionAdapter {
   }
 
   async close(position) {
-    if (this.env.LIVE_TRADING_ENABLED !== "true" || !this.readiness().ready)
+    if (!this.readiness().ready)
       throw new Error("LIVE_CLOSE_PATH_LOCKED");
     if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
       throw new Error("INVALID_LIVE_POSITION");
