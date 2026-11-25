@@ -140,6 +140,8 @@ export class BingXLiveExecutionAdapter {
       const symbol = candidate.symbol;
       const margin = await this.client.getMarginMode(symbol);
       if (margin !== "ISOLATED") await this.client.setMarginMode(symbol, "ISOLATED");
+      const verifiedMarginMode = await this.client.getMarginMode(symbol);
+      if (verifiedMarginMode !== "ISOLATED") throw new Error("LIVE_ISOLATED_MARGIN_VERIFICATION_FAILED");
       const leverageSide = decision.side;
       await this.client.setLeverage(symbol, leverageSide, decision.leverage);
       const verifiedLeverage = await this.client.getLeverage(symbol, leverageSide);
