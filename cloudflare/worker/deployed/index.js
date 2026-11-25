@@ -1,3 +1,6 @@
+import { getLiveReadiness, BingXLiveExecutionAdapter } from "./src/live-execution.js";
+import { BingXLiveClient } from "./src/bingx-live-client.js";
+import { DurableObjectLiveStore } from "./src/live-state-store.js";
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -7535,41 +7538,106 @@ var index_default = {
         error: "BingX market-data requests are disabled by the emergency stop."
       }, { status: 503, headers });
     }
-    if (url.pathname === "/api/live/status") {
-      const liveKeyConfigured = !!env.BINGX_LIVE_API_KEY;
-      const liveSecretConfigured = !!env.BINGX_LIVE_API_SECRET;
-      const credentialsIndependent = liveKeyConfigured && liveSecretConfigured &&
-        env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY &&
-        env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET;
-      const blockers = [];
-      if (!liveKeyConfigured) blockers.push("LIVE_API_KEY_MISSING");
-      if (!liveSecretConfigured) blockers.push("LIVE_API_SECRET_MISSING");
-      if (!credentialsIndependent) blockers.push("LIVE_CREDENTIALS_NOT_INDEPENDENT");
-      blockers.push("LIVE_EXECUTION_LAYER_NOT_INTEGRATED");
-      if (env.LIVE_TRADING_ENABLED !== "true") blockers.push("LIVE_TRADING_DISABLED");
+    if (url.pathname === "/api/live/status" && request.method === "GET") {
+      const readiness = getLiveReadiness(env);
+      const blockers = [...readiness.blockers];
+      if (!env.ENGINE_STATE_V2) blockers.push("LIVE_DURABLE_OBJECT_BINDING_MISSING");
       return Response.json({
-        ok: true,
-        mode: "live-readiness",
-        ready: false,
-        liveTradingEnabled: false,
-        liveApiKeyConfigured: liveKeyConfigured,
-        liveApiSecretConfigured: liveSecretConfigured,
-        liveCredentialsIndependent: credentialsIndependent,
+        ok: true, mode: "live-readiness", ready: blockers.length === 0,
+        liveTradingEnabled: env.LIVE_TRADING_ENABLED === "true",
+        liveApiKeyConfigured: readiness.apiCredentialsConfigured,
+        liveCredentialsIndependent: readiness.demoCredentialsIndependent,
         demoCredentialsConfigured: !!env.BINGX_API_KEY && !!env.BINGX_API_SECRET,
         demoModeSelected: env.BINGX_TRADING_MODE === "demo",
         demoTradingEnabled: isBingXDemoConfigured(env),
-        maxOpenPositions: 10,
-        marginModeRequired: "ISOLATED",
-        normalRiskR: 1,
-        reducedRiskR: 0.5,
-        normalLeverage: { min: 20, max: 50 },
-        reducedRiskLeverage: { min: 5, max: 10 },
-        blockers,
-        reason: "Live execution remains fail-closed. The live adapter is in the repository but has not been integrated into this deployed Worker."
+        liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true,
+        maxOpenPositions: 10, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
+        normalLeverage: { min: 20, max: 50 }, reducedRiskLeverage: { min: 5, max: 10 },
+        blockers, reason: blockers.length ? "Live execution is integrated but blocked until the listed prerequisites are satisfied." : "Live execution is configured and remains disabled until the separate activation flag and user confirmation are supplied."
       }, { headers: { ...headers, "cache-control": "no-store" } });
     }
     if (url.pathname === "/api/live/execute" && request.method === "POST") {
-      return Response.json({ ok: false, mode: "locked", liveTradingEnabled: false, error: "Live execution is permanently disabled in this deployment. Use the BingX VST demo runner." }, { status: 403, headers });
+      if (env.LIVE_TRADING_ENABLED !== "true") return Response.json({ ok: false, mode: "locked", liveTradingEnabled: false, error: "LIVE_TRADING_DISABLED" }, { status: 403, headers });
+      if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, error: "LIVE_CONTROL_AUTHORIZATION_REQUIRED" }, { status: 401, headers });
+      let body;
+      try { body = await request.json(); } catch { return Response.json({ ok: false, error: "INVALID_JSON_BODY" }, { status: 400, headers }); }
+      const confirmedAt = Number(body?.confirmedAt);
+      if (body?.confirmedByUser !== true || !Number.isFinite(confirmedAt) || Math.abs(Date.now() - confirmedAt) > 60000)
+        return Response.json({ ok: false, error: "FRESH_EXPLICIT_LIVE_CONFIRMATION_REQUIRED" }, { status: 400, headers });
+      const readiness = getLiveReadiness(env);
+      if (!readiness.ready) return Response.json({ ok: false, error: "LIVE_READINESS_BLOCKED", blockers: readiness.blockers }, { status: 503, headers });
+      try {
+        const engineStub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
+        const stateResponse = await engineStub.fetch(new Request("https://engine.internal/paper/status"));
+        const state = await stateResponse.json();
+        if (!stateResponse.ok || state.storageDegraded || !Array.isArray(state.setups))
+          return Response.json({ ok: false, error: "LIVE_SIGNAL_STATE_UNAVAILABLE" }, { status: 503, headers });
+        const setupId = String(body.setupId ?? "");
+        const setup = state.setups.find(item => String(item.setupId ?? item.id ?? item.setupKey ?? "") === setupId);
+        if (!setup || setup.entryConfirmed !== true || !["READY", "QUALIFIED", "HIGH_QUALITY"].includes(String(setup.status).toUpperCase()))
+          return Response.json({ ok: false, error: "LIVE_SETUP_NOT_CURRENTLY_READY" }, { status: 409, headers });
+        const engineName = String(setup.tradeStyle ?? setup.engine ?? "").toLowerCase();
+        if (!["scalp", "swing"].includes(engineName)) return Response.json({ ok: false, error: "LIVE_SETUP_ENGINE_INVALID" }, { status: 409, headers });
+        const symbol = String(setup.symbol ?? "");
+        const side = String(setup.side ?? "").toUpperCase();
+        if (!validSymbol.test(symbol) || !["LONG", "SHORT"].includes(side)) return Response.json({ ok: false, error: "LIVE_SETUP_MARKET_FIELDS_INVALID" }, { status: 409, headers });
+        const riskMultiple = Number(setup.riskMultiplier) === 0.5 || setup.countertrend === true || setup.htfAligned === false || Number(setup.score) < 80 ? 0.5 : 1;
+        const client = new BingXLiveClient({ apiKey: env.BINGX_LIVE_API_KEY, apiSecret: env.BINGX_LIVE_API_SECRET });
+        const markPrice = await client.getMarkPrice(symbol);
+        const stopLoss = Number(setup.stopLoss), takeProfit = Number(setup.tp1 ?? setup.takeProfit ?? setup.tp2);
+        const unitRiskFraction = (Math.abs(markPrice - stopLoss) + markPrice * (FEE_RATE + SLIPPAGE_RATE) + stopLoss * (FEE_RATE + SLIPPAGE_RATE)) / markPrice;
+        const minLeverage = riskMultiple === 0.5 ? 5 : 20, maxLeverage = riskMultiple === 0.5 ? 10 : 50;
+        if (!Number.isFinite(unitRiskFraction) || unitRiskFraction <= 0 || unitRiskFraction > 1 / minLeverage * 0.8)
+          return Response.json({ ok: false, error: "LIVE_STOP_DISTANCE_LIQUIDATION_GUARD" }, { status: 409, headers });
+        const leverage = Math.max(minLeverage, Math.min(maxLeverage, Math.floor((riskMultiple === 0.5 ? 0.4 : 0.8) / unitRiskFraction)));
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode([setupId, symbol, side, setup.scannedAt ?? setup.candleTime ?? setup.setupTimeframe].join("|")));
+        const idempotencyKey = "smc-" + Array.from(new Uint8Array(digest)).slice(0, 16).map(byte => byte.toString(16).padStart(2, "0")).join("");
+        const store = new DurableObjectLiveStore({ stub: engineStub });
+        const adapter = new BingXLiveExecutionAdapter({ env, client, store });
+        const candidate = {
+          id: setupId, engine: engineName, symbol, direction: side, status: "QUALIFIED", entryEligible: true,
+          entryConfirmation: { status: "CONFIRMED" }, entry: Number(setup.entry), stopLoss, takeProfit,
+          score: Number(setup.score), leverage, marginMode: "ISOLATED", riskMultiplier
+        };
+        const result = await adapter.submit(candidate, {
+          riskMultiple, idempotencyKey,
+          confirmation: { confirmedByUser: true, token: env.LIVE_CONTROL_TOKEN, confirmedAt }
+        });
+        return Response.json({ ok: true, mode: "BINGX_LIVE", result }, { headers: { ...headers, "cache-control": "no-store" } });
+      } catch (error) {
+        console.error("BingX live execution rejected", String(error).slice(0, 240));
+        return Response.json({ ok: false, error: String(error).slice(0, 320) }, { status: 409, headers });
+      }
+    }
+    if (url.pathname === "/api/live/positions" && request.method === "GET") {
+      if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, error: "LIVE_CONTROL_AUTHORIZATION_REQUIRED" }, { status: 401, headers });
+      try {
+        const stub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
+        const store = new DurableObjectLiveStore({ stub });
+        return Response.json({ ok: true, mode: "BINGX_LIVE", positions: await store.listLivePositions() }, { headers: { ...headers, "cache-control": "no-store" } });
+      } catch (error) { return Response.json({ ok: false, error: String(error).slice(0, 200) }, { status: 503, headers }); }
+    }
+    if (["/api/live/close", "/api/live/protection", "/api/live/partial-close"].includes(url.pathname) && request.method === "POST") {
+      if (env.LIVE_TRADING_ENABLED !== "true") return Response.json({ ok: false, error: "LIVE_TRADING_DISABLED" }, { status: 403, headers });
+      if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, error: "LIVE_CONTROL_AUTHORIZATION_REQUIRED" }, { status: 401, headers });
+      let body;
+      try { body = await request.json(); } catch { return Response.json({ ok: false, error: "INVALID_JSON_BODY" }, { status: 400, headers }); }
+      if (body?.confirmedByUser !== true || !Number.isFinite(Number(body.confirmedAt)) || Math.abs(Date.now() - Number(body.confirmedAt)) > 60000)
+        return Response.json({ ok: false, error: "FRESH_EXPLICIT_LIVE_CONFIRMATION_REQUIRED" }, { status: 400, headers });
+      try {
+        const stub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
+        const store = new DurableObjectLiveStore({ stub });
+        const positions = await store.listLivePositions();
+        const position = positions.find(item => String(item.id) === String(body.positionId) && item.mode === "BINGX_LIVE" && item.state === "OPEN");
+        if (!position) return Response.json({ ok: false, error: "LIVE_POSITION_NOT_FOUND" }, { status: 404, headers });
+        const client = new BingXLiveClient({ apiKey: env.BINGX_LIVE_API_KEY, apiSecret: env.BINGX_LIVE_API_SECRET });
+        const adapter = new BingXLiveExecutionAdapter({ env, client, store });
+        let result;
+        if (url.pathname === "/api/live/close") result = await adapter.close(position);
+        else if (url.pathname === "/api/live/protection") result = await adapter.updateProtection(position, { stopLoss: body.stopLoss, takeProfit: body.takeProfit });
+        else result = await adapter.partialClose(position, Number(body.fraction));
+        return Response.json({ ok: true, mode: "BINGX_LIVE", result }, { headers: { ...headers, "cache-control": "no-store" } });
+      } catch (error) { return Response.json({ ok: false, error: String(error).slice(0, 260) }, { status: 409, headers }); }
     }
     if (env.BINGX_TRADING_MODE === "demo" && request.method === "POST" && (url.pathname === "/api/paper/close" || url.pathname === "/api/paper/close-all")) {
       if (!isBingXDemoConfigured(env)) return Response.json({ ok: false, mode: "bingx-demo", error: "BingX VST demo account is not configured." }, { status: 503, headers });
