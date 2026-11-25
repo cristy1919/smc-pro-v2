@@ -1,4 +1,4 @@
-import { getLiveReadiness } from "./live-execution.js";
+import { getLiveManagementReadiness } from "./live-execution.js";
 
 const positive = value => Number.isFinite(Number(value)) && Number(value) > 0;
 
@@ -27,7 +27,7 @@ export function findConfirmedTrailingStop(candles, side, currentStop, markPrice,
 }
 
 export async function manageLivePositions({ env, client, store, adapter, clock = () => Date.now() } = {}) {
-  const readiness = getLiveReadiness(env);
+  const readiness = getLiveManagementReadiness(env);
   if (!readiness.ready) return { ok: false, skipped: true, reason: "LIVE_READINESS_BLOCKED", blockers: readiness.blockers };
   if (!client || !store || !adapter) return { ok: false, skipped: true, reason: "LIVE_MANAGEMENT_DEPENDENCIES_MISSING" };
 
