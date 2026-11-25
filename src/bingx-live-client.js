@@ -87,7 +87,7 @@ export class BingXLiveClient {
   async getOrder(symbol, { orderId, clientOrderId } = {}) {
     if (!LIVE_SYMBOL.test(symbol ?? "") || (orderId == null && !clientOrderId))
       throw new Error("LIVE_ORDER_LOOKUP_ARGUMENTS_INVALID");
-    const identifier = orderId != null ? { orderId: String(orderId) } : { clientOrderId: String(clientOrderId) };
+    const identifier = clientOrderId ? { clientOrderId: String(clientOrderId) } : { orderId: String(orderId) };
     const row = await this.privateRequest("GET", "/openApi/swap/v2/trade/order", { symbol, ...identifier });
     return unwrap(row);
   }
