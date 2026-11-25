@@ -95,6 +95,25 @@ export class BingXLiveClient {
     return row.dualSidePosition === true || row.dualSidePosition === "true";
   }
 
+  async getCandles(symbol, interval, limit = 120) {
+    if (!LIVE_SYMBOL.test(symbol ?? "") || !["15m", "1h", "4h"].includes(interval))
+      throw new Error("LIVE_TRAILING_CANDLE_REQUEST_INVALID");
+    const data = await this.publicRequest("/openApi/swap/v3/quote/klines", { symbol, interval, limit });
+    const rows = Array.isArray(data) ? data : data?.list ?? data?.klines ?? [];
+    const candles = rows.map(row => {
+      const values = Array.isArray(row) ? row : null;
+      const time = Number(values ? values[0] : row.time ?? row.openTime ?? row.timestamp);
+      const open = Number(values ? values[1] : row.open);
+      const high = Number(values ? values[2] : row.high);
+      const low = Number(values ? values[3] : row.low);
+      const close = Number(values ? values[4] : row.close);
+      if (![time, open, high, low, close].every(Number.isFinite) || time <= 0 || high < low) return null;
+      return { time, open, high, low, close };
+    }).filter(Boolean).sort((a,b)=>a.time-b.time);
+    const intervalMs = ({ "15m":900000, "1h":3600000, "4h":14400000 })[interval];
+    return candles.filter(candle => candle.time + intervalMs <= this.now() - 1000).slice(-limit);
+  }
+
   async getMarkPrice(symbol) {
     if (!LIVE_SYMBOL.test(symbol ?? "")) throw new Error("LIVE_INVALID_SYMBOL");
     const row = unwrap(await this.publicRequest("/openApi/swap/v2/quote/premiumIndex", { symbol }));
