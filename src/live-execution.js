@@ -175,7 +175,12 @@ export class BingXLiveExecutionAdapter {
       if (account?.asset !== "USDT" || account?.source !== "BINGX_LIVE" ||
           !finitePositive(account?.equity) || !finitePositive(account?.availableMargin))
         throw new Error("VERIFIED_LIVE_USDT_EQUITY_REQUIRED");
-      const decision = validateLiveCandidate(candidate, {
+      const normalizedCandidate = {
+        ...candidate,
+        stopLoss: this.client.roundPrice(candidate.stopLoss, contract),
+        takeProfit: this.client.roundPrice(candidate.takeProfit, contract)
+      };
+      const decision = validateLiveCandidate(normalizedCandidate, {
         equity: account.equity, availableMargin: account.availableMargin, openPositions: positions,
         contract, markPrice, riskMultiple, explicitConfirmation: true, idempotencyKey
       });
@@ -191,12 +196,12 @@ export class BingXLiveExecutionAdapter {
       await this.client.setLeverage(symbol, leverageSide, decision.leverage);
       const verifiedLeverage = await this.client.getLeverage(symbol, leverageSide);
       if (Number(verifiedLeverage) !== decision.leverage) throw new Error("LIVE_LEVERAGE_VERIFICATION_FAILED");
-      const quantity = this.client.roundQuantity(decision.riskBudget, markPrice, candidate.stopLoss, contract, decision.leverage, account.availableMargin);
+      const quantity = this.client.roundQuantity(decision.riskBudget, markPrice, normalizedCandidate.stopLoss, contract, decision.leverage, account.availableMargin);
       if (!finitePositive(quantity) || quantity < Number(contract.minQty) || (Number(contract.minNotional) > 0 && quantity * Number(markPrice) < Number(contract.minNotional)) ||
           Math.abs(quantity / Number(contract.qtyStep) - Math.round(quantity / Number(contract.qtyStep))) > 1e-8)
         throw new Error("LIVE_ORDER_QUANTITY_INVALID");
       const bracket = {
-        stopLoss: Number(candidate.stopLoss), takeProfit: Number(candidate.takeProfit),
+        stopLoss: Number(normalizedCandidate.stopLoss), takeProfit: Number(normalizedCandidate.takeProfit),
         workingType: "MARK_PRICE", quantity
       };
       accepted = true; // From this point, a network timeout may still mean BingX accepted the order; never release the idempotency claim.
@@ -208,11 +213,11 @@ export class BingXLiveExecutionAdapter {
       const actualEntry = Number(synced?.position?.entryPrice ?? markPrice);
       const actualQuantity = Math.abs(Number(synced?.position?.positionAmt ?? quantity));
       const actualStopValid = decision.side === "LONG"
-        ? Number(candidate.stopLoss) < actualEntry && Number(candidate.takeProfit) > actualEntry
-        : Number(candidate.takeProfit) < actualEntry && Number(candidate.stopLoss) > actualEntry;
-      const actualRisk = actualQuantity * (Math.abs(actualEntry - Number(candidate.stopLoss)) +
-        actualEntry * 0.0007 + Number(candidate.stopLoss) * 0.0007);
-      const actualRewardRisk = Math.abs(Number(candidate.takeProfit) - actualEntry) /
+        ? Number(normalizedCandidate.stopLoss) < actualEntry && Number(normalizedCandidate.takeProfit) > actualEntry
+        : Number(normalizedCandidate.takeProfit) < actualEntry && Number(normalizedCandidate.stopLoss) > actualEntry;
+      const actualRisk = actualQuantity * (Math.abs(actualEntry - Number(normalizedCandidate.stopLoss)) +
+        actualEntry * 0.0007 + Number(normalizedCandidate.stopLoss) * 0.0007);
+      const actualRewardRisk = Math.abs(Number(normalizedCandidate.takeProfit) - actualEntry) /
         Math.max(1e-12, Math.abs(actualEntry - Number(candidate.stopLoss)));
       if (!synced?.position || synced.protection?.stopLoss !== true || synced.protection?.takeProfit !== true ||
           !finitePositive(actualEntry) || !finitePositive(actualQuantity) || !actualStopValid ||
@@ -223,7 +228,7 @@ export class BingXLiveExecutionAdapter {
           quantity: finitePositive(actualQuantity) ? actualQuantity : quantity,
           qty: finitePositive(actualQuantity) ? actualQuantity : quantity,
           entry: finitePositive(actualEntry) ? actualEntry : markPrice,
-          stopLoss: Number(candidate.stopLoss), takeProfit: Number(candidate.takeProfit),
+          stopLoss: Number(normalizedCandidate.stopLoss), takeProfit: Number(normalizedCandidate.takeProfit),
           tp1: Number(candidate.tp1 ?? candidate.takeProfit), tp2: Number(candidate.tp2 ?? candidate.takeProfit),
           leverage: decision.leverage, marginMode: "ISOLATED", riskMultiple,
           marginUsdt: (finitePositive(actualQuantity) ? actualQuantity : quantity) * (finitePositive(actualEntry) ? actualEntry : markPrice) / decision.leverage,
@@ -265,17 +270,21 @@ export class BingXLiveExecutionAdapter {
       throw new Error("INVALID_LIVE_POSITION");
     if (!finitePositive(stopLoss) || !finitePositive(takeProfit) || !finitePositive(position.entry))
       throw new Error("INVALID_LIVE_PROTECTION_LEVELS");
-    const markPrice = await this.client.getMarkPrice(position.symbol);
-    if (position.side === "LONG" ? !(stopLoss < markPrice && takeProfit > markPrice && stopLoss < takeProfit) :
-      !(takeProfit < markPrice && stopLoss > markPrice && stopLoss > takeProfit))
+    const [markPrice, contract] = await Promise.all([
+      this.client.getMarkPrice(position.symbol), this.client.getContractRules(position.symbol)
+    ]);
+    const roundedStop = this.client.roundPrice(stopLoss, contract);
+    const roundedTarget = this.client.roundPrice(takeProfit, contract);
+    if (position.side === "LONG" ? !(roundedStop < markPrice && roundedTarget > markPrice && roundedStop < roundedTarget) :
+      !(roundedTarget < markPrice && roundedStop > markPrice && roundedStop > roundedTarget))
       throw new Error("LIVE_PROTECTION_DIRECTION_INVALID");
     await this.client.setPositionProtection(position, {
-      stopLoss: Number(stopLoss), takeProfit: Number(takeProfit), workingType: "MARK_PRICE"
+      stopLoss: roundedStop, takeProfit: roundedTarget, workingType: "MARK_PRICE"
     });
     const check = await this.client.reconcilePosition(position.symbol, position.side);
     if (!check?.position || check.protection?.stopLoss !== true || check.protection?.takeProfit !== true)
       throw new Error("LIVE_PROTECTION_UPDATE_NOT_CONFIRMED");
-    const updated = { ...position, stopLoss: Number(stopLoss), takeProfit: Number(takeProfit), protectionVerifiedAt: this.clock() };
+    const updated = { ...position, stopLoss: roundedStop, takeProfit: roundedTarget, protectionVerifiedAt: this.clock() };
     await this.store.saveLivePosition(updated);
     return { ok: true, position: updated };
   }
