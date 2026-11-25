@@ -131,3 +131,46 @@ test("durable live store uses dedicated DO routes and rejects invalid idempotenc
   assert.ok(calls.some(c => c.url.endsWith("/live/idempotency/claim")));
   assert.ok(calls.some(c => c.url.endsWith("/live/positions")));
 });
+
+import { manageLivePositions } from "../src/live-position-manager.js";
+
+test("live position manager closes 50% at TP1 and moves stop to breakeven only once", async () => {
+  let position = { id:"live-p1", mode:"BINGX_LIVE", state:"OPEN", symbol:"BTC-USDT", side:"LONG",
+    entry:100, stopLoss:95, tp1:110, takeProfit:120, quantity:2, stage:0 };
+  let partialCalls=0, protectionCalls=0;
+  const store = {
+    listLivePositions: async () => [position],
+    saveLivePosition: async next => { position = { ...position, ...next }; },
+    markLivePositionClosed: async () => { position = { ...position, state:"CLOSED" }; }
+  };
+  const client = {
+    getOpenPositions: async () => [{symbol:"BTC-USDT",side:"LONG",positionAmt:"2",isolated:true}],
+    getMarkPrice: async () => 111,
+    reconcilePosition: async () => ({position:{positionAmt:"2"},protection:{stopLoss:true,takeProfit:true}})
+  };
+  const adapter = {
+    partialClose: async () => { partialCalls++; return {remainingQuantity:1}; },
+    updateProtection: async (_p, levels) => {
+      protectionCalls++;
+      assert.equal(levels.stopLoss,100);
+      position = {...position, stopLoss:levels.stopLoss, takeProfit:levels.takeProfit};
+      return {ok:true};
+    }
+  };
+  const env={LIVE_TRADING_ENABLED:"true",BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",
+    BINGX_API_KEY:"demo",BINGX_API_SECRET:"demo-secret",LIVE_CONTROL_TOKEN:"control"};
+  const first=await manageLivePositions({env,client,store,adapter,clock:()=>1000});
+  assert.equal(first.results[0].action,"TP1_HALF_CLOSED_STOP_TO_BREAKEVEN");
+  assert.equal(position.quantity,1);
+  assert.equal(position.stage,1);
+  assert.equal(position.stopLoss,100);
+  await manageLivePositions({env,client,store,adapter,clock:()=>2000});
+  assert.equal(partialCalls,1);
+  assert.equal(protectionCalls,1);
+});
+
+test("live manager refuses to manage when live trading flag is off", async () => {
+  const result=await manageLivePositions({env:{LIVE_TRADING_ENABLED:"false"}});
+  assert.equal(result.skipped,true);
+  assert.equal(result.reason,"LIVE_TRADING_DISABLED");
+});
