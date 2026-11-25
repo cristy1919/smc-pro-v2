@@ -35,7 +35,7 @@ export function validateLiveCandidate(candidate, {
   if (candidate?.status !== "QUALIFIED" || candidate?.entryEligible !== true) reasons.push("CANDIDATE_NOT_ENTRY_READY");
   if (candidate?.entryConfirmation?.status !== "CONFIRMED") reasons.push("ENTRY_CONFIRMATION_REQUIRED");
   if (!SYMBOL_RE.test(candidate?.symbol ?? "")) reasons.push("INVALID_SYMBOL");
-  if (!["LONG", "SHORT"].includes(candidate?.direction)) reasons.push("INVALID_DIRECTION");
+  if (!["LONG", "SHORT", "BULLISH", "BEARISH"].includes(candidate?.direction)) reasons.push("INVALID_DIRECTION");
   if (!explicitConfirmation) reasons.push("EXPLICIT_LIVE_CONFIRMATION_REQUIRED");
   if (typeof idempotencyKey !== "string" || idempotencyKey.length < 12 || idempotencyKey.length > 40) reasons.push("IDEMPOTENCY_KEY_REQUIRED");
   if (!finitePositive(equity) || !finitePositive(availableMargin)) reasons.push("LIVE_ACCOUNT_BALANCE_UNAVAILABLE");
@@ -43,13 +43,13 @@ export function validateLiveCandidate(candidate, {
   else if (openPositions.length >= RISK_CONFIG.maxOpenPositions) reasons.push("MAX_OPEN_POSITIONS");
   if (Array.isArray(openPositions) && openPositions.some(p =>
     p.symbol === candidate?.symbol && p.engine === candidate?.engine &&
-    p.side === (candidate?.direction === "BULLISH" ? "LONG" : "SHORT") && p.state === "OPEN"
+    p.side === (candidate?.direction === "BULLISH" || candidate?.direction === "LONG" ? "LONG" : "SHORT") && p.state === "OPEN"
   )) reasons.push("DUPLICATE_ENGINE_SYMBOL_SIDE");
   if (!finitePositive(markPrice)) reasons.push("LIVE_MARK_PRICE_UNAVAILABLE");
   if (!contract || !finitePositive(contract.minQty) || !finitePositive(contract.qtyStep) ||
       !finitePositive(contract.tickSize) || !finitePositive(contract.minNotional)) reasons.push("CONTRACT_RULES_UNAVAILABLE");
   if (![1, 0.5].includes(riskMultiple)) reasons.push("INVALID_RISK_MULTIPLE");
-  const side = candidate?.direction === "BULLISH" ? "LONG" : "SHORT";
+  const side = candidate?.direction === "BULLISH" || candidate?.direction === "LONG" ? "LONG" : "SHORT";
   const entry = Number(markPrice), stop = Number(candidate?.stopLoss), target = Number(candidate?.takeProfit);
   if (!finitePositive(stop) || !finitePositive(target) ||
       (side === "LONG" ? !(stop < entry && target > entry) : !(target < entry && stop > entry))) reasons.push("INVALID_TRADE_LEVELS");
