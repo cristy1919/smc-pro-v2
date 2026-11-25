@@ -206,8 +206,9 @@ export class BingXLiveExecutionAdapter {
       const position = {
         id: String(synced.position.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
         candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
-        quantity: actualQuantity, entry: actualEntry, initialRiskUsdt: actualRisk,
-        stopLoss: bracket.stopLoss, takeProfit: bracket.takeProfit, tp1: Number(candidate.tp1 ?? candidate.takeProfit), tp2: Number(candidate.tp2 ?? candidate.takeProfit), stage: 0, leverage: decision.leverage,
+        quantity: actualQuantity, qty: actualQuantity, entry: actualEntry, initialRiskUsdt: actualRisk,
+        marginUsdt: actualQuantity * actualEntry / decision.leverage, status: "OPEN",
+        stopLoss: bracket.stopLoss, takeProfit: bracket.takeProfit, tp1: Number(candidate.tp1 ?? candidate.takeProfit), tp2: Number(candidate.tp2 ?? candidate.takeProfit), tp3: Number(candidate.tp3 ?? candidate.takeProfit), stage: 0, leverage: decision.leverage, setupTimeframe: candidate.setupTimeframe, entryTimeframe: candidate.entryTimeframe,
         marginMode: "ISOLATED", riskMultiple, riskBudget: decision.riskBudget,
         mode: "BINGX_LIVE", state: "OPEN", openedAt: this.clock(),
         entryOrderId: String(order?.orderID ?? order?.orderId ?? idempotencyKey)
