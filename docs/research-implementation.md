@@ -27,6 +27,7 @@ Existing resources were inspected in place. No new repository, Worker, Durable O
 - `DEMO_TRADING_ENABLED=false`, `LIVE_TRADING_ENABLED=false`, and `PAPER_TRADING_ONLY=true`.
 - The configured `PAPER_START_BALANCE_USDT=1000` is an existing internal paper-account setting. It is **not** verified BingX VST equity and must not be represented as the user's VST balance.
 - The persisted internal ledger currently contains two open paper positions, one closed trade, and a balance of approximately 988.81 USDT. These records were not reset or rewritten.
+- To enforce the requested BingX VST-only execution target, the existing Worker entry gate was changed to `NEW_PAPER_ENTRIES_ENABLED=false`. Scanner/strategy generation and existing-position management remain enabled; new internal-paper entries are blocked until the VST demo credentials are configured. Existing positions and history were preserved.
 - Funding snapshots can be available; open interest, aggressor flow, and BTC/USDT/altcoin dominance are explicitly marked unavailable in the current signal audit where no verified feed is present.
 - The Worker has an embedded production bundle and existing API routes. The repository's research modules are not yet built into or deployed by that Worker. Do not assume changes in this repository automatically change the running Worker.
 
