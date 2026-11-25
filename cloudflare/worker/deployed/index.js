@@ -4109,10 +4109,12 @@ var EngineState = class {
         return Response.json({ ok: false, error: "LIVE_ENTRY_RESERVATION_INVALID" }, { status: 400 });
       const now = Date.now();
       const stored = await this.state.storage.get("live-positions-v1") ?? [];
-      const storedOpen = Array.isArray(stored) ? stored.filter(p => p?.mode === "BINGX_LIVE" && p.state === "OPEN").length : 0;
+      const storedRows = Array.isArray(stored) ? stored : [];
+      const storedOpen = storedRows.filter(p => p?.mode === "BINGX_LIVE" && ["PENDING", "OPEN"].includes(p.state)).length;
       const raw = await this.state.storage.get("live-entry-reservations-v1") ?? [];
       const active = (Array.isArray(raw) ? raw : []).filter(item => Number(item.expiresAt) > now && item.key !== key);
-      if (active.some(item => item.symbol === symbol && item.side === side))
+      if (storedRows.some(p => p?.mode === "BINGX_LIVE" && ["PENDING", "OPEN"].includes(p.state) &&
+          p.symbol === symbol && p.side === side) || active.some(item => item.symbol === symbol && item.side === side))
         return Response.json({ ok: true, claimed: false, reason: "DUPLICATE_PENDING_SYMBOL_SIDE" });
       if (Math.max(observed, storedOpen) + active.length >= maxPositions)
         return Response.json({ ok: true, claimed: false, reason: "MAX_OPEN_POSITIONS_OR_RESERVED" });
