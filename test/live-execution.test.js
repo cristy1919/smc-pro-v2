@@ -282,6 +282,8 @@ test("live adapter accepts a durable user activation for automated scanner entri
     getLeverage:async()=>20,
     roundQuantity:()=>0.001,
     placeEntryWithProtection:async()=>({orderID:"entry-001"}),
+    getOrder:async()=>({status:"FILLED",executedQty:"0.001"}),
+    cancelOrder:async()=>({}),
     reconcilePosition:async()=>({position:{positionId:"position-001",positionAmt:0.001,entryPrice:100000},protection:{stopLoss:true,takeProfit:true}})
   };
   const store={
@@ -463,4 +465,75 @@ test("live entry and management prices are rounded to BingX contract tick size",
   assert.equal(client.roundPrice(100.027, contract), 100.05);
   assert.equal(client.roundPrice(99.973, contract), 99.95);
   assert.throws(() => client.roundPrice(100, { tickSize: 0 }), /LIVE_PRICE_TICK_INVALID/);
+});
+
+
+test("BingX order lookup and cancel use a single order identifier", async () => {
+  const requests = [];
+  const client = new BingXLiveClient({
+    apiKey: "live", apiSecret: "secret",
+    fetchImpl: async (url, init) => {
+      requests.push({ url: new URL(url), method: init.method });
+      return new Response(JSON.stringify({ code: 0, data: { status: "FILLED", orderID: "123456789012345678" } }), { status: 200 });
+    }
+  });
+  const order = await client.getOrder("BTC-USDT", { orderId: "123456789012345678", clientOrderId: "smc-client-123456" });
+  await client.cancelOrder("BTC-USDT", { orderId: "123456789012345678", clientOrderId: "smc-client-123456" });
+  assert.equal(order.status, "FILLED");
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.equal(request.url.searchParams.get("orderId"), "123456789012345678");
+    assert.equal(request.url.searchParams.has("clientOrderId"), false);
+  }
+});
+
+test("pending live entry is reconciled to OPEN only after order fill and TP SL confirmation", async () => {
+  let saved = null, released = false;
+  const pending = {
+    id: "live-smc-pending-123456", mode: "BINGX_LIVE", state: "PENDING", status: "PENDING",
+    symbol: "BTC-USDT", side: "LONG", openedAt: 1000,
+    entryClientOrderId: "smc-pending-123456"
+  };
+  const store = {
+    listLivePositions: async () => [pending],
+    saveLivePosition: async p => { saved = p; },
+    markLivePositionClosed: async () => { throw new Error("should not close"); },
+    releaseEntrySlot: async () => { released = true; }
+  };
+  const client = {
+    getOpenPositions: async () => [{ symbol:"BTC-USDT", side:"LONG", positionAmt:"0.01", isolated:true }],
+    getOrder: async () => ({ status:"FILLED", executedQty:"0.01" }),
+    getPosition: async () => ({ symbol:"BTC-USDT", side:"LONG", positionAmt:"0.01", entryPrice:100000, isolated:true }),
+    reconcilePosition: async () => ({ position:{symbol:"BTC-USDT",side:"LONG",positionAmt:"0.01",entryPrice:100000,isolated:true}, protection:{stopLoss:true,takeProfit:true} })
+  };
+  const env={BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",LIVE_CONTROL_TOKEN:"control"};
+  const result=await manageLivePositions({env,client,store,adapter:{},clock:()=>2000});
+  assert.equal(result.results[0].action,"PENDING_ENTRY_RECONCILED_OPEN");
+  assert.equal(saved.state,"OPEN");
+  assert.equal(saved.entry,100000);
+  assert.equal(released,true);
+});
+
+test("stale pending live entry is cancelled and released only after zero-fill confirmation", async () => {
+  let closed = false, released = false, cancelled = false;
+  const pending = {
+    id:"live-smc-pending-654321", mode:"BINGX_LIVE", state:"PENDING", status:"PENDING",
+    symbol:"BTC-USDT", side:"LONG", openedAt:1000, entryClientOrderId:"smc-pending-654321"
+  };
+  const store = {
+    listLivePositions:async()=>[pending],
+    markLivePositionClosed:async()=>{closed=true;},
+    releaseEntrySlot:async()=>{released=true;}
+  };
+  const client = {
+    getOpenPositions:async()=>[],
+    getOrder:async()=>({status:cancelled?"CANCELED":"NEW",executedQty:"0"}),
+    cancelOrder:async()=>{cancelled=true;},
+    getPosition:async()=>null
+  };
+  const env={BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",LIVE_CONTROL_TOKEN:"control"};
+  const result=await manageLivePositions({env,client,store,adapter:{},clock:()=>100000});
+  assert.equal(result.results[0].action,"PENDING_ENTRY_CANCELLED_UNFILLED");
+  assert.equal(closed,true);
+  assert.equal(released,true);
 });
