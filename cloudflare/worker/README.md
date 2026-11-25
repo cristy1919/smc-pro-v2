@@ -41,3 +41,14 @@ The production resources are the existing Cloudflare Workers `smcprov2` and `smc
 4. Verify current VST equity, available margin, isolated margin, 20x–50x leverage, liquidation buffer, TP/SL protection, and exchange position/order reconciliation.
 5. Integrate the tested repository modules into the existing Worker source/build and prove the same state/schema compatibility before deployment.
 6. Run authenticated 30/60/90-day backtests and walk-forward tests. Do not enable live trading.
+
+
+## Live-trading preparation — 2026-11-25
+
+- Added `src/live-execution.js` with a fail-closed live readiness evaluator and a separate live execution adapter interface. It uses the production BingX host constant and distinct secret names: `BINGX_LIVE_API_KEY` and `BINGX_LIVE_API_SECRET`; it never reads demo credentials as live credentials.
+- The adapter requires an explicit, short-lived confirmation bound to `LIVE_CONTROL_TOKEN`, a persistent idempotency store, a verified live USDT account snapshot, a live position snapshot, current mark price, contract filters, isolated margin, verified leverage, and exchange-confirmed TP/SL protection.
+- Risk policy enforced in the adapter: 10 total positions; normal 1R at 20x–50x; reduced 0.5R at 5x–10x; isolated margin only. Scalp and Swing are accepted independently using the existing direction enums.
+- Entry-with-protection, verified TP/SL adjustment, partial reduce-only close, and full close are separate adapter operations. Unknown order outcomes are not blindly retried.
+- The Worker `/api/live/status` now reports separate live-credential readiness and explicit blockers. The dashboard Diagnostics tab displays the returned blockers.
+- **Important integration boundary:** this adapter is not yet wired into the production Worker request router or backed by a concrete BingX live REST client, and `/api/live/execute` remains hard-locked. Therefore the production system is NOT live-ready and cannot submit live orders. This is intentional fail-closed behavior until the exchange client, persistent idempotency implementation, reconciliation and emergency-close paths are integrated and tested end-to-end.
+- No live API credentials were created or configured. `LIVE_TRADING_ENABLED` remains false. Do not deploy a live order route until all end-to-end tests pass.
