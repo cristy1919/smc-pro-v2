@@ -54,10 +54,10 @@ test("position close action validates percentage and forwards user selection", a
 
 test("deployed dashboard bundle and inline browser script parse successfully", () => {
   const source = readFileSync(new URL("../cloudflare/dashboard/deployed/index.js", import.meta.url), "utf8");
-  const literal = source.match(/const DASHBOARD_HTML = ("(?:\\\\.|[^"\\\\])*");\\s*const API_ORIGIN/);
+  const literal = source.match(/const DASHBOARD_HTML = ("(?:\\.|[^"\\])*");\s*const API_ORIGIN/);
   assert.ok(literal, "DASHBOARD_HTML string literal must be present");
   const html = vm.runInNewContext(literal[1]);
-  const script = html.match(/<script>([\\s\\S]*?)<\\/script>/);
+  const script = html.match(/<script>([\s\S]*?)<\/script>/);
   assert.ok(script, "inline dashboard script must be present");
   assert.doesNotThrow(() => new vm.Script(script[1]), "inline dashboard JavaScript must parse");
   for (const metric of ["LONG / SHORT performansı", "Sembol performansı", "Komisyon toplamı", "Funding toplamı", "En uzun kazanç serisi"]) {
