@@ -3637,7 +3637,7 @@ var EngineState = class {
       }));
     }
     const isPaperScan = request.method === "POST" && path === "/paper/scan";
-    const mutatesPaperLedger = request.method === "PUT" && path === "/state" || request.method === "POST" && ["/paper/scan", "/paper/close", "/paper/close-all", "/paper/settings", "/paper/capital-adjustment", "/runner", "/live/idempotency/claim", "/live/idempotency/release", "/live/positions", "/live/activation"].includes(path);
+    const mutatesPaperLedger = request.method === "PUT" && path === "/state" || request.method === "POST" && ["/paper/scan", "/paper/close", "/paper/close-all", "/paper/settings", "/paper/capital-adjustment", "/runner", "/live/idempotency/claim", "/live/idempotency/release", "/live/entry/reserve", "/live/entry/release", "/live/positions", "/live/activation"].includes(path);
     if (isPaperScan && this.scanInProgress) return Response.json({ ok: true, skipped: true, reason: "SCAN_ALREADY_IN_PROGRESS" }, { status: 202, headers: { "cache-control": "no-store" } });
     if (isPaperScan) { this.scanInProgress = true; this.scanStartedAt = Date.now(); }
     try {
@@ -4096,6 +4096,40 @@ var EngineState = class {
         count: candles.length,
         candles
       });
+    }
+    if (request.method === "POST" && url.pathname === "/live/entry/reserve") {
+      const body = await request.json().catch(() => null);
+      const key = String(body?.key ?? ""), symbol = String(body?.symbol ?? "");
+      const side = String(body?.side ?? "").toUpperCase();
+      const maxPositions = Math.min(10, Math.max(1, Number(body?.maxPositions) || 10));
+      const observed = Number(body?.observedOpenPositions);
+      const ttlMs = Math.min(300000, Math.max(30000, Number(body?.ttlMs) || 120000));
+      if (!/^[a-zA-Z0-9_-]{12,40}$/.test(key) || !/^[A-Z0-9]{2,20}-USDT$/.test(symbol) ||
+          !["LONG", "SHORT"].includes(side) || !Number.isInteger(observed) || observed < 0)
+        return Response.json({ ok: false, error: "LIVE_ENTRY_RESERVATION_INVALID" }, { status: 400 });
+      const now = Date.now();
+      const stored = await this.state.storage.get("live-positions-v1") ?? [];
+      const storedOpen = Array.isArray(stored) ? stored.filter(p => p?.mode === "BINGX_LIVE" && p.state === "OPEN").length : 0;
+      const raw = await this.state.storage.get("live-entry-reservations-v1") ?? [];
+      const active = (Array.isArray(raw) ? raw : []).filter(item => Number(item.expiresAt) > now && item.key !== key);
+      if (active.some(item => item.symbol === symbol && item.side === side))
+        return Response.json({ ok: true, claimed: false, reason: "DUPLICATE_PENDING_SYMBOL_SIDE" });
+      if (Math.max(observed, storedOpen) + active.length >= maxPositions)
+        return Response.json({ ok: true, claimed: false, reason: "MAX_OPEN_POSITIONS_OR_RESERVED" });
+      active.push({ key, symbol, side, createdAt: now, expiresAt: now + ttlMs });
+      await this.state.storage.put("live-entry-reservations-v1", active);
+      return Response.json({ ok: true, claimed: true, expiresAt: now + ttlMs });
+    }
+    if (request.method === "POST" && url.pathname === "/live/entry/release") {
+      const body = await request.json().catch(() => null);
+      const key = String(body?.key ?? "");
+      if (!/^[a-zA-Z0-9_-]{12,40}$/.test(key))
+        return Response.json({ ok: false, error: "LIVE_ENTRY_RESERVATION_KEY_INVALID" }, { status: 400 });
+      const raw = await this.state.storage.get("live-entry-reservations-v1") ?? [];
+      const active = Array.isArray(raw) ? raw : [];
+      const next = active.filter(item => item.key !== key);
+      await this.state.storage.put("live-entry-reservations-v1", next);
+      return Response.json({ ok: true, released: next.length !== active.length });
     }
     if (request.method === "POST" && url.pathname === "/live/idempotency/claim") {
       const body = await request.json().catch(() => null);
