@@ -257,3 +257,39 @@ test("live runner requires durable explicit activation and stays disabled by def
   });
   assert.equal(waiting.reason,"LIVE_USER_ACTIVATION_REQUIRED");
 });
+
+test("live adapter accepts a durable user activation for automated scanner entries", async () => {
+  let saved=null;
+  const env={LIVE_TRADING_ENABLED:"true",BINGX_API_KEY:"demo",BINGX_API_SECRET:"demo-secret",
+    BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",LIVE_CONTROL_TOKEN:"control"};
+  const client={
+    getPositionMode:async()=>true,
+    getAccountSnapshot:async()=>({source:"BINGX_LIVE",asset:"USDT",equity:10000,availableMargin:5000}),
+    getOpenPositions:async()=>[],
+    getOpenOrders:async()=>[],
+    getMarkPrice:async()=>100000,
+    getContractRules:async()=>({minQty:0.001,qtyStep:0.001,tickSize:0.1,minNotional:5,maxLeverage:50,maxLongLeverage:50,maxShortLeverage:50}),
+    getMarginMode:async()=>"ISOLATED",
+    setMarginMode:async()=>{},
+    setLeverage:async()=>{},
+    getLeverage:async()=>20,
+    roundQuantity:()=>0.001,
+    placeEntryWithProtection:async()=>({orderID:"entry-001"}),
+    reconcilePosition:async()=>({position:{positionId:"position-001",positionAmt:0.001,entryPrice:100000},protection:{stopLoss:true,takeProfit:true}})
+  };
+  const store={
+    getActivation:async()=>({active:true,id:"activation-123456",confirmedByUser:true}),
+    claimIdempotencyKey:async()=>true,
+    releaseIdempotencyKey:async()=>{},
+    saveLivePosition:async p=>{saved=p;}
+  };
+  const adapter=new BingXLiveExecutionAdapter({env,client,store,clock:()=>1700000000000});
+  const result=await adapter.submit(baseCandidate(),{
+    idempotencyKey:"scalp-btc-20261125",
+    confirmation:{confirmedByUser:true,token:"control",activationId:"activation-123456"}
+  });
+  assert.equal(result.ok,true);
+  assert.equal(saved.mode,"BINGX_LIVE");
+  assert.equal(saved.marginMode,"ISOLATED");
+  assert.equal(saved.engine,"scalp");
+});
