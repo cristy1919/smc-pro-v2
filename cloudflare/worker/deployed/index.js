@@ -4124,10 +4124,12 @@ var EngineState = class {
     if (request.method === "POST" && url.pathname === "/live/activation") {
       const body = await request.json().catch(() => null);
       if (typeof body?.active !== "boolean" || typeof body?.id !== "string" || body.id.length < 12 ||
-          body.confirmedByUser !== true || !Number.isFinite(Number(body.confirmedAt)))
+          (body.active === true && body.confirmedByUser !== true) ||
+          (body.active === false && body.confirmedByUser !== true && body.systemInvalidation !== true) ||
+          !Number.isFinite(Number(body.confirmedAt)))
         return Response.json({ ok: false, error: "LIVE_ACTIVATION_RECORD_INVALID" }, { status: 400 });
       const activation = {
-        active: body.active, id: body.id, confirmedByUser: true,
+        active: body.active, id: body.id, confirmedByUser: body.confirmedByUser === true,
         activatedAt: Number(body.confirmedAt), updatedAt: Date.now()
       };
       await this.state.storage.put("live-activation-v1", activation);
@@ -7244,6 +7246,16 @@ class EngineStateV2 extends EngineState {
 }
 var index_default = {
   async scheduled(controller, env, _ctx) {
+    if (env.LIVE_TRADING_ENABLED !== "true" && env.ENGINE_STATE_V2) {
+      try {
+        const activationStub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
+        const activationStore = new DurableObjectLiveStore({ stub: activationStub });
+        const activation = await activationStore.getActivation();
+        if (activation.active === true) await activationStore.invalidateActivation();
+      } catch (error) {
+        console.error("Live activation invalidation failed while new entries are disabled", String(error).slice(0, 180));
+      }
+    }
     if (env.BINGX_LIVE_API_KEY && env.BINGX_LIVE_API_SECRET) {
       try {
         const liveStub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
