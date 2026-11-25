@@ -175,3 +175,33 @@ test("live position manager continues managing existing positions when new live 
   assert.equal(result.ok,true);
   assert.equal(result.managed,0);
 });
+
+import { findConfirmedTrailingStop } from "../src/live-position-manager.js";
+
+test("structural live trailing uses only pivots confirmed after entry", () => {
+  const candles = [
+    {time:100,open:11,high:11.4,low:11.0,close:11.2},
+    {time:200,open:11.2,high:11.3,low:10.8,close:11.0},
+    {time:300,open:11,high:11.2,low:10.5,close:10.9},
+    {time:400,open:10.9,high:11.4,low:10.9,close:11.3},
+    {time:500,open:11.3,high:11.5,low:11.1,close:11.4}
+  ];
+  const trail = findConfirmedTrailingStop(candles,"LONG",10,12,0.1,450);
+  assert.equal(trail.stopPrice,10.4);
+  assert.equal(trail.confirmedAt,500);
+  const notYetConfirmed = findConfirmedTrailingStop(candles,"LONG",10,12,0.1,500);
+  assert.equal(notYetConfirmed,null);
+});
+
+test("structural live trailing tightens short stops without moving them away from price", () => {
+  const candles = [
+    {time:100,open:8.8,high:9.1,low:8.5,close:8.7},
+    {time:200,open:8.7,high:9.3,low:8.6,close:8.9},
+    {time:300,open:8.9,high:9.5,low:8.8,close:9.0},
+    {time:400,open:9,high:9.2,low:8.7,close:8.9},
+    {time:500,open:8.9,high:9.0,low:8.6,close:8.8}
+  ];
+  const trail = findConfirmedTrailingStop(candles,"SHORT",10,8.5,0.1,450);
+  assert.equal(trail.stopPrice,9.6);
+  assert.equal(trail.confirmedAt,500);
+});
