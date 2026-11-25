@@ -54,9 +54,11 @@ test("position close action validates percentage and forwards user selection", a
 
 test("deployed dashboard bundle and inline browser script parse successfully", () => {
   const source = readFileSync(new URL("../cloudflare/dashboard/deployed/index.js", import.meta.url), "utf8");
-  const literal = source.match(/const DASHBOARD_HTML = ("(?:\\.|[^"\\])*");/);
-  assert.ok(literal, "DASHBOARD_HTML string literal must be present");
-  const html = vm.runInNewContext(literal[1]);
+  const start = source.indexOf("const DASHBOARD_HTML = ");
+  const end = source.indexOf(";\nconst API_ORIGIN", start);
+  assert.ok(start >= 0 && end > start, "DASHBOARD_HTML declaration boundaries must be present");
+  const literal = source.slice(start + "const DASHBOARD_HTML = ".length, end);
+  const html = vm.runInNewContext(literal);
   const script = html.match(/<script>([\s\S]*?)<\/script>/);
   assert.ok(script, "inline dashboard script must be present");
   assert.doesNotThrow(() => new vm.Script(script[1]), "inline dashboard JavaScript must parse");
