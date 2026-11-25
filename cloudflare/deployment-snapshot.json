@@ -1,0 +1,38 @@
+{
+  "updatedAt": "2026-11-25T12:32:00Z",
+  "repository": "cristy1919/smc-pro-v2",
+  "production": {
+    "worker": {
+      "name": "smcprov2",
+      "versionId": "65b86fa0-f51a-449d-b9fe-b1d3c297b3af",
+      "snapshot": "cloudflare/worker/deployed/index.js",
+      "runnerEnabled": true,
+      "internalPaperEntriesEnabled": true,
+      "bingxVstEnabled": false,
+      "liveTradingEnabled": false
+    },
+    "dashboard": {
+      "name": "smcprov2-dashboard",
+      "versionId": "9457036e-3763-4c49-845b-da9e9d142caa",
+      "snapshot": "cloudflare/dashboard/deployed/index.js",
+      "tabs": [
+        "Market Overview",
+        "Açık İşlemler",
+        "Scalp Scanner",
+        "Swing Scanner",
+        "Positions",
+        "Statistics",
+        "Candidates (İşlem Adayları)",
+        "Trade History",
+        "Diagnostics",
+        "Grafik"
+      ]
+    }
+  },
+  "safety": {
+    "tradingMode": "internal-paper",
+    "demoTradingEnabled": false,
+    "liveTradingEnabled": false,
+    "bingxCredentialsRequired": false
+  }
+}
