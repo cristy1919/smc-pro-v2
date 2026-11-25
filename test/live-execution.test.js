@@ -445,3 +445,12 @@ test("live market entry serializes attached stop-loss and take-profit as numeric
   assert.equal(body.get("positionSide"), "LONG");
   assert.equal(body.get("clientOrderId"), "smc-live-order-001");
 });
+
+
+test("live entry and management prices are rounded to BingX contract tick size", () => {
+  const client = new BingXLiveClient({ apiKey: "live", apiSecret: "secret", fetchImpl: async () => { throw new Error("network should not be used"); } });
+  const contract = { tickSize: 0.05, pricePrecision: 2 };
+  assert.equal(client.roundPrice(100.027, contract), 100.05);
+  assert.equal(client.roundPrice(99.973, contract), 99.95);
+  assert.throws(() => client.roundPrice(100, { tickSize: 0 }), /LIVE_PRICE_TICK_INVALID/);
+});
