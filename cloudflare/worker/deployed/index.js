@@ -1,4 +1,4 @@
-import { getLiveReadiness, BingXLiveExecutionAdapter } from "./src/live-execution.js";
+import { getLiveReadiness, getLiveManagementReadiness, BingXLiveExecutionAdapter } from "./src/live-execution.js";
 import { BingXLiveClient } from "./src/bingx-live-client.js";
 import { DurableObjectLiveStore } from "./src/live-state-store.js";
 import { manageLivePositions } from "./src/live-position-manager.js";
@@ -7746,7 +7746,7 @@ var index_default = {
       } catch (error) { return Response.json({ ok: false, error: String(error).slice(0, 200) }, { status: 503, headers }); }
     }
     if (["/api/live/close", "/api/live/protection", "/api/live/partial-close"].includes(url.pathname) && request.method === "POST") {
-      if (!getLiveReadiness(env).ready) return Response.json({ ok: false, error: "LIVE_READINESS_BLOCKED", blockers: getLiveReadiness(env).blockers }, { status: 503, headers });
+      if (!getLiveManagementReadiness(env).ready) return Response.json({ ok: false, error: "LIVE_MANAGEMENT_READINESS_BLOCKED", blockers: getLiveManagementReadiness(env).blockers }, { status: 503, headers });
       if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, error: "LIVE_CONTROL_AUTHORIZATION_REQUIRED" }, { status: 401, headers });
       let body;
       try { body = await request.json(); } catch { return Response.json({ ok: false, error: "INVALID_JSON_BODY" }, { status: 400, headers }); }
