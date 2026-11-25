@@ -4372,18 +4372,23 @@ var EngineState = class {
       const closedSymbols = [];
       const closedPositionIds = [];
       const failures = [];
+      const requestedMarks = new Map((Array.isArray(closeAllBody.requestedMarks) ? closeAllBody.requestedMarks : []).map((item) => [String(item.positionId), item]));
       const exitQuotes = await Promise.all(targets.map(async (position) => {
-        try {
-          return { position, liveExitPrice: await getBingXMarkPrice(position.symbol, 1200) };
-        } catch {
-          return { position, liveExitPrice: null };
+        const supplied = requestedMarks.get(String(position.id));
+        const suppliedAt = Date.parse(supplied?.markAt ?? "");
+        const suppliedPrice = Number(supplied?.markPrice);
+        const age = Date.now() - suppliedAt;
+        if (supplied?.symbol === position.symbol && Number.isFinite(suppliedPrice) && suppliedPrice > 0 && Number.isFinite(suppliedAt) && age >= 0 && age <= 15e3) {
+          return { position, liveExitPrice: suppliedPrice, priceSource: "DASHBOARD_MARK_SNAPSHOT" };
         }
+        const freshPrice = await getBingXMarkPrice(position.symbol, 800);
+        return { position, liveExitPrice: freshPrice, priceSource: freshPrice !== null ? "BINGX_MARK_PRICE" : "UNAVAILABLE" };
       }));
       for (const quote of exitQuotes) {
         const { position, liveExitPrice } = quote;
         try {
           const exitPrice = liveExitPrice ?? Number.NaN;
-          const priceSource = liveExitPrice !== null ? "BINGX_MARK_PRICE" : "UNAVAILABLE";
+          const priceSource = quote.priceSource ?? (liveExitPrice !== null ? "BINGX_MARK_PRICE" : "UNAVAILABLE");
           if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
             failures.push({ symbol: position.symbol, error: "No verified mark price is available; position left open" });
             continue;
@@ -4450,10 +4455,16 @@ var EngineState = class {
         console.warn("Paper close API rejected position", JSON.stringify({ requestId, positionId, reason: "OPEN_POSITION_NOT_FOUND", openPositionIds: ledger.positions.filter((p) => p.status === "OPEN").map((p) => p.id).slice(0, 30) }));
         return Response.json({ ok: false, code: "OPEN_POSITION_NOT_FOUND", error: "Open paper position not found.", requestId }, { status: 404, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
       }
-      const liveExitPrice = await getBingXMarkPrice(position.symbol, 1200);
+      const requestedAt = Date.parse(body.requestedMarkAt ?? "");
+      const requestedPrice = Number(body.requestedExitPrice);
+      const requestedAge = Date.now() - requestedAt;
+      const requestedFresh = Number.isFinite(requestedPrice) && requestedPrice > 0 && Number.isFinite(requestedAt) && requestedAge >= 0 && requestedAge <= 15e3;
+      const liveExitPrice = requestedFresh ? requestedPrice : await getBingXMarkPrice(position.symbol, 800);
       const storedMark = Number(position.markPrice);
-      const exitPrice = liveExitPrice ?? (Number.isFinite(storedMark) && storedMark > 0 ? storedMark : Number.NaN);
-      const priceSource = liveExitPrice !== null ? "BINGX_MARK_PRICE" : Number.isFinite(storedMark) && storedMark > 0 ? "LAST_KNOWN_MARK_PRICE" : "UNAVAILABLE";
+      const storedAt = Date.parse(position.markPriceAt ?? "");
+      const storedFresh = Number.isFinite(storedAt) && Date.now() - storedAt >= 0 && Date.now() - storedAt <= 15e3;
+      const exitPrice = liveExitPrice ?? (storedFresh && Number.isFinite(storedMark) && storedMark > 0 ? storedMark : Number.NaN);
+      const priceSource = requestedFresh ? "DASHBOARD_MARK_SNAPSHOT" : liveExitPrice !== null ? "BINGX_MARK_PRICE" : storedFresh && Number.isFinite(storedMark) && storedMark > 0 ? "LAST_KNOWN_MARK_PRICE" : "UNAVAILABLE";
       if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
         console.warn("Paper close rejected because no verified mark price is available", JSON.stringify({ requestId, positionId, symbol: position.symbol }));
         return Response.json({ ok: false, code: "MARK_PRICE_UNAVAILABLE", error: "Güvenilir anlık fiyat alınamadı; pozisyon kapatılmadı.", requestId }, { status: 503, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
