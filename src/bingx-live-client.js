@@ -84,6 +84,27 @@ export class BingXLiveClient {
     return Array.isArray(rows) ? rows : rows?.orders ?? [];
   }
 
+  async getOrder(symbol, { orderId, clientOrderId } = {}) {
+    if (!LIVE_SYMBOL.test(symbol ?? "") || (orderId == null && !clientOrderId))
+      throw new Error("LIVE_ORDER_LOOKUP_ARGUMENTS_INVALID");
+    const row = await this.privateRequest("GET", "/openApi/swap/v2/trade/order", {
+      symbol, ...(orderId != null ? { orderId: String(orderId) } : {}),
+      ...(clientOrderId ? { clientOrderId: String(clientOrderId) } : {})
+    });
+    return unwrap(row);
+  }
+
+  async cancelOrder(symbol, { orderId, clientOrderId } = {}) {
+    if (!LIVE_SYMBOL.test(symbol ?? "") || (orderId == null && !clientOrderId))
+      throw new Error("LIVE_ORDER_CANCEL_ARGUMENTS_INVALID");
+    const row = await this.privateRequest("DELETE", "/openApi/swap/v2/trade/order", {
+      symbol, ...(orderId != null ? { orderId: String(orderId) } : {}),
+      ...(clientOrderId ? { clientOrderId: String(clientOrderId) } : {})
+    });
+    return unwrap(row);
+  }
+
+
   normalizePosition(row, hedgeMode) {
     const amount = Number(row?.positionAmt);
     const rawSide = String(row?.positionSide ?? "").toUpperCase();
