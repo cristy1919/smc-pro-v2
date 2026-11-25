@@ -23,13 +23,13 @@ The production resources are the existing Cloudflare Workers `smcprov2` and `smc
 
 - Existing dashboard Worker was updated in place; it exposes exactly ten tabs: Market Overview, Açık İşlemler, Scalp Scanner, Swing Scanner, Positions, Statistics, Candidates (İşlem Adayları), Trade History, Diagnostics, Grafik.
 - Chart navigation opens Grafik. Candidate views retain READY, WATCH, and WAIT states.
-- Diagnostics now explicitly shows that new internal-paper entries are disabled and BingX VST is not connected.
+- Diagnostics distinguishes internal-paper entries from BingX VST connectivity; BingX VST and live execution remain disabled.
 - Dashboard source uploads completed without observed Worker error logs immediately after deployment. Full browser rendering and live API response verification remain unproven because external HTTP requests from the deployment inspection environment are blocked by its network policy.
 
 ## Repository integration boundary
 
 - The repository holds independently testable strategy, market-data, risk, and backtest modules.
-- The production Worker still runs its existing embedded bundle. The repository modules have not yet been integrated into a single reproducible Worker build. A deploy workflow must not overwrite the existing Worker until that integration and state-schema compatibility are tested.
+- The production Worker still runs its existing embedded bundle. The repository now includes a separately tested paper-ledger accounting module (`cloudflare/worker/src/paper-ledger-accounting.js`) and regression tests, but the complete embedded production bundle is not yet reproducibly built from the repository modules. The deployed bundle was updated in place; do not overwrite it from the skeletal source tree until full integration and state-schema compatibility are tested.
 - The read-only 30/60/90-day VST backtest workflow requires GitHub secrets `BINGX_API_KEY` and `BINGX_SECRET_KEY` (the script also accepts `BINGX_API_SECRET`). No authenticated VST backtest has been run; no profitability, expectancy, or drawdown claims are available.
 
 ## Safety gates
