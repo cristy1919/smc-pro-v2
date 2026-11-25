@@ -160,17 +160,28 @@ export class BingXLiveExecutionAdapter {
         leverage: decision.leverage, bracket, clientOrderId: idempotencyKey
       });
       const synced = await this.client.reconcilePosition(symbol, decision.side);
-      if (!synced?.position || synced.protection?.stopLoss !== true || synced.protection?.takeProfit !== true) {
+      const actualEntry = Number(synced?.position?.entryPrice ?? markPrice);
+      const actualQuantity = Math.abs(Number(synced?.position?.positionAmt ?? quantity));
+      const actualStopValid = decision.side === "LONG"
+        ? Number(candidate.stopLoss) < actualEntry && Number(candidate.takeProfit) > actualEntry
+        : Number(candidate.takeProfit) < actualEntry && Number(candidate.stopLoss) > actualEntry;
+      const actualRisk = actualQuantity * (Math.abs(actualEntry - Number(candidate.stopLoss)) +
+        actualEntry * 0.0007 + Number(candidate.stopLoss) * 0.0007);
+      const actualRewardRisk = Math.abs(Number(candidate.takeProfit) - actualEntry) /
+        Math.max(1e-12, Math.abs(actualEntry - Number(candidate.stopLoss)));
+      if (!synced?.position || synced.protection?.stopLoss !== true || synced.protection?.takeProfit !== true ||
+          !finitePositive(actualEntry) || !finitePositive(actualQuantity) || !actualStopValid ||
+          actualRewardRisk < RISK_CONFIG.minRewardRisk || actualRisk > decision.riskBudget * 1.1) {
         await this.client.emergencyClose({ symbol, side: decision.side, position: synced?.position ?? null });
         const afterClose = await this.client.getPosition(symbol, decision.side);
         if (afterClose && Math.abs(Number(afterClose.positionAmt)) > 0)
-          throw new Error("LIVE_UNPROTECTED_POSITION_EMERGENCY_CLOSE_NOT_CONFIRMED");
-        throw new Error("LIVE_PROTECTION_NOT_CONFIRMED_POSITION_CLOSED");
+          throw new Error("LIVE_POST_FILL_GUARD_EMERGENCY_CLOSE_NOT_CONFIRMED");
+        throw new Error("LIVE_POST_FILL_GUARD_REJECTED_POSITION_CLOSED");
       }
       const position = {
         id: String(synced.position.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
         candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
-        quantity: Math.abs(Number(synced.position.positionAmt ?? quantity)), entry: Number(synced.position.entryPrice ?? markPrice),
+        quantity: actualQuantity, entry: actualEntry, initialRiskUsdt: actualRisk,
         stopLoss: bracket.stopLoss, takeProfit: bracket.takeProfit, tp1: Number(candidate.tp1 ?? candidate.takeProfit), tp2: Number(candidate.tp2 ?? candidate.takeProfit), stage: 0, leverage: decision.leverage,
         marginMode: "ISOLATED", riskMultiple, riskBudget: decision.riskBudget,
         mode: "BINGX_LIVE", state: "OPEN", openedAt: this.clock(),
