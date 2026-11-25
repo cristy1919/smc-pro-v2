@@ -1,1 +1,1 @@
-{"name":"smc-pro-v2","version":"0.1.0","private":true,"type":"module","engines":{"node":">=20"},"scripts":{"test":"node --test","check":"node --check src/index.js && node --test"}}
+{"name":"smc-pro-v2","version":"0.1.0","private":true,"type":"module","engines":{"node":">=20"},"scripts":{"test":"node --test","check":"node --check src/index.js && node --check cloudflare/worker/deployed/index.js && node --check cloudflare/dashboard/deployed/index.js && node --test"}}
