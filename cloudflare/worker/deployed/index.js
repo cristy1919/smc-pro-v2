@@ -7645,6 +7645,20 @@ var index_default = {
         return Response.json({ ok: false, error: "FRESH_EXPLICIT_LIVE_ACTIVATION_CONFIRMATION_REQUIRED" }, { status: 400, headers });
       const readiness = getLiveReadiness(env);
       if (!readiness.ready) return Response.json({ ok: false, error: "LIVE_READINESS_BLOCKED", blockers: readiness.blockers }, { status: 503, headers });
+      const liveClient = new BingXLiveClient({ apiKey: env.BINGX_LIVE_API_KEY, apiSecret: env.BINGX_LIVE_API_SECRET });
+      let accountSnapshot, hedgeMode, livePositions, liveOrders;
+      try {
+        [accountSnapshot, hedgeMode, livePositions, liveOrders] = await Promise.all([
+          liveClient.getAccountSnapshot(), liveClient.getPositionMode(), liveClient.getOpenPositions(), liveClient.getOpenOrders()
+        ]);
+      } catch (error) {
+        return Response.json({ ok: false, error: "LIVE_ACTIVATION_ACCOUNT_CHECK_FAILED", detail: String(error).slice(0, 180) }, { status: 503, headers });
+      }
+      if (accountSnapshot?.source !== "BINGX_LIVE" || accountSnapshot.asset !== "USDT" ||
+          hedgeMode !== true || !Array.isArray(livePositions) || livePositions.length > 10 ||
+          livePositions.some(position => position.isolated !== true && String(position.marginType ?? "").toUpperCase() !== "ISOLATED") ||
+          !Array.isArray(liveOrders))
+        return Response.json({ ok: false, error: "LIVE_ACTIVATION_ACCOUNT_GUARDS_FAILED" }, { status: 409, headers });
       const stub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
       const activation = { active: true, id: crypto.randomUUID(), confirmedByUser: true, confirmedAt, activatedAt: Date.now() };
       await new DurableObjectLiveStore({ stub }).setActivation(activation);
