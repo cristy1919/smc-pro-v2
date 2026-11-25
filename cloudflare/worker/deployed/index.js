@@ -4370,6 +4370,7 @@ var EngineState = class {
       }
       const targets = ledger.positions.filter((p) => p.status === "OPEN");
       const closedSymbols = [];
+      const closedPositionIds = [];
       const failures = [];
       const exitQuotes = await Promise.all(targets.map(async (position) => {
         try {
@@ -4404,6 +4405,7 @@ var EngineState = class {
           ledger.dailyPnl = Number((ledger.dailyPnl + gross - exitFee - exitSlippage).toFixed(8));
           ledger.closedTrades.unshift(closed);
           closedSymbols.push(position.symbol);
+          closedPositionIds.push(position.id);
           ledger.positions = ledger.positions.filter((p) => p.id !== position.id);
         } catch {
           failures.push({ symbol: position.symbol, error: "Fresh exit price request failed" });
@@ -4417,7 +4419,7 @@ var EngineState = class {
       engine.closedTrades = ledger.closedTrades;
       await this.saveEngineState(engine);
       console.info("Paper positions close-all", JSON.stringify({ requestId, requested: targets.length, closed: closedSymbols.length, failed: failures.length, remaining: open.length, closedSymbols, failures }));
-      return Response.json({ ok: failures.length === 0, mode: "bingx-demo", requestId, requested: targets.length, closed: closedSymbols.length, closedSymbols, failures, remaining: open.length, balance: ledger.balance }, { headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+      return Response.json({ ok: failures.length === 0, mode: "bingx-demo", requestId, requested: targets.length, closed: closedSymbols.length, closedSymbols, closedPositionIds, failures, remaining: open.length, balance: ledger.balance }, { headers: { "x-request-id": requestId, "cache-control": "no-store" } });
     }
     if (request.method === "POST" && url.pathname === "/paper/close") {
       let body;
