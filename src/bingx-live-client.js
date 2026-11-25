@@ -286,9 +286,13 @@ export class BingXLiveClient {
     return { stop: newSl, takeProfit: newTp };
   }
 
-  async reducePosition({ symbol, side, quantity }) {
+  async reducePosition({ symbol, side, quantity, clientOrderId }) {
     const hedgeMode = await this.getPositionMode();
-    const params = { symbol, side: side === "LONG" ? "SELL" : "BUY", positionSide: hedgeMode ? side : "BOTH", type: "MARKET", quantity };
+    const params = {
+      symbol, side: side === "LONG" ? "SELL" : "BUY",
+      positionSide: hedgeMode ? side : "BOTH", type: "MARKET", quantity,
+      ...(clientOrderId ? { clientOrderId } : {})
+    };
     if (!hedgeMode) params.reduceOnly = "true";
     return this.privateRequest("POST", "/openApi/swap/v2/trade/order", params);
   }
