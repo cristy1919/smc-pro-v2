@@ -216,12 +216,58 @@ export class BingXLiveExecutionAdapter {
         stopLoss: Number(normalizedCandidate.stopLoss), takeProfit: Number(normalizedCandidate.takeProfit),
         workingType: "MARK_PRICE", quantity
       };
-      accepted = true; // From this point, a network timeout may still mean BingX accepted the order; never release the idempotency claim.
+      if (typeof this.client.getOrder !== "function" || typeof this.client.cancelOrder !== "function")
+        throw new Error("LIVE_ORDER_STATUS_AND_CANCEL_REQUIRED");
+      const pendingId = "live-" + idempotencyKey;
+      const pendingRecord = {
+        id: pendingId, candidateId: candidate.id, engine: candidate.engine,
+        tradeStyle: candidate.engine.toUpperCase(), symbol, side: decision.side,
+        quantity, qty: quantity, entry: Number(markPrice),
+        stopLoss: bracket.stopLoss, takeProfit: bracket.takeProfit,
+        tp1: Number(candidate.tp1 ?? candidate.takeProfit),
+        tp2: Number(candidate.tp2 ?? candidate.takeProfit),
+        tp3: Number(candidate.tp3 ?? candidate.takeProfit),
+        leverage: decision.leverage, marginMode: "ISOLATED", riskMultiple,
+        riskBudget: decision.riskBudget, mode: "BINGX_LIVE", state: "PENDING",
+        status: "PENDING", openedAt: this.clock(), entryClientOrderId: idempotencyKey,
+        entryOrderId: null, riskStatus: "ENTRY_SUBMISSION_PENDING"
+      };
+      await this.store.saveLivePosition(pendingRecord);
+      accepted = true; // A write timeout is an unknown outcome; the pending record and slot stay reserved.
       const order = await this.client.placeEntryWithProtection({
         symbol, side: decision.side, quantity, marginMode: "ISOLATED",
         leverage: decision.leverage, bracket, clientOrderId: idempotencyKey
       });
+      const orderId = order?.orderID ?? order?.orderId ?? null;
+      let orderState = await this.client.getOrder(symbol, {
+        ...(orderId != null ? { orderId: String(orderId) } : {}),
+        clientOrderId: idempotencyKey
+      });
+      let orderStatus = String(orderState?.status ?? "").toUpperCase().replaceAll("_", "");
+      if (["NEW", "PENDING", "PARTIALLYFILLED"].includes(orderStatus)) {
+        await this.client.cancelOrder(symbol, {
+          ...(orderId != null ? { orderId: String(orderId) } : {}),
+          clientOrderId: idempotencyKey
+        });
+        orderState = await this.client.getOrder(symbol, {
+          ...(orderId != null ? { orderId: String(orderId) } : {}),
+          clientOrderId: idempotencyKey
+        });
+        orderStatus = String(orderState?.status ?? "").toUpperCase().replaceAll("_", "");
+      }
       const synced = await this.client.reconcilePosition(symbol, decision.side);
+      const executedQuantity = Math.abs(Number(orderState?.executedQty ?? 0));
+      if (!synced?.position && ["CANCELLED", "CANCELED", "FAILED", "EXPIRED"].includes(orderStatus) && executedQuantity === 0) {
+        await this.store.markLivePositionClosed(pendingId, {
+          closedAt: this.clock(), closeReason: "ENTRY_ORDER_CANCELLED_WITHOUT_FILL",
+          entryOrderId: orderId == null ? null : String(orderId)
+        });
+        await this.store.releaseEntrySlot(idempotencyKey);
+        reserved = false;
+        throw new Error("LIVE_ENTRY_ORDER_CANCELLED_WITHOUT_FILL");
+      }
+      if (!synced?.position || !["FILLED", "PARTIALLYFILLED", "CANCELLED", "CANCELED"].includes(orderStatus))
+        throw new Error("LIVE_ENTRY_OUTCOME_UNKNOWN_RECONCILIATION_REQUIRED:" + (orderStatus || "NO_ORDER_STATUS"));
       const actualEntry = Number(synced?.position?.entryPrice ?? markPrice);
       const actualQuantity = Math.abs(Number(synced?.position?.positionAmt ?? quantity));
       const actualStopValid = decision.side === "LONG"
@@ -235,7 +281,7 @@ export class BingXLiveExecutionAdapter {
           !finitePositive(actualEntry) || !finitePositive(actualQuantity) || !actualStopValid ||
           actualRewardRisk < RISK_CONFIG.minRewardRisk || actualRisk > decision.riskBudget * 1.1) {
         const emergencyRecord = {
-          id: String(synced?.position?.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
+          id: pendingId,
           candidateId: candidate.id, engine: candidate.engine, tradeStyle: candidate.engine.toUpperCase(), symbol, side: decision.side,
           quantity: finitePositive(actualQuantity) ? actualQuantity : quantity,
           qty: finitePositive(actualQuantity) ? actualQuantity : quantity,
@@ -248,12 +294,12 @@ export class BingXLiveExecutionAdapter {
           setupTimeframe: candidate.setupTimeframe, entryTimeframe: candidate.entryTimeframe,
           riskBudget: decision.riskBudget, mode: "BINGX_LIVE", state: "OPEN",
           openedAt: this.clock(), riskStatus: "EMERGENCY_CLOSE_REQUIRED",
-          entryOrderId: String(order?.orderID ?? order?.orderId ?? idempotencyKey)
+          entryOrderId: String(orderId ?? idempotencyKey), entryClientOrderId: idempotencyKey
         };
         await this.emergencyCloseAndVerify(emergencyRecord, synced?.position, "LIVE_POST_FILL_GUARD", idempotencyKey);
       }
       const position = {
-        id: String(synced.position.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
+        id: pendingId, positionId: String(synced.position.positionId ?? ""),
         candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
         quantity: actualQuantity, qty: actualQuantity, entry: actualEntry, initialRiskUsdt: actualRisk,
         marginUsdt: actualQuantity * actualEntry / decision.leverage, status: "OPEN",
