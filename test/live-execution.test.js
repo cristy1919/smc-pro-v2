@@ -310,3 +310,18 @@ test("BingX live contract rules use public directional leverage caps and allow a
   assert.equal(rules.maxShortLeverage,40);
   assert.equal(rules.minNotional,0);
 });
+
+test("live activation invalidation is a system-only disable path and never grants activation", async () => {
+  let posted=null;
+  const store=new DurableObjectLiveStore({
+    stub:{fetch:async request=>{
+      posted=await request.json();
+      return new Response(JSON.stringify({ok:true,activation:{active:false}}),{status:200});
+    }},
+    now:()=>1700000000000
+  });
+  await store.invalidateActivation();
+  assert.equal(posted.active,false);
+  assert.equal(posted.systemInvalidation,true);
+  assert.equal(posted.confirmedByUser,false);
+});
