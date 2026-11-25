@@ -7227,7 +7227,7 @@ class EngineStateV2 extends EngineState {
 }
 var index_default = {
   async scheduled(controller, env, _ctx) {
-    if (env.LIVE_TRADING_ENABLED === "true") {
+    if (env.BINGX_LIVE_API_KEY && env.BINGX_LIVE_API_SECRET) {
       try {
         const liveStub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
         const liveStore = new DurableObjectLiveStore({ stub: liveStub });
@@ -7583,7 +7583,7 @@ var index_default = {
         demoCredentialsConfigured: !!env.BINGX_API_KEY && !!env.BINGX_API_SECRET,
         demoModeSelected: env.BINGX_TRADING_MODE === "demo",
         demoTradingEnabled: isBingXDemoConfigured(env),
-        liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true,
+        liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true, livePositionManagementIntegrated: true,
         runtimeChecks,
         maxOpenPositions: 10, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
         normalLeverage: { min: 20, max: 50 }, reducedRiskLeverage: { min: 5, max: 10 },
@@ -7655,7 +7655,7 @@ var index_default = {
       } catch (error) { return Response.json({ ok: false, error: String(error).slice(0, 200) }, { status: 503, headers }); }
     }
     if (["/api/live/close", "/api/live/protection", "/api/live/partial-close"].includes(url.pathname) && request.method === "POST") {
-      if (env.LIVE_TRADING_ENABLED !== "true") return Response.json({ ok: false, error: "LIVE_TRADING_DISABLED" }, { status: 403, headers });
+      if (!getLiveReadiness(env).ready) return Response.json({ ok: false, error: "LIVE_READINESS_BLOCKED", blockers: getLiveReadiness(env).blockers }, { status: 503, headers });
       if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, error: "LIVE_CONTROL_AUTHORIZATION_REQUIRED" }, { status: 401, headers });
       let body;
       try { body = await request.json(); } catch { return Response.json({ ok: false, error: "INVALID_JSON_BODY" }, { status: 400, headers }); }
