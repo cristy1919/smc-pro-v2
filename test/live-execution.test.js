@@ -205,3 +205,55 @@ test("structural live trailing tightens short stops without moving them away fro
   assert.equal(trail.stopPrice,9.6);
   assert.equal(trail.confirmedAt,500);
 });
+
+import { runLiveSetupQueue } from "../src/live-runner.js";
+
+const readyScannerSetup = (overrides={}) => ({
+  model:"S01_SWEEP_MSS_FVG", symbol:"BTC-USDT", side:"LONG", tradeStyle:"SCALP",
+  setupCandleTime:900000, candleTime:900000, status:"READY", entry:100,
+  stopLoss:98, takeProfit:107, tp1:102, tp2:104, score:88, riskMultiplier:0.5,
+  confirmations:["CLOSED_CANDLE_CONFIRMATION"], audit:{zone:{bottom:99,top:101},countertrend:true},
+  ...overrides
+});
+
+test("activated live runner uses current READY scanner setup only when mark is inside its zone", async () => {
+  let submitted=null;
+  const env={LIVE_TRADING_ENABLED:"true",BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",
+    BINGX_API_KEY:"demo",BINGX_API_SECRET:"demo-secret",LIVE_CONTROL_TOKEN:"control"};
+  const store={getActivation:async()=>({active:true,id:"activation-123456",confirmedByUser:true})};
+  const client={getMarkPrice:async()=>100};
+  const adapter={submit:async(candidate,options)=>{submitted={candidate,options};return {ok:true};}};
+  const result=await runLiveSetupQueue({env,setups:[readyScannerSetup()],client,store,adapter,clock:()=>1000000});
+  assert.equal(result.results[0].action,"LIVE_ENTRY_OPENED");
+  assert.equal(submitted.candidate.engine,"scalp");
+  assert.equal(submitted.candidate.riskMultiplier,0.5);
+  assert.equal(submitted.candidate.leverage>=5 && submitted.candidate.leverage<=10,true);
+  assert.equal(submitted.options.confirmation.activationId,"activation-123456");
+  assert.match(submitted.options.idempotencyKey,/^smc-[a-f0-9]{32}$/);
+});
+
+test("activated live runner leaves out-of-zone setups waiting", async () => {
+  let submitted=0;
+  const env={LIVE_TRADING_ENABLED:"true",BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",
+    BINGX_API_KEY:"demo",BINGX_API_SECRET:"demo-secret",LIVE_CONTROL_TOKEN:"control"};
+  const result=await runLiveSetupQueue({
+    env,setups:[readyScannerSetup()],client:{getMarkPrice:async()=>105},
+    store:{getActivation:async()=>({active:true,id:"activation-123456",confirmedByUser:true})},
+    adapter:{submit:async()=>{submitted++;}},clock:()=>1000000
+  });
+  assert.equal(result.results[0].action,"WAIT_ENTRY_OUTSIDE_ZONE");
+  assert.equal(submitted,0);
+});
+
+test("live runner requires durable explicit activation and stays disabled by default", async () => {
+  const env={LIVE_TRADING_ENABLED:"false"};
+  const disabled=await runLiveSetupQueue({env});
+  assert.equal(disabled.reason,"LIVE_NEW_ENTRIES_DISABLED");
+  const waiting=await runLiveSetupQueue({
+    env:{LIVE_TRADING_ENABLED:"true",BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",
+      BINGX_API_KEY:"demo",BINGX_API_SECRET:"demo-secret",LIVE_CONTROL_TOKEN:"control"},
+    setups:[readyScannerSetup()],client:{getMarkPrice:async()=>100},
+    store:{getActivation:async()=>({active:false,id:null})},adapter:{submit:async()=>{}},clock:()=>1000000
+  });
+  assert.equal(waiting.reason,"LIVE_USER_ACTIVATION_REQUIRED");
+});
