@@ -218,7 +218,7 @@ export class BingXLiveExecutionAdapter {
       const actualRisk = actualQuantity * (Math.abs(actualEntry - Number(normalizedCandidate.stopLoss)) +
         actualEntry * 0.0007 + Number(normalizedCandidate.stopLoss) * 0.0007);
       const actualRewardRisk = Math.abs(Number(normalizedCandidate.takeProfit) - actualEntry) /
-        Math.max(1e-12, Math.abs(actualEntry - Number(candidate.stopLoss)));
+        Math.max(1e-12, Math.abs(actualEntry - Number(normalizedCandidate.stopLoss)));
       if (!synced?.position || synced.protection?.stopLoss !== true || synced.protection?.takeProfit !== true ||
           !finitePositive(actualEntry) || !finitePositive(actualQuantity) || !actualStopValid ||
           actualRewardRisk < RISK_CONFIG.minRewardRisk || actualRisk > decision.riskBudget * 1.1) {
