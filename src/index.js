@@ -20,3 +20,4 @@ export * from "./live-execution.js";
 export * from "./bingx-live-client.js";
 export * from "./live-state-store.js";
 export * from "./live-position-manager.js";
+export * from "./live-runner.js";
