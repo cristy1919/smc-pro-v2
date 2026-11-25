@@ -797,6 +797,8 @@ __name(evaluateEngine, "evaluateEngine");
 
 // src/bingx-demo.ts
 var MIN_LEVERAGE = 20;
+var RISKY_MIN_LEVERAGE = 5;
+var RISKY_MAX_LEVERAGE = 10;
 function nextLowerBingXLeverage(current, minimumLeverage = MIN_LEVERAGE) {
   const floor = Math.max(1, Math.floor(minimumLeverage));
   if (!Number.isFinite(current) || current <= floor) return null;
@@ -1652,12 +1654,13 @@ async function openBingXDemoPosition(apiKey, apiSecret, setup, snapshot, setupKe
     const riskBudget = round(Number(balance.equity) * 0.02 * riskMultiplier, 8);
     if (!Number.isFinite(riskBudget) || riskBudget <= 0) return { ok: false, code: "VST_RISK_BASELINE_UNAVAILABLE", error: "Fixed VST 1R baseline is unavailable; no order was sent." };
     const marginBudget = balance.availableMargin;
-    const minimumLeverage = MIN_LEVERAGE;
+    const minimumLeverage = riskMultiplier < 1 ? RISKY_MIN_LEVERAGE : MIN_LEVERAGE;
+    const maximumLeverage = riskMultiplier < 1 ? RISKY_MAX_LEVERAGE : MAX_LEVERAGE;
     const unitRiskFraction = (stopDistance + entryReferencePrice * (FEE_RATE + SLIPPAGE_RATE) + setup.stopLoss * (FEE_RATE + SLIPPAGE_RATE)) / entryReferencePrice;
     if (unitRiskFraction > 1 / minimumLeverage * 0.8) {
       return { ok: false, code: "STOP_DISTANCE_EXCEEDS_MIN_LEVERAGE_SAFETY", error: "The structural stop is too wide to preserve a liquidation cushion at the minimum permitted " + minimumLeverage + "x isolated leverage; no order was sent." };
     }
-    let leverage = Math.max(minimumLeverage, Math.min(MAX_LEVERAGE, Math.floor(0.8 / unitRiskFraction)));
+    let leverage = Math.max(minimumLeverage, Math.min(maximumLeverage, Math.floor((riskMultiplier < 1 ? 0.4 : 0.8) / unitRiskFraction)));
     await waitForDemoRateLimit();
     const contractResponse = await fetch(DEMO_BASE + "/openApi/swap/v2/quote/contracts?symbol=" + encodeURIComponent(setup.symbol), {
       headers: { accept: "application/json", "X-SOURCE-KEY": "BX-AI-SKILL" },
@@ -1996,7 +1999,8 @@ function calculateBingXDemoEntrySizing(input) {
   const riskMultiplier = Number.isFinite(Number(input.riskMultiplier)) ? Math.min(1, Math.max(0.5, Number(input.riskMultiplier))) : 1;
   const distance = Math.abs(entry - stopLoss), riskBudget = Number(input.fixedRiskUnitUsdt) * riskMultiplier;
   if (!Number.isFinite(riskBudget) || riskBudget <= 0) return { ok: false, code: "VST_RISK_BASELINE_UNAVAILABLE", error: "Fixed VST 1R baseline is unavailable; no order was sent." };
-  const marginBudget = availableMargin, minimumLeverage = MIN_LEVERAGE;
+  const marginBudget = availableMargin, minimumLeverage = riskMultiplier < 1 ? RISKY_MIN_LEVERAGE : MIN_LEVERAGE;
+  const maximumLeverage = riskMultiplier < 1 ? RISKY_MAX_LEVERAGE : MAX_LEVERAGE;
   const liquidationBufferFraction = 5e-3;
   const costFraction = distance / entry + 2 * (FEE_RATE + SLIPPAGE_RATE);
   if (!(distance > 0 && costFraction > 0 && marginBudget > 0))
@@ -2006,8 +2010,8 @@ function calculateBingXDemoEntrySizing(input) {
   const maxLeverageByLiquidationBuffer = Math.floor(1 / (distance / entry + DEFAULT_MAINTENANCE_MARGIN_RATE + liquidationBufferFraction));
   if (maxLeverageByLiquidationBuffer < minimumLeverage)
     return { ok: false, code: "LIQUIDATION_BUFFER_INSUFFICIENT", error: "The stop cannot maintain a 0.5% liquidation cushion at the minimum permitted leverage." };
-  const riskAdjustedLeverageTarget = riskMultiplier < 1 ? minimumLeverage : Math.max(minimumLeverage, Math.floor(0.8 / costFraction));
-  const leverage = Math.min(MAX_LEVERAGE, maxLeverageByLiquidationBuffer, riskAdjustedLeverageTarget);
+  const riskAdjustedLeverageTarget = riskMultiplier < 1 ? Math.max(minimumLeverage, Math.min(maximumLeverage, Math.floor(0.4 / costFraction))) : Math.max(minimumLeverage, Math.floor(0.8 / costFraction));
+  const leverage = Math.min(maximumLeverage, maxLeverageByLiquidationBuffer, riskAdjustedLeverageTarget);
   const liquidationCushionUsdt = entry * (1 / leverage - DEFAULT_MAINTENANCE_MARGIN_RATE) - distance;
   if (liquidationCushionUsdt < entry * liquidationBufferFraction)
     return { ok: false, code: "LIQUIDATION_BUFFER_INSUFFICIENT", error: "Selected leverage does not leave the required 0.5% liquidation cushion beyond the stop." };
