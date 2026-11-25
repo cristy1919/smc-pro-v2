@@ -150,6 +150,57 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
         continue;
       }
 
+      if (position.tp1ExecutionState === "PENDING") {
+        if (typeof client.getOrder !== "function" || typeof client.getPosition !== "function") {
+          results.push({ id: position.id, action: "TP1_REQUIRES_ORDER_RECONCILIATION" });
+          continue;
+        }
+        let tp1Order = await client.getOrder(position.symbol, { clientOrderId: position.tp1ClientOrderId });
+        let tp1Status = String(tp1Order?.status ?? "").toUpperCase().replaceAll("_", "");
+        let tp1Executed = Math.abs(Number(tp1Order?.executedQty ?? 0));
+        let currentPosition = await client.getPosition(position.symbol, position.side);
+        if (["NEW", "PENDING", "PARTIALLYFILLED"].includes(tp1Status) &&
+            (tp1Status === "PARTIALLYFILLED" || clock() - Number(position.tp1ExecutionStartedAt) > 90000)) {
+          if (typeof client.cancelOrder !== "function") throw new Error("TP1_CANCEL_RECONCILIATION_REQUIRED");
+          await client.cancelOrder(position.symbol, { clientOrderId: position.tp1ClientOrderId });
+          tp1Order = await client.getOrder(position.symbol, { clientOrderId: position.tp1ClientOrderId });
+          tp1Status = String(tp1Order?.status ?? "").toUpperCase().replaceAll("_", "");
+          tp1Executed = Math.abs(Number(tp1Order?.executedQty ?? 0));
+          currentPosition = await client.getPosition(position.symbol, position.side);
+        }
+        const currentQuantity = Math.abs(Number(currentPosition?.positionAmt ?? 0));
+        const initialQuantity = Number(position.quantity ?? position.qty);
+        const tp1FilledStatus = ["FILLED", "PARTIALLYFILLED", "CANCELLED", "CANCELED"].includes(tp1Status);
+        if (currentPosition && finitePositive(currentQuantity) && finitePositive(initialQuantity) &&
+            currentQuantity < initialQuantity - 1e-10 && tp1FilledStatus && finitePositive(tp1Executed)) {
+          const confirmed = {
+            ...position, quantity: currentQuantity, qty: currentQuantity, stage: 1,
+            tp1ExecutionState: "CONFIRMED", tp1ReachedAt: Number(position.tp1ExecutionStartedAt) || clock(),
+            lastManagedAt: clock()
+          };
+          await store.saveLivePosition(confirmed);
+          await adapter.updateProtection(confirmed, { stopLoss: Number(position.entry), takeProfit: Number(position.takeProfit) });
+          await store.saveLivePosition({ ...confirmed, stopLoss: Number(position.entry) });
+          results.push({ id: position.id, action: "TP1_PARTIAL_CLOSE_RECOVERED", remainingQuantity: currentQuantity });
+          continue;
+        }
+        if (!currentPosition && tp1Executed >= initialQuantity && tp1FilledStatus) {
+          await store.markLivePositionClosed(position.id, { closedAt: clock(), closeReason: "TP1_ORDER_CLOSED_FULL_POSITION" });
+          results.push({ id: position.id, action: "TP1_ORDER_CLOSED_FULL_POSITION" });
+          continue;
+        }
+        if (["CANCELLED", "CANCELED", "FAILED", "EXPIRED"].includes(tp1Status) &&
+            tp1Executed === 0 && currentQuantity >= initialQuantity - 1e-10) {
+          const attempts = Number(position.tp1Attempt ?? 1);
+          const retryState = attempts < 2 ? "RETRY_READY" : "REJECTED";
+          await store.saveLivePosition({ ...position, tp1ExecutionState: retryState, tp1ExecutionError: tp1Status });
+          results.push({ id: position.id, action: retryState === "RETRY_READY" ? "TP1_RETRY_READY" : "TP1_PARTIAL_CLOSE_REJECTED" });
+          continue;
+        }
+        results.push({ id: position.id, action: "TP1_ORDER_OUTCOME_UNKNOWN", status: tp1Status || "UNKNOWN" });
+        continue;
+      }
+
       const tp1 = Number(position.tp1);
       const stage = Number(position.stage ?? 0);
       if (stage >= 1 && (position.side === "LONG" ? Number(position.stopLoss) < Number(position.entry) : Number(position.stopLoss) > Number(position.entry))) {
@@ -174,21 +225,32 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
           await store.saveLivePosition({ ...position, lastTrailingCandleTime: latestClosedTime });
         }
       }
-      const reachedTp1 = stage === 0 && positive(tp1) &&
+      const reachedTp1 = stage === 0 && position.tp1ExecutionState !== "REJECTED" && positive(tp1) &&
         (position.side === "LONG" ? markPrice >= tp1 : markPrice <= tp1);
       if (reachedTp1) {
-        const partial = await adapter.partialClose(position, 0.5);
+        const attempt = Number(position.tp1Attempt ?? 0) + 1;
+        const clientOrderId = "tp1-" + String(position.id).slice(-30) + "-" + attempt;
+        const pending = {
+          ...position, tp1ExecutionState: "PENDING", tp1ClientOrderId: clientOrderId,
+          tp1Attempt: attempt, tp1ExecutionStartedAt: clock()
+        };
+        await store.saveLivePosition(pending);
+        const partial = await adapter.partialClose(pending, 0.5, clientOrderId);
         const updated = {
-          ...position,
+          ...pending,
           quantity: partial.remainingQuantity,
           qty: partial.remainingQuantity,
           stage: 1,
+          tp1ExecutionState: "CONFIRMED",
           tp1ReachedAt: clock(),
           lastManagedAt: clock()
         };
         await store.saveLivePosition(updated);
         await adapter.updateProtection(updated, { stopLoss: Number(position.entry), takeProfit: Number(position.takeProfit) });
+        await store.saveLivePosition({ ...updated, stopLoss: Number(position.entry) });
         results.push({ id: position.id, action: "TP1_HALF_CLOSED_STOP_TO_BREAKEVEN", remainingQuantity: partial.remainingQuantity });
+      } else if (position.tp1ExecutionState === "REJECTED") {
+        results.push({ id: position.id, action: "TP1_PARTIAL_CLOSE_REJECTED" });
       } else {
         results.push({ id: position.id, action: "PROTECTION_VERIFIED" });
       }
