@@ -1,0 +1,176 @@
+import { RISK_CONFIG } from "./config.js";
+
+const LIVE_BASE = "https://open-api.bingx.com";
+const SYMBOL_RE = /^[A-Z0-9]{2,20}-USDT$/;
+const finitePositive = value => Number.isFinite(Number(value)) && Number(value) > 0;
+
+export function getLiveReadiness(env = {}) {
+  const checks = [
+    ["LIVE_API_KEY", !!env.BINGX_LIVE_API_KEY],
+    ["LIVE_API_SECRET", !!env.BINGX_LIVE_API_SECRET],
+    ["LIVE_CREDENTIALS_SEPARATE_FROM_DEMO", !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET &&
+      (env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY || env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET)],
+    ["LIVE_EXECUTION_DISABLED_BY_DEFAULT", env.LIVE_TRADING_ENABLED !== "true"],
+    ["LIVE_CONFIRMATION_SECRET", !!env.LIVE_CONTROL_TOKEN],
+    ["LIVE_BASE_URL_LOCKED", LIVE_BASE === "https://open-api.bingx.com"]
+  ];
+  const blockers = checks.filter(([name, passed]) => !passed).map(([name]) => name);
+  return {
+    mode: "live-readiness",
+    ready: blockers.length === 0,
+    liveTradingEnabled: env.LIVE_TRADING_ENABLED === "true",
+    apiCredentialsConfigured: !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET,
+    demoCredentialsIndependent: !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET &&
+      (env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY || env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET),
+    checks: checks.map(([name, passed]) => ({ name, passed })),
+    blockers
+  };
+}
+
+export function validateLiveCandidate(candidate, {
+  equity, availableMargin, openPositions = [], contract, markPrice, riskMultiple = 1,
+  explicitConfirmation = false, idempotencyKey
+} = {}) {
+  const reasons = [];
+  if (!candidate || !["scalp", "swing"].includes(candidate.engine)) reasons.push("INVALID_ENGINE");
+  if (candidate?.status !== "QUALIFIED" || candidate?.entryEligible !== true) reasons.push("CANDIDATE_NOT_ENTRY_READY");
+  if (candidate?.entryConfirmation?.status !== "CONFIRMED") reasons.push("ENTRY_CONFIRMATION_REQUIRED");
+  if (!SYMBOL_RE.test(candidate?.symbol ?? "")) reasons.push("INVALID_SYMBOL");
+  if (!["LONG", "SHORT"].includes(candidate?.direction)) reasons.push("INVALID_DIRECTION");
+  if (!explicitConfirmation) reasons.push("EXPLICIT_LIVE_CONFIRMATION_REQUIRED");
+  if (typeof idempotencyKey !== "string" || idempotencyKey.length < 12 || idempotencyKey.length > 40) reasons.push("IDEMPOTENCY_KEY_REQUIRED");
+  if (!finitePositive(equity) || !finitePositive(availableMargin)) reasons.push("LIVE_ACCOUNT_BALANCE_UNAVAILABLE");
+  if (!Array.isArray(openPositions)) reasons.push("LIVE_POSITION_SNAPSHOT_UNAVAILABLE");
+  else if (openPositions.length >= RISK_CONFIG.maxOpenPositions) reasons.push("MAX_OPEN_POSITIONS");
+  if (Array.isArray(openPositions) && openPositions.some(p =>
+    p.symbol === candidate?.symbol && p.engine === candidate?.engine &&
+    p.side === (candidate?.direction === "BULLISH" ? "LONG" : "SHORT") && p.state === "OPEN"
+  )) reasons.push("DUPLICATE_ENGINE_SYMBOL_SIDE");
+  if (!finitePositive(markPrice)) reasons.push("LIVE_MARK_PRICE_UNAVAILABLE");
+  if (!contract || !finitePositive(contract.minQty) || !finitePositive(contract.qtyStep) ||
+      !finitePositive(contract.tickSize) || !finitePositive(contract.minNotional)) reasons.push("CONTRACT_RULES_UNAVAILABLE");
+  if (![1, 0.5].includes(riskMultiple)) reasons.push("INVALID_RISK_MULTIPLE");
+  const side = candidate?.direction === "BULLISH" ? "LONG" : "SHORT";
+  const entry = Number(markPrice), stop = Number(candidate?.stopLoss), target = Number(candidate?.takeProfit);
+  if (!finitePositive(stop) || !finitePositive(target) ||
+      (side === "LONG" ? !(stop < entry && target > entry) : !(target < entry && stop > entry))) reasons.push("INVALID_TRADE_LEVELS");
+  const rr = finitePositive(stop) && finitePositive(target) && finitePositive(entry)
+    ? Math.abs(target - entry) / Math.abs(entry - stop) : 0;
+  if (rr < RISK_CONFIG.minRewardRisk) reasons.push("MINIMUM_RR_NOT_MET");
+  const risky = riskMultiple === 0.5;
+  const minLeverage = risky ? 5 : RISK_CONFIG.minLeverage;
+  const maxLeverage = risky ? 10 : RISK_CONFIG.maxLeverage;
+  const requestedLeverage = Number(candidate?.leverage);
+  if (!Number.isInteger(requestedLeverage) || requestedLeverage < minLeverage || requestedLeverage > maxLeverage)
+    reasons.push("LEVERAGE_OUTSIDE_POLICY");
+  if (candidate?.marginMode !== "ISOLATED") reasons.push("ISOLATED_MARGIN_REQUIRED");
+  if (contract && finitePositive(contract.maxLeverage) && requestedLeverage > contract.maxLeverage)
+    reasons.push("CONTRACT_LEVERAGE_LIMIT");
+  return {
+    eligible: reasons.length === 0,
+    reasons,
+    side,
+    riskMultiple,
+    riskBudget: finitePositive(equity) ? Number(equity) * RISK_CONFIG.riskUnitFraction * riskMultiple : null,
+    marginMode: "ISOLATED",
+    leverage: reasons.length === 0 ? requestedLeverage : null,
+    rewardRisk: rr
+  };
+}
+
+export class BingXLiveExecutionAdapter {
+  constructor({ env, client, store, clock = () => Date.now() } = {}) {
+    this.env = env ?? {};
+    this.client = client;
+    this.store = store;
+    this.clock = clock;
+  }
+
+  readiness() { return getLiveReadiness(this.env); }
+
+  async submit(candidate, { riskMultiple = 1, confirmation, idempotencyKey } = {}) {
+    const readiness = this.readiness();
+    if (!readiness.ready || this.env.LIVE_TRADING_ENABLED !== "true")
+      throw new Error("LIVE_EXECUTION_LOCKED:" + readiness.blockers.join(","));
+    if (!confirmation || confirmation.confirmedByUser !== true ||
+        confirmation.token !== this.env.LIVE_CONTROL_TOKEN ||
+        !Number.isFinite(confirmation.confirmedAt) ||
+        this.clock() - confirmation.confirmedAt > 60000 ||
+        this.clock() < confirmation.confirmedAt)
+      throw new Error("LIVE_CONFIRMATION_INVALID_OR_EXPIRED");
+    if (!this.client || !this.store) throw new Error("LIVE_EXECUTION_DEPENDENCIES_UNAVAILABLE");
+    if (typeof this.store.claimIdempotencyKey !== "function" ||
+        typeof this.store.releaseIdempotencyKey !== "function")
+      throw new Error("LIVE_IDEMPOTENCY_STORE_REQUIRED");
+    if (!await this.store.claimIdempotencyKey(idempotencyKey, { ttlMs: 86400000 }))
+      throw new Error("DUPLICATE_LIVE_REQUEST");
+
+    let accepted = false;
+    try {
+      const [account, positions, markPrice, contract] = await Promise.all([
+        this.client.getAccountSnapshot(), this.client.getOpenPositions(),
+        this.client.getMarkPrice(candidate?.symbol), this.client.getContractRules(candidate?.symbol)
+      ]);
+      if (account?.asset !== "USDT" || account?.source !== "BINGX_LIVE" ||
+          !finitePositive(account?.equity) || !finitePositive(account?.availableMargin))
+        throw new Error("VERIFIED_LIVE_USDT_EQUITY_REQUIRED");
+      const decision = validateLiveCandidate(candidate, {
+        equity: account.equity, availableMargin: account.availableMargin, openPositions: positions,
+        contract, markPrice, riskMultiple, explicitConfirmation: true, idempotencyKey
+      });
+      if (!decision.eligible) throw new Error("LIVE_RISK_REJECTED:" + decision.reasons.join(","));
+      const symbol = candidate.symbol;
+      const margin = await this.client.getMarginMode(symbol);
+      if (margin !== "ISOLATED") await this.client.setMarginMode(symbol, "ISOLATED");
+      const leverageSide = decision.side;
+      await this.client.setLeverage(symbol, leverageSide, decision.leverage);
+      const verifiedLeverage = await this.client.getLeverage(symbol, leverageSide);
+      if (Number(verifiedLeverage) !== decision.leverage) throw new Error("LIVE_LEVERAGE_VERIFICATION_FAILED");
+      const quantity = this.client.roundQuantity(decision.riskBudget, markPrice, candidate.stopLoss, contract, decision.leverage);
+      if (!finitePositive(quantity) || quantity < Number(contract.minQty) ||
+          quantity % Number(contract.qtyStep) !== 0)
+        throw new Error("LIVE_ORDER_QUANTITY_INVALID");
+      const bracket = {
+        stopLoss: Number(candidate.stopLoss), takeProfit: Number(candidate.takeProfit),
+        workingType: "MARK_PRICE", quantity
+      };
+      const order = await this.client.placeEntryWithProtection({
+        symbol, side: decision.side, quantity, marginMode: "ISOLATED",
+        leverage: decision.leverage, bracket, clientOrderId: idempotencyKey
+      });
+      accepted = true;
+      if (!order?.orderID && !order?.orderId) throw new Error("LIVE_ORDER_ID_MISSING_RECONCILE_REQUIRED");
+      const synced = await this.client.reconcilePosition(symbol, decision.side);
+      if (!synced?.position || synced.protection?.stopLoss !== true || synced.protection?.takeProfit !== true) {
+        await this.client.emergencyClose({ symbol, side: decision.side, position: synced?.position ?? null });
+        throw new Error("LIVE_PROTECTION_NOT_CONFIRMED_EMERGENCY_CLOSE_REQUESTED");
+      }
+      const position = {
+        id: String(synced.position.positionId ?? order.orderID ?? order.orderId),
+        candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
+        quantity: Number(synced.position.positionAmt ?? quantity), entry: Number(synced.position.entryPrice ?? markPrice),
+        stopLoss: bracket.stopLoss, takeProfit: bracket.takeProfit, leverage: decision.leverage,
+        marginMode: "ISOLATED", riskMultiple, riskBudget: decision.riskBudget,
+        mode: "BINGX_LIVE", state: "OPEN", openedAt: this.clock(),
+        entryOrderId: String(order.orderID ?? order.orderId)
+      };
+      await this.store.saveLivePosition(position);
+      return { ok: true, position };
+    } catch (error) {
+      if (!accepted) await this.store.releaseIdempotencyKey(idempotencyKey);
+      throw error;
+    }
+  }
+
+  async close(position) {
+    if (this.env.LIVE_TRADING_ENABLED !== "true" || !this.readiness().ready)
+      throw new Error("LIVE_CLOSE_PATH_LOCKED");
+    if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
+      throw new Error("INVALID_LIVE_POSITION");
+    const result = await this.client.closePosition(position);
+    const verified = await this.client.getPosition(position.symbol, position.side);
+    if (verified && Number(verified.positionAmt) !== 0) throw new Error("LIVE_CLOSE_NOT_CONFIRMED");
+    await this.store.markLivePositionClosed(position.id, { closedAt: this.clock(), exchangeResult: result });
+    return { ok: true, result };
+  }
+}
