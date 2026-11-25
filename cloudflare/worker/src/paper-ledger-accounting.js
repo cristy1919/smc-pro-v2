@@ -70,6 +70,75 @@ export function computeCanonicalPaperBalance(ledger) {
   );
 }
 
+/**
+ * Reconstruct the account balance at the start of a UTC day from pre-day
+ * entry, exit, and funding events. This is a bootstrap path; after it is
+ * persisted as dailyStartBalance, daily PnL is balance minus that baseline.
+ */
+export function computeDailyStartBalance(ledger, dayStartMs, slippageRate = 0.0002, liquidationFeeRate = 0) {
+  const capitalEvents = Array.isArray(ledger?.capitalAdjustments)
+    ? ledger.capitalAdjustments
+    : [];
+  const firstCapital = capitalEvents[0] ?? {};
+  let startBalance = numeric(
+    firstCapital.balanceAfter ?? firstCapital.targetUsdt,
+    numeric(ledger?.startingBalance, 1000),
+  );
+  for (const event of capitalEvents.slice(1)) {
+    const at = typeof event.at === "string" ? Date.parse(event.at) : numeric(event.at, NaN);
+    if (Number.isFinite(at) && at < dayStartMs) startBalance += numeric(event.amountUsdt);
+  }
+
+  const seen = new Set();
+  const records = [
+    ...(ledger?.closedTrades ?? []),
+    ...(ledger?.positions ?? []).filter((position) => position.status === "OPEN"),
+  ];
+  for (const position of records) {
+    const id = String(position.positionId ?? position.id ?? "");
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const feeRate = Math.max(0, numeric(position.feeRate, 0.0005));
+    for (const event of position.executionEvents ?? []) {
+      const at = typeof event.at === "string" ? Date.parse(event.at) : numeric(event.at, NaN);
+      const qty = numeric(event.qty);
+      if (!Number.isFinite(at) || at >= dayStartMs || qty <= 0) continue;
+      if (event.event === "PAPER_ENTRY") {
+        const entry = numeric(event.entry ?? position.entry, NaN);
+        if (Number.isFinite(entry) && entry > 0) {
+          startBalance -= qty * entry * (feeRate + slippageRate);
+        }
+        continue;
+      }
+      const exit = numeric(event.executionPrice, NaN);
+      if (!Number.isFinite(exit) || exit <= 0) continue;
+      const gross =
+        (position.side === "LONG" ? exit - numeric(position.entry) : numeric(position.entry) - exit) *
+        qty;
+      const liquidationFee =
+        event.event === "LIQUIDATION" ? qty * exit * liquidationFeeRate : 0;
+      startBalance += gross - qty * exit * feeRate - qty * exit * slippageRate - liquidationFee;
+    }
+    for (const funding of position.fundingEvents ?? []) {
+      const at = numeric(funding.fundingTime, NaN);
+      if (Number.isFinite(at) && at < dayStartMs) startBalance += numeric(funding.pnlUsdt);
+    }
+  }
+  return Number(startBalance.toFixed(8));
+}
+
+export function computeCanonicalDailyPnl(ledger, dayStartMs, slippageRate = 0.0002) {
+  const start =
+    Number.isFinite(Number(ledger?.dailyStartBalance))
+      ? Number(ledger.dailyStartBalance)
+      : computeDailyStartBalance(ledger, dayStartMs, slippageRate);
+  const todayCapital = (ledger?.capitalAdjustments ?? []).slice(1).reduce((sum, event) => {
+    const at = typeof event.at === "string" ? Date.parse(event.at) : numeric(event.at, NaN);
+    return Number.isFinite(at) && at >= dayStartMs ? sum + numeric(event.amountUsdt) : sum;
+  }, 0);
+  return Number((computeCanonicalPaperBalance(ledger) - start - todayCapital).toFixed(8));
+}
+
 /** Requests that can mutate the shared paper ledger must use one serial lock. */
 export function isPaperLedgerMutation(method, path) {
   if (method === "PUT" && path === "/state") return true;
