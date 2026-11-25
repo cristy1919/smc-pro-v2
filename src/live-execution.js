@@ -388,7 +388,7 @@ export class BingXLiveExecutionAdapter {
     }
     const executed = Math.abs(Number(order?.executedQty ?? 0));
     const remaining = await this.client.getPosition(position.symbol, position.side);
-    if (!remaining || !finitePositive(remaining.positionAmt) ||
+    if (!remaining || !finitePositive(Math.abs(Number(remaining.positionAmt))) ||
         Math.abs(Number(remaining.positionAmt)) >= currentQty || !finitePositive(executed) ||
         !["FILLED", "PARTIALLYFILLED", "CANCELLED", "CANCELED"].includes(status))
       throw new Error("LIVE_PARTIAL_CLOSE_NOT_CONFIRMED:" + (status || "UNKNOWN"));
