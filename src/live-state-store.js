@@ -1,4 +1,4 @@
-const allowedPositionStates = new Set(["OPEN", "CLOSED"]);
+const allowedPositionStates = new Set(["PENDING", "OPEN", "CLOSED"]);
 
 export class DurableObjectLiveStore {
   constructor({ stub, now = () => Date.now() } = {}) {
