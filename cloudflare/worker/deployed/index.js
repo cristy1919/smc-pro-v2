@@ -1,6 +1,7 @@
 import { getLiveReadiness, BingXLiveExecutionAdapter } from "./src/live-execution.js";
 import { BingXLiveClient } from "./src/bingx-live-client.js";
 import { DurableObjectLiveStore } from "./src/live-state-store.js";
+import { manageLivePositions } from "./src/live-position-manager.js";
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -7226,6 +7227,18 @@ class EngineStateV2 extends EngineState {
 }
 var index_default = {
   async scheduled(controller, env, _ctx) {
+    if (env.LIVE_TRADING_ENABLED === "true") {
+      try {
+        const liveStub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
+        const liveStore = new DurableObjectLiveStore({ stub: liveStub });
+        const liveClient = new BingXLiveClient({ apiKey: env.BINGX_LIVE_API_KEY, apiSecret: env.BINGX_LIVE_API_SECRET });
+        const liveAdapter = new BingXLiveExecutionAdapter({ env, client: liveClient, store: liveStore });
+        const management = await manageLivePositions({ env, client: liveClient, store: liveStore, adapter: liveAdapter });
+        console.info("BingX live position management", JSON.stringify(management));
+      } catch (error) {
+        console.error("BingX live position management blocked", String(error).slice(0, 220));
+      }
+    }
     if (AUTOMATION_STOP) return;
     const id = env.ENGINE_STATE_V2.idFromName("main-engine");
     const engine = env.ENGINE_STATE_V2.get(id);
@@ -7578,6 +7591,7 @@ var index_default = {
       }, { headers: { ...headers, "cache-control": "no-store" } });
     }
     if (url.pathname === "/api/live/execute" && request.method === "POST") {
+      if (AUTOMATION_STOP) return Response.json({ ok: false, error: "AUTOMATION_EMERGENCY_STOP_ACTIVE" }, { status: 503, headers });
       if (env.LIVE_TRADING_ENABLED !== "true") return Response.json({ ok: false, mode: "locked", liveTradingEnabled: false, error: "LIVE_TRADING_DISABLED" }, { status: 403, headers });
       if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, error: "LIVE_CONTROL_AUTHORIZATION_REQUIRED" }, { status: 401, headers });
       let body;
@@ -7619,6 +7633,7 @@ var index_default = {
         const candidate = {
           id: setupId, engine: engineName, symbol, direction: side, status: "QUALIFIED", entryEligible: true,
           entryConfirmation: { status: "CONFIRMED" }, entry: Number(setup.entry), stopLoss, takeProfit,
+          tp1: Number(setup.tp1), tp2: Number(setup.tp2),
           score: Number(setup.score), leverage, marginMode: "ISOLATED", riskMultiplier
         };
         const result = await adapter.submit(candidate, {
