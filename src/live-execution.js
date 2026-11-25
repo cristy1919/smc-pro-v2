@@ -193,10 +193,14 @@ export class BingXLiveExecutionAdapter {
           id: String(synced?.position?.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
           candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
           quantity: finitePositive(actualQuantity) ? actualQuantity : quantity,
+          qty: finitePositive(actualQuantity) ? actualQuantity : quantity,
           entry: finitePositive(actualEntry) ? actualEntry : markPrice,
           stopLoss: Number(candidate.stopLoss), takeProfit: Number(candidate.takeProfit),
           tp1: Number(candidate.tp1 ?? candidate.takeProfit), tp2: Number(candidate.tp2 ?? candidate.takeProfit),
           leverage: decision.leverage, marginMode: "ISOLATED", riskMultiple,
+          marginUsdt: (finitePositive(actualQuantity) ? actualQuantity : quantity) * (finitePositive(actualEntry) ? actualEntry : markPrice) / decision.leverage,
+          status: "OPEN", tp3: Number(candidate.tp3 ?? candidate.takeProfit),
+          setupTimeframe: candidate.setupTimeframe, entryTimeframe: candidate.entryTimeframe,
           riskBudget: decision.riskBudget, mode: "BINGX_LIVE", state: "OPEN",
           openedAt: this.clock(), riskStatus: "EMERGENCY_CLOSE_REQUIRED",
           entryOrderId: String(order?.orderID ?? order?.orderId ?? idempotencyKey)
@@ -269,7 +273,7 @@ export class BingXLiveExecutionAdapter {
     if (!remaining || !Number.isFinite(Number(remaining.positionAmt)) || Math.abs(Number(remaining.positionAmt)) >= currentQty)
       throw new Error("LIVE_PARTIAL_CLOSE_NOT_CONFIRMED");
     const remainingQuantity = Math.abs(Number(remaining.positionAmt));
-    await this.store.saveLivePosition({ ...position, quantity: remainingQuantity, updatedAt: this.clock() });
+    await this.store.saveLivePosition({ ...position, quantity: remainingQuantity, qty: remainingQuantity, updatedAt: this.clock() });
     return { ok: true, result, remainingQuantity };
   }
 
