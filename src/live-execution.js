@@ -8,7 +8,7 @@ export function getLiveReadiness(env = {}) {
   const checks = [
     ["LIVE_API_KEY", !!env.BINGX_LIVE_API_KEY],
     ["LIVE_API_SECRET", !!env.BINGX_LIVE_API_SECRET],
-    ["LIVE_CREDENTIALS_SEPARATE_FROM_DEMO", !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET &&
+    ["LIVE_CREDENTIALS_SEPARATE_FROM_DEMO", !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET && !!env.BINGX_API_KEY && !!env.BINGX_API_SECRET &&
       env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY && env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET],
     ["LIVE_CONFIRMATION_SECRET", !!env.LIVE_CONTROL_TOKEN],
     ["LIVE_BASE_URL_LOCKED", LIVE_BASE === "https://open-api.bingx.com"]
@@ -19,8 +19,8 @@ export function getLiveReadiness(env = {}) {
     ready: blockers.length === 0,
     liveTradingEnabled: env.LIVE_TRADING_ENABLED === "true",
     apiCredentialsConfigured: !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET,
-    demoCredentialsIndependent: !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET &&
-      (env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY && env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET),
+    demoCredentialsIndependent: !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET && !!env.BINGX_API_KEY && !!env.BINGX_API_SECRET &&
+      env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY && env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET,
     checks: checks.map(([name, passed]) => ({ name, passed })),
     blockers
   };
@@ -149,20 +149,22 @@ export class BingXLiveExecutionAdapter {
         symbol, side: decision.side, quantity, marginMode: "ISOLATED",
         leverage: decision.leverage, bracket, clientOrderId: idempotencyKey
       });
-      if (!order?.orderID && !order?.orderId) throw new Error("LIVE_ORDER_ID_MISSING_RECONCILE_REQUIRED");
       const synced = await this.client.reconcilePosition(symbol, decision.side);
       if (!synced?.position || synced.protection?.stopLoss !== true || synced.protection?.takeProfit !== true) {
         await this.client.emergencyClose({ symbol, side: decision.side, position: synced?.position ?? null });
-        throw new Error("LIVE_PROTECTION_NOT_CONFIRMED_EMERGENCY_CLOSE_REQUESTED");
+        const afterClose = await this.client.getPosition(symbol, decision.side);
+        if (afterClose && Math.abs(Number(afterClose.positionAmt)) > 0)
+          throw new Error("LIVE_UNPROTECTED_POSITION_EMERGENCY_CLOSE_NOT_CONFIRMED");
+        throw new Error("LIVE_PROTECTION_NOT_CONFIRMED_POSITION_CLOSED");
       }
       const position = {
-        id: String(synced.position.positionId ?? order.orderID ?? order.orderId),
+        id: String(synced.position.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
         candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
         quantity: Number(synced.position.positionAmt ?? quantity), entry: Number(synced.position.entryPrice ?? markPrice),
         stopLoss: bracket.stopLoss, takeProfit: bracket.takeProfit, leverage: decision.leverage,
         marginMode: "ISOLATED", riskMultiple, riskBudget: decision.riskBudget,
         mode: "BINGX_LIVE", state: "OPEN", openedAt: this.clock(),
-        entryOrderId: String(order.orderID ?? order.orderId)
+        entryOrderId: String(order?.orderID ?? order?.orderId ?? idempotencyKey)
       };
       await this.store.saveLivePosition(position);
       return { ok: true, position };
@@ -213,7 +215,9 @@ export class BingXLiveExecutionAdapter {
     const remaining = await this.client.getPosition(position.symbol, position.side);
     if (!remaining || !Number.isFinite(Number(remaining.positionAmt)) || Math.abs(Number(remaining.positionAmt)) >= currentQty)
       throw new Error("LIVE_PARTIAL_CLOSE_NOT_CONFIRMED");
-    return { ok: true, result, remainingQuantity: Math.abs(Number(remaining.positionAmt)) };
+    const remainingQuantity = Math.abs(Number(remaining.positionAmt));
+    await this.store.saveLivePosition({ ...position, quantity: remainingQuantity, updatedAt: this.clock() });
+    return { ok: true, result, remainingQuantity };
   }
 
   async close(position) {
