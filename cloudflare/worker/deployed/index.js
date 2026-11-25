@@ -296,18 +296,14 @@ function updatePositions(ledger, prices, now = Date.now(), _marketStopSymbols = 
     }
     if (p.model === "TURTLE_SYSTEM_1") continue;
     const first = Number(p.tp1 ?? p.takeProfit), second = Number(p.tp2), third = Number(p.tp3);
-    const orderedTargets = Number.isFinite(first) && Number.isFinite(second) && (isLong ? first < second && (!Number.isFinite(third) || second < third) : first > second && (!Number.isFinite(third) || second > third));
+    const hasSecondTarget = Number.isFinite(second) && second > 0;
+    const orderedTargets = Number.isFinite(first) && hasSecondTarget && (isLong ? first < second && (!Number.isFinite(third) || second < third) : first > second && (!Number.isFinite(third) || second > third));
     if (!orderedTargets) {
-      const hitSingleTP1 = Number(p.targetStage) < 1 && Number.isFinite(first) && crossed(first);
-      if (hitSingleTP1) {
-        const baseQty = Number(p.initialQty) > 0 ? Number(p.initialQty) : Number(p.qty);
-        const closeQty = Math.min(p.qty, round(baseQty * 0.5, 8));
-        if (closeQty > 0) {
-          p.targetStage = 1;
-          p.targetStagesReached = [...new Set([...(Array.isArray(p.targetStagesReached) ? p.targetStagesReached : []), 1])].sort((a, b) => a - b);
-          closePaperQuantity(ledger, p, closeQty, markPrice, now, "TP1_TAKE_PROFIT", first, markPrice, false, 1);
-          if (p.status === "OPEN") p.stopLoss = p.entry;
-        }
+      const hitSingleTP = Number(p.targetStage) < 1 && Number.isFinite(first) && first > 0 && crossed(first);
+      if (hitSingleTP) {
+        p.targetStage = 1;
+        p.targetStagesReached = [...new Set([...(Array.isArray(p.targetStagesReached) ? p.targetStagesReached : []), 1])].sort((a, b) => a - b);
+        closePaperQuantity(ledger, p, p.qty, markPrice, now, "TP1_TAKE_PROFIT", first, markPrice, false, 1);
       }
       continue;
     }
