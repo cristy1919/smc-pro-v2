@@ -7573,8 +7573,9 @@ var index_default = {
         if (!stateResponse.ok || state.storageDegraded || !Array.isArray(state.setups))
           return Response.json({ ok: false, error: "LIVE_SIGNAL_STATE_UNAVAILABLE" }, { status: 503, headers });
         const setupId = String(body.setupId ?? "");
-        const setup = state.setups.find(item => String(item.setupId ?? item.id ?? item.setupKey ?? "") === setupId);
-        if (!setup || setup.entryConfirmed !== true || !["READY", "QUALIFIED", "HIGH_QUALITY"].includes(String(setup.status).toUpperCase()))
+        const setup = state.setups.find(item => String(item.setupId ?? item.id ?? item.setupKey ?? [item.model, item.symbol, item.side, item.tradeStyle, item.setupCandleTime].join("|")) === setupId);
+        const setupConfirmed = setup?.entryConfirmed === true || Array.isArray(setup?.confirmations) && setup.confirmations.includes("CLOSED_CANDLE_CONFIRMATION");
+        if (!setup || !setupConfirmed || !["READY", "QUALIFIED", "HIGH_QUALITY"].includes(String(setup.status).toUpperCase()))
           return Response.json({ ok: false, error: "LIVE_SETUP_NOT_CURRENTLY_READY" }, { status: 409, headers });
         const engineName = String(setup.tradeStyle ?? setup.engine ?? "").toLowerCase();
         if (!["scalp", "swing"].includes(engineName)) return Response.json({ ok: false, error: "LIVE_SETUP_ENGINE_INVALID" }, { status: 409, headers });
@@ -7584,7 +7585,7 @@ var index_default = {
         const riskMultiple = Number(setup.riskMultiplier) === 0.5 || setup.countertrend === true || setup.htfAligned === false || Number(setup.score) < 80 ? 0.5 : 1;
         const client = new BingXLiveClient({ apiKey: env.BINGX_LIVE_API_KEY, apiSecret: env.BINGX_LIVE_API_SECRET });
         const markPrice = await client.getMarkPrice(symbol);
-        const stopLoss = Number(setup.stopLoss), takeProfit = Number(setup.tp1 ?? setup.takeProfit ?? setup.tp2);
+        const stopLoss = Number(setup.stopLoss), takeProfit = Number(setup.takeProfit ?? setup.tp3 ?? setup.tp2 ?? setup.tp1);
         const unitRiskFraction = (Math.abs(markPrice - stopLoss) + markPrice * (FEE_RATE + SLIPPAGE_RATE) + stopLoss * (FEE_RATE + SLIPPAGE_RATE)) / markPrice;
         const minLeverage = riskMultiple === 0.5 ? 5 : 20, maxLeverage = riskMultiple === 0.5 ? 10 : 50;
         if (!Number.isFinite(unitRiskFraction) || unitRiskFraction <= 0 || unitRiskFraction > 1 / minLeverage * 0.8)
