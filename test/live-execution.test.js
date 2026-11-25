@@ -1,0 +1,81 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { getLiveReadiness, validateLiveCandidate, BingXLiveExecutionAdapter } from "../src/live-execution.js";
+
+const baseCandidate = (overrides = {}) => ({
+  id: "scalp-setup-001", engine: "scalp", symbol: "BTC-USDT", direction: "BULLISH",
+  status: "QUALIFIED", entryEligible: true, entryConfirmation: { status: "CONFIRMED" },
+  stopLoss: 99000, takeProfit: 103500, marginMode: "ISOLATED", leverage: 20, ...overrides
+});
+const contract = { minQty: 0.001, qtyStep: 0.001, tickSize: 0.1, minNotional: 5, maxLeverage: 50 };
+
+test("live readiness remains blocked until two independent live secrets exist", () => {
+  const blocked = getLiveReadiness({ BINGX_API_KEY: "demo", BINGX_API_SECRET: "demo-secret" });
+  assert.equal(blocked.ready, false);
+  assert.ok(blocked.blockers.includes("LIVE_API_KEY"));
+  const ready = getLiveReadiness({
+    BINGX_API_KEY: "demo", BINGX_API_SECRET: "demo-secret",
+    BINGX_LIVE_API_KEY: "live", BINGX_LIVE_API_SECRET: "live-secret", LIVE_CONTROL_TOKEN: "control"
+  });
+  assert.equal(ready.ready, true);
+  assert.equal(ready.liveTradingEnabled, false);
+});
+
+test("live credentials must be independently provisioned", () => {
+  const state = getLiveReadiness({
+    BINGX_API_KEY: "demo", BINGX_API_SECRET: "demo-secret",
+    BINGX_LIVE_API_KEY: "live", BINGX_LIVE_API_SECRET: "demo-secret", LIVE_CONTROL_TOKEN: "control"
+  });
+  assert.equal(state.ready, false);
+  assert.ok(state.blockers.includes("LIVE_CREDENTIALS_SEPARATE_FROM_DEMO"));
+});
+
+test("normal setup enforces isolated margin and 20x-50x leverage", () => {
+  const result = validateLiveCandidate(baseCandidate(), {
+    equity: 10000, availableMargin: 5000, openPositions: [], contract,
+    markPrice: 100000, riskMultiple: 1, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261125"
+  });
+  assert.equal(result.eligible, true);
+  assert.equal(result.marginMode, "ISOLATED");
+  assert.equal(result.leverage, 20);
+  assert.equal(result.riskBudget, 200);
+});
+
+test("reduced-risk setup enforces 0.5R and 5x-10x leverage", () => {
+  const result = validateLiveCandidate(baseCandidate({ leverage: 10 }), {
+    equity: 10000, availableMargin: 5000, openPositions: [], contract,
+    markPrice: 100000, riskMultiple: 0.5, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261125"
+  });
+  assert.equal(result.eligible, true);
+  assert.equal(result.riskBudget, 100);
+  const invalid = validateLiveCandidate(baseCandidate({ leverage: 20 }), {
+    equity: 10000, availableMargin: 5000, openPositions: [], contract,
+    markPrice: 100000, riskMultiple: 0.5, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261125"
+  });
+  assert.ok(invalid.reasons.includes("LEVERAGE_OUTSIDE_POLICY"));
+});
+
+test("ten-position cap, duplicates, and invalid quantity metadata fail closed", () => {
+  const common = { equity: 10000, availableMargin: 5000, contract, markPrice: 100000,
+    riskMultiple: 1, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261125" };
+  const full = validateLiveCandidate(baseCandidate(), { ...common, openPositions: Array.from({length:10},()=>({state:"OPEN"})) });
+  assert.ok(full.reasons.includes("MAX_OPEN_POSITIONS"));
+  const duplicate = validateLiveCandidate(baseCandidate(), { ...common, openPositions: [{state:"OPEN",engine:"scalp",symbol:"BTC-USDT",side:"LONG"}] });
+  assert.ok(duplicate.reasons.includes("DUPLICATE_ENGINE_SYMBOL_SIDE"));
+  const noRules = validateLiveCandidate(baseCandidate(), { ...common, contract: null, openPositions: [] });
+  assert.ok(noRules.reasons.includes("CONTRACT_RULES_UNAVAILABLE"));
+});
+
+test("disabled live flag blocks before any exchange request", async () => {
+  let called = false;
+  const adapter = new BingXLiveExecutionAdapter({
+    env: { BINGX_LIVE_API_KEY: "live", BINGX_LIVE_API_SECRET: "live-secret", LIVE_CONTROL_TOKEN: "control" },
+    client: { getAccountSnapshot: async () => { called = true; } },
+    store: {}
+  });
+  await assert.rejects(
+    adapter.submit(baseCandidate(), { confirmation: { confirmedByUser: true, token: "control", confirmedAt: Date.now() }, idempotencyKey: "scalp-btc-20261125" }),
+    /LIVE_EXECUTION_LOCKED/
+  );
+  assert.equal(called, false);
+});
