@@ -5,9 +5,18 @@ const SYMBOL_RE = /^[A-Z0-9]{2,20}-USDT$/;
 const finitePositive = value => Number.isFinite(Number(value)) && Number(value) > 0;
 
 export function getLiveManagementReadiness(env = {}) {
+  const livePair = !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET;
+  const demoKeyPresent = !!env.BINGX_API_KEY;
+  const demoSecretPresent = !!env.BINGX_API_SECRET;
+  const demoPairPresent = demoKeyPresent && demoSecretPresent;
+  const demoAnyPresent = demoKeyPresent || demoSecretPresent;
+  const independent = livePair && (!demoAnyPresent ||
+    (demoPairPresent && env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY &&
+      env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET));
   const checks = [
     ["LIVE_API_KEY", !!env.BINGX_LIVE_API_KEY],
     ["LIVE_API_SECRET", !!env.BINGX_LIVE_API_SECRET],
+    ["LIVE_CREDENTIALS_SEPARATE_FROM_DEMO", independent],
     ["LIVE_CONFIRMATION_SECRET", !!env.LIVE_CONTROL_TOKEN],
     ["LIVE_BASE_URL_LOCKED", LIVE_BASE === "https://open-api.bingx.com"]
   ];
