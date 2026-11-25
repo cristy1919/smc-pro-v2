@@ -47,7 +47,7 @@ export function validateLiveCandidate(candidate, {
   )) reasons.push("DUPLICATE_ENGINE_SYMBOL_SIDE");
   if (!finitePositive(markPrice)) reasons.push("LIVE_MARK_PRICE_UNAVAILABLE");
   if (!contract || !finitePositive(contract.minQty) || !finitePositive(contract.qtyStep) ||
-      !finitePositive(contract.tickSize) || !finitePositive(contract.minNotional)) reasons.push("CONTRACT_RULES_UNAVAILABLE");
+      !finitePositive(contract.tickSize) || !Number.isFinite(Number(contract.minNotional ?? 0)) || Number(contract.minNotional ?? 0) < 0) reasons.push("CONTRACT_RULES_UNAVAILABLE");
   if (![1, 0.5].includes(riskMultiple)) reasons.push("INVALID_RISK_MULTIPLE");
   const side = candidate?.direction === "BULLISH" || candidate?.direction === "LONG" ? "LONG" : "SHORT";
   const entry = Number(markPrice), stop = Number(candidate?.stopLoss), target = Number(candidate?.takeProfit);
@@ -147,7 +147,7 @@ export class BingXLiveExecutionAdapter {
       const verifiedLeverage = await this.client.getLeverage(symbol, leverageSide);
       if (Number(verifiedLeverage) !== decision.leverage) throw new Error("LIVE_LEVERAGE_VERIFICATION_FAILED");
       const quantity = this.client.roundQuantity(decision.riskBudget, markPrice, candidate.stopLoss, contract, decision.leverage, account.availableMargin);
-      if (!finitePositive(quantity) || quantity < Number(contract.minQty) || quantity * Number(markPrice) < Number(contract.minNotional) ||
+      if (!finitePositive(quantity) || quantity < Number(contract.minQty) || (Number(contract.minNotional) > 0 && quantity * Number(markPrice) < Number(contract.minNotional)) ||
           Math.abs(quantity / Number(contract.qtyStep) - Math.round(quantity / Number(contract.qtyStep))) > 1e-8)
         throw new Error("LIVE_ORDER_QUANTITY_INVALID");
       const bracket = {
