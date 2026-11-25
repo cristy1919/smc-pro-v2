@@ -3,7 +3,6 @@ import { getLiveReadiness } from "./live-execution.js";
 const positive = value => Number.isFinite(Number(value)) && Number(value) > 0;
 
 export async function manageLivePositions({ env, client, store, adapter, clock = () => Date.now() } = {}) {
-  if (env?.LIVE_TRADING_ENABLED !== "true") return { ok: true, skipped: true, reason: "LIVE_TRADING_DISABLED" };
   const readiness = getLiveReadiness(env);
   if (!readiness.ready) return { ok: false, skipped: true, reason: "LIVE_READINESS_BLOCKED", blockers: readiness.blockers };
   if (!client || !store || !adapter) return { ok: false, skipped: true, reason: "LIVE_MANAGEMENT_DEPENDENCIES_MISSING" };
