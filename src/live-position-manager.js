@@ -33,6 +33,88 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
 
   const [tracked, exchangePositions] = await Promise.all([store.listLivePositions(), client.getOpenPositions()]);
   const results = [];
+  for (const pending of tracked.filter(item => item?.mode === "BINGX_LIVE" && item.state === "PENDING")) {
+    try {
+      if (typeof client.getOrder !== "function" || typeof client.getPosition !== "function") {
+        results.push({ id: pending.id, action: "PENDING_ENTRY_REQUIRES_ORDER_RECONCILIATION" });
+        continue;
+      }
+      let order = await client.getOrder(pending.symbol, {
+        ...(pending.entryOrderId ? { orderId: pending.entryOrderId } : {}),
+        clientOrderId: pending.entryClientOrderId
+      });
+      let status = String(order?.status ?? "").toUpperCase().replaceAll("_", "");
+      let executed = Math.abs(Number(order?.executedQty ?? 0));
+      let exchangePosition = await client.getPosition(pending.symbol, pending.side);
+      if (["NEW", "PENDING", "PARTIALLYFILLED"].includes(status) &&
+          (status === "PARTIALLYFILLED" || clock() - Number(pending.openedAt) > 90000)) {
+        await client.cancelOrder(pending.symbol, {
+          ...(pending.entryOrderId ? { orderId: pending.entryOrderId } : {}),
+          clientOrderId: pending.entryClientOrderId
+        });
+        order = await client.getOrder(pending.symbol, {
+          ...(pending.entryOrderId ? { orderId: pending.entryOrderId } : {}),
+          clientOrderId: pending.entryClientOrderId
+        });
+        status = String(order?.status ?? "").toUpperCase().replaceAll("_", "");
+        executed = Math.abs(Number(order?.executedQty ?? 0));
+        exchangePosition = await client.getPosition(pending.symbol, pending.side);
+      }
+      if (!exchangePosition && ["CANCELLED", "CANCELED", "FAILED", "EXPIRED"].includes(status) && executed === 0) {
+        await store.markLivePositionClosed(pending.id, {
+          closedAt: clock(), closeReason: "PENDING_ENTRY_CANCELLED_WITHOUT_FILL"
+        });
+        if (pending.entryClientOrderId && typeof store.releaseEntrySlot === "function")
+          await store.releaseEntrySlot(pending.entryClientOrderId);
+        results.push({ id: pending.id, action: "PENDING_ENTRY_CANCELLED_UNFILLED" });
+        continue;
+      }
+      if (!exchangePosition || !["FILLED", "PARTIALLYFILLED", "CANCELLED", "CANCELED"].includes(status)) {
+        results.push({ id: pending.id, action: "PENDING_ENTRY_OUTCOME_UNKNOWN", status: status || "UNKNOWN" });
+        continue;
+      }
+      if (exchangePosition.isolated !== true && String(exchangePosition.marginType ?? "").toUpperCase() !== "ISOLATED") {
+        await client.emergencyClose({ symbol: pending.symbol, side: pending.side, position: exchangePosition });
+        const after = await client.getPosition(pending.symbol, pending.side);
+        if (after && Math.abs(Number(after.positionAmt)) > 0)
+          throw new Error("PENDING_ENTRY_CROSS_MARGIN_CLOSE_UNCONFIRMED");
+        await store.markLivePositionClosed(pending.id, { closedAt: clock(), closeReason: "PENDING_ENTRY_NOT_ISOLATED" });
+        if (pending.entryClientOrderId && typeof store.releaseEntrySlot === "function")
+          await store.releaseEntrySlot(pending.entryClientOrderId);
+        results.push({ id: pending.id, action: "PENDING_ENTRY_CLOSED_CROSS_MARGIN" });
+        continue;
+      }
+      const reconciled = await client.reconcilePosition(pending.symbol, pending.side);
+      if (!reconciled?.position || reconciled.protection?.stopLoss !== true || reconciled.protection?.takeProfit !== true) {
+        await client.emergencyClose({ symbol: pending.symbol, side: pending.side, position: reconciled?.position ?? exchangePosition });
+        const after = await client.getPosition(pending.symbol, pending.side);
+        if (after && Math.abs(Number(after.positionAmt)) > 0)
+          throw new Error("PENDING_ENTRY_PROTECTION_CLOSE_UNCONFIRMED");
+        await store.markLivePositionClosed(pending.id, { closedAt: clock(), closeReason: "PENDING_ENTRY_PROTECTION_MISSING" });
+        if (pending.entryClientOrderId && typeof store.releaseEntrySlot === "function")
+          await store.releaseEntrySlot(pending.entryClientOrderId);
+        results.push({ id: pending.id, action: "PENDING_ENTRY_CLOSED_MISSING_PROTECTION" });
+        continue;
+      }
+      const opened = {
+        ...pending, state: "OPEN", status: "OPEN",
+        positionId: String(exchangePosition.positionId ?? ""),
+        entry: Number(exchangePosition.entryPrice ?? exchangePosition.avgPrice ?? pending.entry),
+        quantity: Math.abs(Number(exchangePosition.positionAmt)),
+        qty: Math.abs(Number(exchangePosition.positionAmt)),
+        openedAt: Number(exchangePosition.time ?? pending.openedAt),
+        riskStatus: "ENTRY_RECONCILED",
+        exchangeOrderStatus: status
+      };
+      await store.saveLivePosition(opened);
+      if (pending.entryClientOrderId && typeof store.releaseEntrySlot === "function")
+        await store.releaseEntrySlot(pending.entryClientOrderId);
+      results.push({ id: pending.id, action: "PENDING_ENTRY_RECONCILED_OPEN" });
+    } catch (error) {
+      console.error("Pending live entry reconciliation failed", pending.id, String(error).slice(0, 200));
+      results.push({ id: pending.id, action: "PENDING_ENTRY_RECONCILIATION_ERROR", error: String(error).slice(0, 180) });
+    }
+  }
   for (const position of tracked.filter(item => item?.mode === "BINGX_LIVE" && item.state === "OPEN")) {
     try {
       const exchangePosition = exchangePositions.find(item =>
