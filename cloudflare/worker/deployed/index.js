@@ -2,6 +2,7 @@ import { getLiveReadiness, BingXLiveExecutionAdapter } from "./src/live-executio
 import { BingXLiveClient } from "./src/bingx-live-client.js";
 import { DurableObjectLiveStore } from "./src/live-state-store.js";
 import { manageLivePositions } from "./src/live-position-manager.js";
+import { runLiveSetupQueue } from "./src/live-runner.js";
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -7251,6 +7252,14 @@ var index_default = {
         const liveAdapter = new BingXLiveExecutionAdapter({ env, client: liveClient, store: liveStore });
         const management = await manageLivePositions({ env, client: liveClient, store: liveStore, adapter: liveAdapter });
         console.info("BingX live position management", JSON.stringify(management));
+        if (env.LIVE_TRADING_ENABLED === "true" && !AUTOMATION_STOP) {
+          const stateResponse = await liveStub.fetch(new Request("https://engine.internal/paper/status"));
+          const state = await stateResponse.json();
+          if (stateResponse.ok && state.storageDegraded !== true && Array.isArray(state.setups)) {
+            const entries = await runLiveSetupQueue({ env, setups: state.setups, client: liveClient, store: liveStore, adapter: liveAdapter, automationStopped: AUTOMATION_STOP });
+            if (entries.results?.length) console.info("BingX live scanner execution", JSON.stringify(entries));
+          } else console.warn("BingX live scanner execution skipped: scanner state unavailable");
+        }
       } catch (error) {
         console.error("BingX live position management blocked", String(error).slice(0, 220));
       }
@@ -7571,6 +7580,13 @@ var index_default = {
       const readiness = getLiveReadiness(env);
       const blockers = [...readiness.blockers];
       const runtimeChecks = [];
+      let activation = { active: false, id: null };
+      try {
+        if (env.ENGINE_STATE_V2) {
+          const activationStub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
+          activation = await new DurableObjectLiveStore({ stub: activationStub }).getActivation();
+        }
+      } catch { blockers.push("LIVE_ACTIVATION_STATE_UNAVAILABLE"); }
       if (!env.ENGINE_STATE_V2) blockers.push("LIVE_DURABLE_OBJECT_BINDING_MISSING");
       if (readiness.apiCredentialsConfigured && readiness.demoCredentialsIndependent) {
         try {
@@ -7600,11 +7616,38 @@ var index_default = {
         demoModeSelected: env.BINGX_TRADING_MODE === "demo",
         demoTradingEnabled: isBingXDemoConfigured(env),
         liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true, livePositionManagementIntegrated: true,
-        runtimeChecks,
+        runtimeChecks, activation: { active: activation.active === true, activatedAt: activation.activatedAt ?? null },
         maxOpenPositions: 10, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
         normalLeverage: { min: 20, max: 50 }, reducedRiskLeverage: { min: 5, max: 10 },
         blockers, reason: blockers.length ? "Live execution is integrated but blocked until the listed prerequisites and account checks pass." : "Live execution is configured and remains disabled until the separate activation flag and fresh user confirmation are supplied."
       }, { headers: { ...headers, "cache-control": "no-store" } });
+    }
+    if (url.pathname === "/api/live/activate" && request.method === "POST") {
+      if (env.LIVE_TRADING_ENABLED !== "true") return Response.json({ ok: false, error: "LIVE_TRADING_DISABLED" }, { status: 403, headers });
+      if (AUTOMATION_STOP) return Response.json({ ok: false, error: "AUTOMATION_EMERGENCY_STOP_ACTIVE" }, { status: 503, headers });
+      if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, error: "LIVE_CONTROL_AUTHORIZATION_REQUIRED" }, { status: 401, headers });
+      let body;
+      try { body = await request.json(); } catch { return Response.json({ ok: false, error: "INVALID_JSON_BODY" }, { status: 400, headers }); }
+      const confirmedAt = Number(body?.confirmedAt);
+      if (body?.confirmedByUser !== true || !Number.isFinite(confirmedAt) || Math.abs(Date.now() - confirmedAt) > 60000)
+        return Response.json({ ok: false, error: "FRESH_EXPLICIT_LIVE_ACTIVATION_CONFIRMATION_REQUIRED" }, { status: 400, headers });
+      const readiness = getLiveReadiness(env);
+      if (!readiness.ready) return Response.json({ ok: false, error: "LIVE_READINESS_BLOCKED", blockers: readiness.blockers }, { status: 503, headers });
+      const stub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
+      const activation = { active: true, id: crypto.randomUUID(), confirmedByUser: true, confirmedAt, activatedAt: Date.now() };
+      await new DurableObjectLiveStore({ stub }).setActivation(activation);
+      return Response.json({ ok: true, liveTradingEnabled: true, activation: { active: true, activatedAt: activation.activatedAt } }, { headers: { ...headers, "cache-control": "no-store" } });
+    }
+    if (url.pathname === "/api/live/deactivate" && request.method === "POST") {
+      if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, error: "LIVE_CONTROL_AUTHORIZATION_REQUIRED" }, { status: 401, headers });
+      let body;
+      try { body = await request.json(); } catch { return Response.json({ ok: false, error: "INVALID_JSON_BODY" }, { status: 400, headers }); }
+      const confirmedAt = Number(body?.confirmedAt);
+      if (body?.confirmedByUser !== true || !Number.isFinite(confirmedAt) || Math.abs(Date.now() - confirmedAt) > 60000)
+        return Response.json({ ok: false, error: "FRESH_EXPLICIT_LIVE_DEACTIVATION_CONFIRMATION_REQUIRED" }, { status: 400, headers });
+      const stub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
+      await new DurableObjectLiveStore({ stub }).setActivation({ active: false, id: crypto.randomUUID(), confirmedByUser: true, confirmedAt, activatedAt: null });
+      return Response.json({ ok: true, liveActivation: false }, { headers: { ...headers, "cache-control": "no-store" } });
     }
     if (url.pathname === "/api/live/execute" && request.method === "POST") {
       if (AUTOMATION_STOP) return Response.json({ ok: false, error: "AUTOMATION_EMERGENCY_STOP_ACTIVE" }, { status: 503, headers });
