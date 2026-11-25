@@ -30,6 +30,20 @@ export class DurableObjectLiveStore {
     await this.request("/live/idempotency/release", { key });
   }
 
+  async reserveEntrySlot(key, { symbol, side, observedOpenPositions = 0, maxPositions = 10, ttlMs = 120000 } = {}) {
+    if (typeof key !== "string" || !/^[a-zA-Z0-9_-]{12,40}$/.test(key) ||
+        typeof symbol !== "string" || !/^[A-Z0-9]{2,20}-USDT$/.test(symbol) ||
+        !["LONG", "SHORT"].includes(side)) return { claimed: false, reason: "INVALID_RESERVATION" };
+    return this.request("/live/entry/reserve", {
+      key, symbol, side, observedOpenPositions, maxPositions,
+      ttlMs: Math.min(300000, Math.max(30000, Number(ttlMs) || 120000)), now: this.now()
+    });
+  }
+
+  async releaseEntrySlot(key) {
+    await this.request("/live/entry/release", { key });
+  }
+
   async saveLivePosition(position) {
     if (!position || position.mode !== "BINGX_LIVE" || !allowedPositionStates.has(position.state))
       throw new Error("LIVE_POSITION_RECORD_INVALID");
