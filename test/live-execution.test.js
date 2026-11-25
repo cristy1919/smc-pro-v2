@@ -169,8 +169,9 @@ test("live position manager closes 50% at TP1 and moves stop to breakeven only o
   assert.equal(protectionCalls,1);
 });
 
-test("live manager refuses to manage when live trading flag is off", async () => {
-  const result=await manageLivePositions({env:{LIVE_TRADING_ENABLED:"false"}});
-  assert.equal(result.skipped,true);
-  assert.equal(result.reason,"LIVE_TRADING_DISABLED");
+test("live position manager continues managing existing positions when new live entries are disabled", async () => {
+  const env={LIVE_TRADING_ENABLED:"false",BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",BINGX_API_KEY:"demo",BINGX_API_SECRET:"demo-secret",LIVE_CONTROL_TOKEN:"control"};
+  const result=await manageLivePositions({env,client:{getOpenPositions:async()=>[]},store:{listLivePositions:async()=>[]},adapter:{}});
+  assert.equal(result.ok,true);
+  assert.equal(result.managed,0);
 });
