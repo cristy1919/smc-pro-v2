@@ -15,6 +15,7 @@ The production resources are the existing Cloudflare Workers `smcprov2` and `smc
 - BingX VST execution is fail-closed until `BINGX_API_KEY` and `BINGX_API_SECRET` exist as Cloudflare secrets and the demo mode flags are explicitly configured. Those secrets were not present in the audited Worker settings.
 - Live execution remains hard-disabled.
 - New VST entries, once credentials are configured, calculate 1R from **2% of current verified VST equity** at order time. Reduced-risk setups use 0.5R. The originally captured VST equity snapshot remains available for audit, not as the new-trade sizing base.
+- Score bands now match the requested boundaries: 0–59 RED, 60–64 WAIT, 65–69 WATCH, 70–83 QUALIFIED, 84–100 HIGH_QUALITY. Setup readiness follows those gates; minimum R:R is 1:1 and the standard target remains 3.5R.
 - Isolated margin and a leverage range of 20x–50x are enforced by the existing sizing/liquidation checks. Leverage below 20x is no longer selected for reduced-risk setups.
 - Cron is `* * * * *`; Durable Object alarms coordinate the scanner. Dashboard refresh does not invoke a scan.
 
