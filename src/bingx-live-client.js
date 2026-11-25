@@ -184,6 +184,15 @@ export class BingXLiveClient {
     await this.privateRequest("POST", "/openApi/swap/v2/trade/leverage", { symbol, side, leverage });
   }
 
+  roundPrice(price, contract) {
+    const value = Number(price), tick = Number(contract?.tickSize);
+    if (!positive(value) || !positive(tick)) throw new Error("LIVE_PRICE_TICK_INVALID");
+    const rounded = Math.round(value / tick) * tick;
+    const precision = Number.isInteger(Number(contract?.pricePrecision))
+      ? Math.max(0, Math.min(12, Number(contract.pricePrecision))) : 12;
+    return Number(rounded.toFixed(precision));
+  }
+
   roundQuantity(riskBudget, markPrice, stopLoss, contract, leverage, availableMargin) {
     const distance = Math.abs(Number(markPrice) - Number(stopLoss));
     if (![riskBudget, markPrice, distance, contract?.qtyStep, contract?.minQty].every(positive)) return 0;
