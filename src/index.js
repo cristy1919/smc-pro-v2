@@ -17,3 +17,4 @@ export * from "./legacy-dashboard-api.js";
 export * from "./risk-controller.js";
 
 export * from "./live-execution.js";
+export * from "./bingx-live-client.js";
