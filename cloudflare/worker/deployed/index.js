@@ -3632,7 +3632,7 @@ var EngineState = class {
       }));
     }
     const isPaperScan = request.method === "POST" && path === "/paper/scan";
-    const mutatesPaperLedger = request.method === "PUT" && path === "/state" || request.method === "POST" && ["/paper/scan", "/paper/close", "/paper/close-all", "/paper/settings", "/paper/capital-adjustment", "/runner"].includes(path);
+    const mutatesPaperLedger = request.method === "PUT" && path === "/state" || request.method === "POST" && ["/paper/scan", "/paper/close", "/paper/close-all", "/paper/settings", "/paper/capital-adjustment", "/runner", "/live/idempotency/claim", "/live/idempotency/release", "/live/positions"].includes(path);
     if (isPaperScan && this.scanInProgress) return Response.json({ ok: true, skipped: true, reason: "SCAN_ALREADY_IN_PROGRESS" }, { status: 202, headers: { "cache-control": "no-store" } });
     if (isPaperScan) { this.scanInProgress = true; this.scanStartedAt = Date.now(); }
     try {
@@ -4091,6 +4091,49 @@ var EngineState = class {
         count: candles.length,
         candles
       });
+    }
+    if (request.method === "POST" && url.pathname === "/live/idempotency/claim") {
+      const body = await request.json().catch(() => null);
+      const key = String(body?.key ?? "");
+      const ttlMs = Math.min(86400000, Math.max(60000, Number(body?.ttlMs) || 86400000));
+      if (!/^[a-zA-Z0-9_-]{12,40}$/.test(key)) return Response.json({ ok: false, error: "LIVE_IDEMPOTENCY_KEY_INVALID" }, { status: 400 });
+      const storageKey = "live-idempotency:" + key;
+      const current = await this.state.storage.get(storageKey);
+      if (current && Number(current.expiresAt) > Date.now()) return Response.json({ ok: true, claimed: false, state: current.state ?? "CLAIMED" });
+      await this.state.storage.put(storageKey, { state: "CLAIMED", claimedAt: Date.now(), expiresAt: Date.now() + ttlMs });
+      return Response.json({ ok: true, claimed: true });
+    }
+    if (request.method === "POST" && url.pathname === "/live/idempotency/release") {
+      const body = await request.json().catch(() => null);
+      const key = String(body?.key ?? "");
+      if (!/^[a-zA-Z0-9_-]{12,40}$/.test(key)) return Response.json({ ok: false, error: "LIVE_IDEMPOTENCY_KEY_INVALID" }, { status: 400 });
+      const storageKey = "live-idempotency:" + key;
+      const current = await this.state.storage.get(storageKey);
+      if (current?.state === "CLAIMED") await this.state.storage.delete(storageKey);
+      return Response.json({ ok: true, released: current?.state === "CLAIMED" });
+    }
+    if ((request.method === "GET" || request.method === "POST") && url.pathname === "/live/positions") {
+      const storageKey = "live-positions-v1";
+      if (request.method === "GET") {
+        const positions = await this.state.storage.get(storageKey) ?? [];
+        return Response.json({ ok: true, positions: Array.isArray(positions) ? positions : [] }, { headers: { "cache-control": "no-store" } });
+      }
+      const body = await request.json().catch(() => null);
+      const positions = await this.state.storage.get(storageKey) ?? [];
+      if (!Array.isArray(positions)) return Response.json({ ok: false, error: "LIVE_POSITION_STORAGE_CORRUPT" }, { status: 503 });
+      if (body?.operation === "upsert" && body.position?.mode === "BINGX_LIVE" && typeof body.position.id === "string") {
+        const next = positions.filter(item => String(item.id) !== body.position.id);
+        next.push(body.position);
+        await this.state.storage.put(storageKey, next.slice(-500));
+        return Response.json({ ok: true, persisted: true });
+      }
+      if (body?.operation === "close" && typeof body.id === "string") {
+        const next = positions.map(item => String(item.id) === body.id
+          ? { ...item, state: "CLOSED", ...body.metadata } : item);
+        await this.state.storage.put(storageKey, next);
+        return Response.json({ ok: true, persisted: true });
+      }
+      return Response.json({ ok: false, error: "LIVE_POSITION_OPERATION_INVALID" }, { status: 400 });
     }
     if ((request.method === "GET" || request.method === "POST") && url.pathname === "/paper/state") {
       const allowedKeys = /* @__PURE__ */ new Set(["engine-state", "bingx-demo-position-meta", "bingx-demo-executed-setup-keys", "bingx-demo-pending-limit-entries", "bingx-demo-protection-health-v1", "state-recovery-notice", "state-recovery-retry", "paper-runner-explicitly-paused", "runner-configured", "bingx-vst-closed-trades-v1", "bingx-vst-closed-strategy-meta-v1", "bingx-demo-order-history-v1"]);
