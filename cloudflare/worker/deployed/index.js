@@ -7691,6 +7691,11 @@ var index_default = {
         const riskMultiple = Number(setup.riskMultiplier) === 0.5 || setup.countertrend === true || setup.htfAligned === false || Number(setup.score) < 80 ? 0.5 : 1;
         const client = new BingXLiveClient({ apiKey: env.BINGX_LIVE_API_KEY, apiSecret: env.BINGX_LIVE_API_SECRET });
         const markPrice = await client.getMarkPrice(symbol);
+        const zone = setup.audit?.zone ?? setup.zone ?? null;
+        const zoneLow = Number(zone?.bottom ?? zone?.low), zoneHigh = Number(zone?.top ?? zone?.high);
+        if (!Number.isFinite(zoneLow) || !Number.isFinite(zoneHigh) || zoneLow <= 0 || zoneHigh <= zoneLow ||
+            markPrice < zoneLow || markPrice > zoneHigh)
+          return Response.json({ ok: false, error: "LIVE_ENTRY_OUTSIDE_VALID_ZONE" }, { status: 409, headers });
         const stopLoss = Number(setup.stopLoss), takeProfit = Number(setup.takeProfit ?? setup.tp3 ?? setup.tp2 ?? setup.tp1);
         const unitRiskFraction = (Math.abs(markPrice - stopLoss) + markPrice * (FEE_RATE + SLIPPAGE_RATE) + stopLoss * (FEE_RATE + SLIPPAGE_RATE)) / markPrice;
         const minLeverage = riskMultiple === 0.5 ? 5 : 20, maxLeverage = riskMultiple === 0.5 ? 10 : 50;
