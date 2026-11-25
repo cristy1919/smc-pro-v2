@@ -7627,7 +7627,7 @@ var index_default = {
         demoCredentialsConfigured: !!env.BINGX_API_KEY && !!env.BINGX_API_SECRET,
         demoModeSelected: env.BINGX_TRADING_MODE === "demo",
         demoTradingEnabled: isBingXDemoConfigured(env),
-        liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true, livePositionManagementIntegrated: true,
+        liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true, livePositionManagementIntegrated: true, liveRunnerIntegrated: true, explicitActivationRequired: true,
         runtimeChecks, activation: { active: activation.active === true, activatedAt: activation.activatedAt ?? null },
         maxOpenPositions: 10, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
         normalLeverage: { min: 20, max: 50 }, reducedRiskLeverage: { min: 5, max: 10 },
