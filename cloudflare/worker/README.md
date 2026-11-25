@@ -29,7 +29,8 @@ The production resources are the existing Cloudflare Workers `smcprov2` and `smc
 ## Repository integration boundary
 
 - The repository holds independently testable strategy, market-data, risk, and backtest modules.
-- The production Worker still runs its existing embedded bundle. The repository now includes a separately tested paper-ledger accounting module (`cloudflare/worker/src/paper-ledger-accounting.js`) and regression tests, but the complete embedded production bundle is not yet reproducibly built from the repository modules. The deployed bundle was updated in place; do not overwrite it from the skeletal source tree until full integration and state-schema compatibility are tested.
+- The exact deployed bundles are now tracked in `cloudflare/worker/deployed/index.js` and `cloudflare/dashboard/deployed/index.js`. The Worker version deployed is `65b86fa0-f51a-449d-b9fe-b1d3c297b3af`; the dashboard version is `9457036e-3763-4c49-845b-da9e9d142caa`.
+- The repository also contains the separately testable paper-ledger accounting module (`cloudflare/worker/src/paper-ledger-accounting.js`) and regression tests. The complete production bundle is preserved exactly, but the modular strategy sources are not yet the reproducible build input for that bundle. Do not overwrite the existing Worker from the skeletal source tree until full integration and state-schema compatibility are tested.
 - The read-only 30/60/90-day VST backtest workflow requires GitHub secrets `BINGX_API_KEY` and `BINGX_SECRET_KEY` (the script also accepts `BINGX_API_SECRET`). No authenticated VST backtest has been run; no profitability, expectancy, or drawdown claims are available.
 
 ## Safety gates
