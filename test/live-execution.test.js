@@ -339,3 +339,11 @@ test("live position management remains available with only live credentials afte
   assert.equal(result.ok,true);
   assert.equal(closed.id,"live-pos-001");
 });
+
+test("live readiness does not require unused demo private keys but refuses partial or reused demo credentials", () => {
+  const liveOnly=getLiveReadiness({BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",LIVE_CONTROL_TOKEN:"control"});
+  assert.equal(liveOnly.ready,true);
+  const partialDemo=getLiveReadiness({BINGX_API_KEY:"demo",BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",LIVE_CONTROL_TOKEN:"control"});
+  assert.equal(partialDemo.ready,false);
+  assert.ok(partialDemo.blockers.includes("LIVE_CREDENTIALS_SEPARATE_FROM_DEMO"));
+});
