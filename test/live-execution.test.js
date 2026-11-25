@@ -420,3 +420,28 @@ test("live management refuses a reused or partial demo credential pair", () => {
   assert.equal(reused.ready, false);
   assert.ok(reused.blockers.includes("LIVE_CREDENTIALS_SEPARATE_FROM_DEMO"));
 });
+
+
+test("live market entry serializes attached stop-loss and take-profit as numeric JSON parameters", async () => {
+  let body = null;
+  const client = new BingXLiveClient({
+    apiKey: "live", apiSecret: "secret",
+    fetchImpl: async (_url, init) => {
+      body = new URLSearchParams(init.body);
+      return new Response(JSON.stringify({ code: 0, data: { orderID: "live-order-001" } }), { status: 200 });
+    }
+  });
+  const result = await client.placeEntryWithProtection({
+    symbol: "BTC-USDT", side: "LONG", quantity: 0.01, marginMode: "ISOLATED",
+    bracket: { stopLoss: 99000, takeProfit: 103500 }, clientOrderId: "smc-live-order-001"
+  });
+  assert.equal(result.orderID, "live-order-001");
+  const sl = JSON.parse(body.get("stopLoss"));
+  const tp = JSON.parse(body.get("takeProfit"));
+  assert.equal(sl.type, "STOP_MARKET");
+  assert.equal(sl.stopPrice, 99000);
+  assert.equal(tp.type, "TAKE_PROFIT_MARKET");
+  assert.equal(tp.stopPrice, 103500);
+  assert.equal(body.get("positionSide"), "LONG");
+  assert.equal(body.get("clientOrderId"), "smc-live-order-001");
+});
