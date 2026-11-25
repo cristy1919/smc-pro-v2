@@ -137,12 +137,12 @@ export class BingXLiveClient {
     await this.privateRequest("POST", "/openApi/swap/v2/trade/leverage", { symbol, side, leverage });
   }
 
-  roundQuantity(riskBudget, markPrice, stopLoss, contract, leverage) {
+  roundQuantity(riskBudget, markPrice, stopLoss, contract, leverage, availableMargin) {
     const distance = Math.abs(Number(markPrice) - Number(stopLoss));
     if (![riskBudget, markPrice, distance, contract?.qtyStep, contract?.minQty].every(positive)) return 0;
     const unitRisk = distance + Number(markPrice) * 0.0014;
     const riskLimitedNotional = Number(riskBudget) * Number(markPrice) / unitRisk;
-    const maxMarginNotional = Number(riskBudget) * Number(leverage);
+    const maxMarginNotional = Number(availableMargin) * Number(leverage) * 0.95;
     const notional = Math.min(riskLimitedNotional, maxMarginNotional);
     const raw = notional / Number(markPrice);
     const quantity = Math.floor(raw / Number(contract.qtyStep) + 1e-10) * Number(contract.qtyStep);
