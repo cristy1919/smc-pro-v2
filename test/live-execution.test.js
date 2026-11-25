@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getLiveReadiness, validateLiveCandidate, BingXLiveExecutionAdapter } from "../src/live-execution.js";
+import { getLiveReadiness, getLiveManagementReadiness, validateLiveCandidate, BingXLiveExecutionAdapter } from "../src/live-execution.js";
 
 const baseCandidate = (overrides = {}) => ({
   id: "scalp-setup-001", engine: "scalp", symbol: "BTC-USDT", direction: "BULLISH",
@@ -413,7 +413,6 @@ test("hedge-mode reduction uses the matching side and omits reduceOnly", async (
 });
 
 test("live management refuses a reused or partial demo credential pair", () => {
-  const { getLiveManagementReadiness } = await import("../src/live-execution.js");
   const reused = getLiveManagementReadiness({
     BINGX_LIVE_API_KEY: "same", BINGX_LIVE_API_SECRET: "same-secret",
     BINGX_API_KEY: "same", BINGX_API_SECRET: "same-secret", LIVE_CONTROL_TOKEN: "control"
