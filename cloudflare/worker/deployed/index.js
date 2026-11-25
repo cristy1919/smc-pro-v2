@@ -7541,7 +7541,27 @@ var index_default = {
     if (url.pathname === "/api/live/status" && request.method === "GET") {
       const readiness = getLiveReadiness(env);
       const blockers = [...readiness.blockers];
+      const runtimeChecks = [];
       if (!env.ENGINE_STATE_V2) blockers.push("LIVE_DURABLE_OBJECT_BINDING_MISSING");
+      if (readiness.apiCredentialsConfigured && readiness.demoCredentialsIndependent) {
+        try {
+          const client = new BingXLiveClient({ apiKey: env.BINGX_LIVE_API_KEY, apiSecret: env.BINGX_LIVE_API_SECRET });
+          const [account, hedgeMode, positions, orders] = await Promise.all([
+            client.getAccountSnapshot(), client.getPositionMode(), client.getOpenPositions(), client.getOpenOrders()
+          ]);
+          runtimeChecks.push({ name: "LIVE_PRIVATE_API", passed: account?.source === "BINGX_LIVE" && account.asset === "USDT" });
+          runtimeChecks.push({ name: "LIVE_HEDGE_MODE", passed: hedgeMode === true });
+          runtimeChecks.push({ name: "LIVE_POSITION_SNAPSHOT", passed: Array.isArray(positions) });
+          runtimeChecks.push({ name: "LIVE_OPEN_ORDER_SNAPSHOT", passed: Array.isArray(orders) });
+          if (hedgeMode !== true) blockers.push("LIVE_HEDGE_MODE_REQUIRED");
+          if (!Array.isArray(positions) || positions.length > 10) blockers.push("LIVE_POSITION_SNAPSHOT_INVALID_OR_OVER_LIMIT");
+          if (positions.some(position => position.isolated !== true && String(position.marginType ?? "").toUpperCase() !== "ISOLATED"))
+            blockers.push("EXISTING_LIVE_POSITION_NOT_ISOLATED");
+        } catch (error) {
+          runtimeChecks.push({ name: "LIVE_PRIVATE_API", passed: false, error: String(error).slice(0, 180) });
+          blockers.push("LIVE_PRIVATE_API_OR_ACCOUNT_CHECK_FAILED");
+        }
+      }
       return Response.json({
         ok: true, mode: "live-readiness", ready: blockers.length === 0,
         liveTradingEnabled: env.LIVE_TRADING_ENABLED === "true",
@@ -7551,9 +7571,10 @@ var index_default = {
         demoModeSelected: env.BINGX_TRADING_MODE === "demo",
         demoTradingEnabled: isBingXDemoConfigured(env),
         liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true,
+        runtimeChecks,
         maxOpenPositions: 10, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
         normalLeverage: { min: 20, max: 50 }, reducedRiskLeverage: { min: 5, max: 10 },
-        blockers, reason: blockers.length ? "Live execution is integrated but blocked until the listed prerequisites are satisfied." : "Live execution is configured and remains disabled until the separate activation flag and user confirmation are supplied."
+        blockers, reason: blockers.length ? "Live execution is integrated but blocked until the listed prerequisites and account checks pass." : "Live execution is configured and remains disabled until the separate activation flag and fresh user confirmation are supplied."
       }, { headers: { ...headers, "cache-control": "no-store" } });
     }
     if (url.pathname === "/api/live/execute" && request.method === "POST") {
