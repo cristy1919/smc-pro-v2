@@ -325,3 +325,17 @@ test("live activation invalidation is a system-only disable path and never grant
   assert.equal(posted.systemInvalidation,true);
   assert.equal(posted.confirmedByUser,false);
 });
+
+test("live position management remains available with only live credentials after entry flag is off", async () => {
+  const env={LIVE_TRADING_ENABLED:"false",BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",LIVE_CONTROL_TOKEN:"control"};
+  const client={
+    closePosition:async()=>({orderID:"close-001"}),
+    getPosition:async()=>null
+  };
+  let closed=null;
+  const store={markLivePositionClosed:async(id,meta)=>{closed={id,meta};}};
+  const adapter=new BingXLiveExecutionAdapter({env,client,store,clock:()=>1000});
+  const result=await adapter.close({id:"live-pos-001",mode:"BINGX_LIVE",state:"OPEN",symbol:"BTC-USDT",side:"LONG"});
+  assert.equal(result.ok,true);
+  assert.equal(closed.id,"live-pos-001");
+});
