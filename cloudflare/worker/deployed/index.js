@@ -4152,7 +4152,7 @@ var EngineState = class {
       }
       if (body?.operation === "close" && typeof body.id === "string") {
         const next = positions.map(item => String(item.id) === body.id
-          ? { ...item, state: "CLOSED", ...body.metadata } : item);
+          ? { ...item, state: "CLOSED", status: "CLOSED", ...body.metadata } : item);
         await this.state.storage.put(storageKey, next);
         return Response.json({ ok: true, persisted: true });
       }
