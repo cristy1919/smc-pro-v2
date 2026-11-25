@@ -87,6 +87,23 @@ export class BingXLiveExecutionAdapter {
 
   readiness() { return getLiveReadiness(this.env); }
 
+  async emergencyCloseAndVerify(record, exchangePosition, reason) {
+    let persisted = false;
+    try {
+      await this.store.saveLivePosition(record);
+      persisted = true;
+    } catch { /* exchange closure is still attempted even if local persistence is degraded */ }
+    await this.client.emergencyClose({ symbol: record.symbol, side: record.side, position: exchangePosition ?? null });
+    const after = await this.client.getPosition(record.symbol, record.side);
+    if (after && Math.abs(Number(after.positionAmt)) > 0)
+      throw new Error(reason + "_EMERGENCY_CLOSE_NOT_CONFIRMED");
+    if (persisted) {
+      try { await this.store.markLivePositionClosed(record.id, { closedAt: this.clock(), closeReason: reason }); }
+      catch { /* next reconciliation cycle will mark the now-flat record closed */ }
+    }
+    throw new Error(reason + "_POSITION_CLOSED");
+  }
+
   async submit(candidate, { riskMultiple, confirmation, idempotencyKey } = {}) {
     riskMultiple = Number.isFinite(riskMultiple) ? riskMultiple : Number(candidate?.riskMultiplier ?? 1);
     const readiness = this.readiness();
@@ -172,11 +189,19 @@ export class BingXLiveExecutionAdapter {
       if (!synced?.position || synced.protection?.stopLoss !== true || synced.protection?.takeProfit !== true ||
           !finitePositive(actualEntry) || !finitePositive(actualQuantity) || !actualStopValid ||
           actualRewardRisk < RISK_CONFIG.minRewardRisk || actualRisk > decision.riskBudget * 1.1) {
-        await this.client.emergencyClose({ symbol, side: decision.side, position: synced?.position ?? null });
-        const afterClose = await this.client.getPosition(symbol, decision.side);
-        if (afterClose && Math.abs(Number(afterClose.positionAmt)) > 0)
-          throw new Error("LIVE_POST_FILL_GUARD_EMERGENCY_CLOSE_NOT_CONFIRMED");
-        throw new Error("LIVE_POST_FILL_GUARD_REJECTED_POSITION_CLOSED");
+        const emergencyRecord = {
+          id: String(synced?.position?.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
+          candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
+          quantity: finitePositive(actualQuantity) ? actualQuantity : quantity,
+          entry: finitePositive(actualEntry) ? actualEntry : markPrice,
+          stopLoss: Number(candidate.stopLoss), takeProfit: Number(candidate.takeProfit),
+          tp1: Number(candidate.tp1 ?? candidate.takeProfit), tp2: Number(candidate.tp2 ?? candidate.takeProfit),
+          leverage: decision.leverage, marginMode: "ISOLATED", riskMultiple,
+          riskBudget: decision.riskBudget, mode: "BINGX_LIVE", state: "OPEN",
+          openedAt: this.clock(), riskStatus: "EMERGENCY_CLOSE_REQUIRED",
+          entryOrderId: String(order?.orderID ?? order?.orderId ?? idempotencyKey)
+        };
+        await this.emergencyCloseAndVerify(emergencyRecord, synced?.position, "LIVE_POST_FILL_GUARD");
       }
       const position = {
         id: String(synced.position.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
@@ -190,11 +215,8 @@ export class BingXLiveExecutionAdapter {
       try {
         await this.store.saveLivePosition(position);
       } catch (storageError) {
-        await this.client.emergencyClose({ symbol, side: decision.side, position: synced.position });
-        const afterClose = await this.client.getPosition(symbol, decision.side);
-        if (afterClose && Math.abs(Number(afterClose.positionAmt)) > 0)
-          throw new Error("LIVE_POSITION_PERSISTENCE_FAILED_EMERGENCY_CLOSE_UNCONFIRMED");
-        throw new Error("LIVE_POSITION_PERSISTENCE_FAILED_POSITION_CLOSED:" + String(storageError).slice(0, 100));
+        await this.emergencyCloseAndVerify({ ...position, riskStatus: "POSITION_PERSISTENCE_FAILED" }, synced.position,
+          "LIVE_POSITION_PERSISTENCE_FAILED");
       }
       return { ok: true, position };
     } catch (error) {
