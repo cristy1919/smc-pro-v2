@@ -79,6 +79,11 @@ export class BingXLiveClient {
     return { source: "BINGX_LIVE", asset: "USDT", equity, availableMargin, balance: Number(usdt.balance), fetchedAt: this.now() };
   }
 
+  async getOpenOrders() {
+    const rows = await this.privateRequest("GET", "/openApi/swap/v2/trade/openOrders");
+    return Array.isArray(rows) ? rows : rows?.orders ?? [];
+  }
+
   async getOpenPositions() {
     const rows = await this.privateRequest("GET", "/openApi/swap/v2/user/positions");
     return (Array.isArray(rows) ? rows : rows?.positions ?? []).filter(p => Math.abs(Number(p.positionAmt)) > 0)
