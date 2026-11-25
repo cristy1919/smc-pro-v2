@@ -281,7 +281,9 @@ test("live adapter accepts a durable user activation for automated scanner entri
     getActivation:async()=>({active:true,id:"activation-123456",confirmedByUser:true}),
     claimIdempotencyKey:async()=>true,
     releaseIdempotencyKey:async()=>{},
-    saveLivePosition:async p=>{saved=p;}
+    saveLivePosition:async p=>{saved=p;},
+    reserveEntrySlot:async()=>({claimed:true}),
+    releaseEntrySlot:async()=>{}
   };
   const adapter=new BingXLiveExecutionAdapter({env,client,store,clock:()=>1700000000000});
   const result=await adapter.submit(baseCandidate(),{
