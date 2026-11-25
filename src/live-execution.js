@@ -135,7 +135,7 @@ export class BingXLiveExecutionAdapter {
         stopLoss: Number(candidate.stopLoss), takeProfit: Number(candidate.takeProfit),
         workingType: "MARK_PRICE", quantity
       };
-      const order = await this.client.placeEntryWithProtection({
+      accepted = true; // From this point, a network timeout may still mean BingX accepted the order; never release the idempotency claim.\n      const order = await this.client.placeEntryWithProtection({
         symbol, side: decision.side, quantity, marginMode: "ISOLATED",
         leverage: decision.leverage, bracket, clientOrderId: idempotencyKey
       });
