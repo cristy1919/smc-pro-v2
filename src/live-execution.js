@@ -115,7 +115,7 @@ export class BingXLiveExecutionAdapter {
   readiness() { return getLiveReadiness(this.env); }
   managementReadiness() { return getLiveManagementReadiness(this.env); }
 
-  async emergencyCloseAndVerify(record, exchangePosition, reason) {
+  async emergencyCloseAndVerify(record, exchangePosition, reason, reservationKey) {
     let persisted = false;
     try {
       await this.store.saveLivePosition(record);
@@ -128,6 +128,9 @@ export class BingXLiveExecutionAdapter {
     if (persisted) {
       try { await this.store.markLivePositionClosed(record.id, { closedAt: this.clock(), closeReason: reason }); }
       catch { /* next reconciliation cycle will mark the now-flat record closed */ }
+    }
+    if (reservationKey && typeof this.store.releaseEntrySlot === "function") {
+      try { await this.store.releaseEntrySlot(reservationKey); } catch { /* reservation expires automatically */ }
     }
     throw new Error(reason + "_POSITION_CLOSED");
   }
@@ -156,12 +159,15 @@ export class BingXLiveExecutionAdapter {
       throw new Error("LIVE_HEDGE_MODE_REQUIRED");
     if (typeof this.client.getOpenOrders !== "function") throw new Error("LIVE_OPEN_ORDER_SNAPSHOT_REQUIRED");
     if (typeof this.store.claimIdempotencyKey !== "function" ||
-        typeof this.store.releaseIdempotencyKey !== "function")
-      throw new Error("LIVE_IDEMPOTENCY_STORE_REQUIRED");
+        typeof this.store.releaseIdempotencyKey !== "function" ||
+        typeof this.store.reserveEntrySlot !== "function" ||
+        typeof this.store.releaseEntrySlot !== "function")
+      throw new Error("LIVE_IDEMPOTENCY_AND_CAPACITY_STORE_REQUIRED");
     if (!await this.store.claimIdempotencyKey(idempotencyKey, { ttlMs: 86400000 }))
       throw new Error("DUPLICATE_LIVE_REQUEST");
 
     let accepted = false;
+    let reserved = false;
     try {
       const [account, positions, openOrders, markPrice, contract] = await Promise.all([
         this.client.getAccountSnapshot(), this.client.getOpenPositions(), this.client.getOpenOrders(),
@@ -200,6 +206,12 @@ export class BingXLiveExecutionAdapter {
       if (!finitePositive(quantity) || quantity < Number(contract.minQty) || (Number(contract.minNotional) > 0 && quantity * Number(markPrice) < Number(contract.minNotional)) ||
           Math.abs(quantity / Number(contract.qtyStep) - Math.round(quantity / Number(contract.qtyStep))) > 1e-8)
         throw new Error("LIVE_ORDER_QUANTITY_INVALID");
+      const slot = await this.store.reserveEntrySlot(idempotencyKey, {
+        symbol, side: decision.side, observedOpenPositions: positions.length,
+        maxPositions: RISK_CONFIG.maxOpenPositions, ttlMs: 120000
+      });
+      if (slot?.claimed !== true) throw new Error("LIVE_ENTRY_SLOT_REJECTED:" + String(slot?.reason ?? "UNKNOWN"));
+      reserved = true;
       const bracket = {
         stopLoss: Number(normalizedCandidate.stopLoss), takeProfit: Number(normalizedCandidate.takeProfit),
         workingType: "MARK_PRICE", quantity
@@ -238,7 +250,7 @@ export class BingXLiveExecutionAdapter {
           openedAt: this.clock(), riskStatus: "EMERGENCY_CLOSE_REQUIRED",
           entryOrderId: String(order?.orderID ?? order?.orderId ?? idempotencyKey)
         };
-        await this.emergencyCloseAndVerify(emergencyRecord, synced?.position, "LIVE_POST_FILL_GUARD");
+        await this.emergencyCloseAndVerify(emergencyRecord, synced?.position, "LIVE_POST_FILL_GUARD", idempotencyKey);
       }
       const position = {
         id: String(synced.position.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
@@ -254,11 +266,16 @@ export class BingXLiveExecutionAdapter {
         await this.store.saveLivePosition(position);
       } catch (storageError) {
         await this.emergencyCloseAndVerify({ ...position, riskStatus: "POSITION_PERSISTENCE_FAILED" }, synced.position,
-          "LIVE_POSITION_PERSISTENCE_FAILED");
+          "LIVE_POSITION_PERSISTENCE_FAILED", idempotencyKey);
       }
+      await this.store.releaseEntrySlot(idempotencyKey);
+      reserved = false;
       return { ok: true, position };
     } catch (error) {
-      if (!accepted) await this.store.releaseIdempotencyKey(idempotencyKey);
+      if (!accepted) {
+        if (reserved) await this.store.releaseEntrySlot(idempotencyKey);
+        await this.store.releaseIdempotencyKey(idempotencyKey);
+      }
       throw error;
     }
   }
