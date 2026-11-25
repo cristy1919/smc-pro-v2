@@ -1,4 +1,6 @@
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import assert from "node:assert/strict";
 import { DASHBOARD_TABS } from "../src/config.js";
 import { buildDashboardSnapshot, buildLegacyDashboardPayload, createDashboardActions, toLegacyDashboardCandidate } from "../src/dashboard-model.js";
@@ -48,4 +50,17 @@ test("position close action validates percentage and forwards user selection", a
   await actions.close({positionId:"p1",closePercent:35});
   assert.deepEqual(received,{positionId:"p1",closePercent:35});
   await assert.rejects(()=>actions.close({positionId:"p1",closePercent:101}),RangeError);
+});
+
+test("deployed dashboard module and inline browser script parse successfully", () => {
+  const source = readFileSync(new URL("../cloudflare/dashboard/deployed/index.js", import.meta.url), "utf8");
+  const moduleSource = source.replace("export default {", "const __default = {");
+  assert.doesNotThrow(() => new vm.Script(moduleSource), "dashboard Worker module must parse");
+  const html = vm.runInNewContext(moduleSource + "\\nDASHBOARD_HTML");
+  const script = html.match(/<script>([\\s\\S]*?)<\\/script>/);
+  assert.ok(script, "inline dashboard script must be present");
+  assert.doesNotThrow(() => new vm.Script(script[1]), "inline dashboard JavaScript must parse");
+  for (const metric of ["LONG / SHORT performansı", "Sembol performansı", "Komisyon toplamı", "Funding toplamı", "En uzun kazanç serisi"]) {
+    assert.ok(script[1].includes(metric), "missing statistics section: " + metric);
+  }
 });
