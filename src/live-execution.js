@@ -37,7 +37,7 @@ export function validateLiveCandidate(candidate, {
   if (!SYMBOL_RE.test(candidate?.symbol ?? "")) reasons.push("INVALID_SYMBOL");
   if (!["LONG", "SHORT", "BULLISH", "BEARISH"].includes(candidate?.direction)) reasons.push("INVALID_DIRECTION");
   if (!explicitConfirmation) reasons.push("EXPLICIT_LIVE_CONFIRMATION_REQUIRED");
-  if (typeof idempotencyKey !== "string" || idempotencyKey.length < 12 || idempotencyKey.length > 40) reasons.push("IDEMPOTENCY_KEY_REQUIRED");
+  if (typeof idempotencyKey !== "string" || !/^[a-zA-Z0-9_-]{12,40}$/.test(idempotencyKey)) reasons.push("IDEMPOTENCY_KEY_REQUIRED");
   if (!finitePositive(equity) || !finitePositive(availableMargin)) reasons.push("LIVE_ACCOUNT_BALANCE_UNAVAILABLE");
   if (!Array.isArray(openPositions)) reasons.push("LIVE_POSITION_SNAPSHOT_UNAVAILABLE");
   else if (openPositions.length >= RISK_CONFIG.maxOpenPositions) reasons.push("MAX_OPEN_POSITIONS");
@@ -201,7 +201,7 @@ export class BingXLiveExecutionAdapter {
     if (!Number.isFinite(fraction) || fraction <= 0 || fraction >= 1)
       throw new Error("INVALID_PARTIAL_CLOSE_FRACTION");
     const current = await this.client.getPosition(position.symbol, position.side);
-    const currentQty = Number(current?.positionAmt);
+    const currentQty = Math.abs(Number(current?.positionAmt));
     if (!finitePositive(currentQty)) throw new Error("LIVE_POSITION_QUANTITY_UNAVAILABLE");
     const contract = await this.client.getContractRules(position.symbol);
     if (!finitePositive(contract?.qtyStep)) throw new Error("LIVE_CONTRACT_STEP_UNAVAILABLE");
@@ -211,10 +211,9 @@ export class BingXLiveExecutionAdapter {
       throw new Error("LIVE_PARTIAL_CLOSE_QUANTITY_INVALID");
     const result = await this.client.reducePosition({ symbol: position.symbol, side: position.side, quantity });
     const remaining = await this.client.getPosition(position.symbol, position.side);
-    if (!remaining || !Number.isFinite(Number(remaining.positionAmt)) || Number(remaining.positionAmt) < 0 ||
-        Number(remaining.positionAmt) >= currentQty)
+    if (!remaining || !Number.isFinite(Number(remaining.positionAmt)) || Math.abs(Number(remaining.positionAmt)) >= currentQty)
       throw new Error("LIVE_PARTIAL_CLOSE_NOT_CONFIRMED");
-    return { ok: true, result, remainingQuantity: Number(remaining.positionAmt) };
+    return { ok: true, result, remainingQuantity: Math.abs(Number(remaining.positionAmt)) };
   }
 
   async close(position) {
