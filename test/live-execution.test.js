@@ -537,3 +537,51 @@ test("stale pending live entry is cancelled and released only after zero-fill co
   assert.equal(closed,true);
   assert.equal(released,true);
 });
+
+
+test("live TP1 partial close uses a stable client order ID and verifies fill before returning", async () => {
+  let quantity = 2, sentClientOrderId = null;
+  const env={BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",LIVE_CONTROL_TOKEN:"control"};
+  const client={
+    getPosition:async()=>({positionAmt:String(quantity)}),
+    getContractRules:async()=>({qtyStep:0.1,minQty:0.1}),
+    reducePosition:async args=>{sentClientOrderId=args.clientOrderId;quantity=1;return {orderID:"tp1-order"};},
+    getOrder:async(_symbol,{clientOrderId})=>({status:"FILLED",executedQty:"1",clientOrderId})
+  };
+  const adapter=new BingXLiveExecutionAdapter({env,client,store:{},clock:()=>1000});
+  const result=await adapter.partialClose({id:"live-smc-123456789012345678901234567890",mode:"BINGX_LIVE",state:"OPEN",symbol:"BTC-USDT",side:"LONG"},0.5,"tp1-smc-123456789012345678901234");
+  assert.equal(result.remainingQuantity,1);
+  assert.equal(sentClientOrderId,"tp1-smc-123456789012345678901234");
+});
+
+test("pending TP1 close recovers from exchange fill without sending a duplicate partial order", async () => {
+  let saved=null, protectionCalls=0;
+  const position={
+    id:"live-smc-123456789012345678901234567890",mode:"BINGX_LIVE",state:"OPEN",
+    symbol:"BTC-USDT",side:"LONG",entry:100,stopLoss:95,tp1:110,takeProfit:120,
+    quantity:2,qty:2,stage:0,tp1ExecutionState:"PENDING",
+    tp1ClientOrderId:"tp1-smc-123456789012345678901234",tp1Attempt:1,tp1ExecutionStartedAt:1000
+  };
+  const store={
+    listLivePositions:async()=>[position],
+    saveLivePosition:async p=>{saved=p;},
+    markLivePositionClosed:async()=>{throw new Error("should not close");}
+  };
+  const client={
+    getOpenPositions:async()=>[{symbol:"BTC-USDT",side:"LONG",positionAmt:"1",isolated:true}],
+    getMarkPrice:async()=>111,
+    reconcilePosition:async()=>({position:{positionAmt:"1"},protection:{stopLoss:true,takeProfit:true}}),
+    getOrder:async()=>({status:"FILLED",executedQty:"1"}),
+    getPosition:async()=>({positionAmt:"1",entryPrice:100,isolated:true})
+  };
+  const adapter={
+    updateProtection:async(_p,levels)=>{protectionCalls++;assert.equal(levels.stopLoss,100);}
+  };
+  const env={BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",LIVE_CONTROL_TOKEN:"control"};
+  const result=await manageLivePositions({env,client,store,adapter,clock:()=>2000});
+  assert.equal(result.results[0].action,"TP1_PARTIAL_CLOSE_RECOVERED");
+  assert.equal(saved.stage,1);
+  assert.equal(saved.quantity,1);
+  assert.equal(saved.tp1ExecutionState,"CONFIRMED");
+  assert.equal(protectionCalls,1);
+});
