@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { DASHBOARD_TABS } from "../src/config.js";
 import { buildDashboardSnapshot, buildLegacyDashboardPayload, createDashboardActions, toLegacyDashboardCandidate } from "../src/dashboard-model.js";
 
-test("dashboard exposes the exact ten required tabs in order", () => {
+test("dashboard exposes the exact nine required tabs in order without duplicate Positions", () => {
   assert.deepEqual(DASHBOARD_TABS, [
-    "Market Overview","Açık İşlemler","Scalp Scanner","Swing Scanner","Positions",
+    "Market Overview","Açık İşlemler","Scalp Scanner","Swing Scanner",
     "Statistics","Candidates (İşlem Adayları)","Trade History","Diagnostics","Grafik"
   ]);
 });
