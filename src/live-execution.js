@@ -87,7 +87,8 @@ export class BingXLiveExecutionAdapter {
 
   readiness() { return getLiveReadiness(this.env); }
 
-  async submit(candidate, { riskMultiple = 1, confirmation, idempotencyKey } = {}) {
+  async submit(candidate, { riskMultiple, confirmation, idempotencyKey } = {}) {
+    riskMultiple = Number.isFinite(riskMultiple) ? riskMultiple : Number(candidate?.riskMultiplier ?? 1);
     const readiness = this.readiness();
     if (!readiness.ready || this.env.LIVE_TRADING_ENABLED !== "true")
       throw new Error("LIVE_EXECUTION_LOCKED:" + readiness.blockers.join(","));
@@ -100,6 +101,7 @@ export class BingXLiveExecutionAdapter {
     if (!this.client || !this.store) throw new Error("LIVE_EXECUTION_DEPENDENCIES_UNAVAILABLE");
     if (typeof this.client.getPositionMode !== "function" || !(await this.client.getPositionMode()))
       throw new Error("LIVE_HEDGE_MODE_REQUIRED");
+    if (typeof this.client.getOpenOrders !== "function") throw new Error("LIVE_OPEN_ORDER_SNAPSHOT_REQUIRED");
     if (typeof this.store.claimIdempotencyKey !== "function" ||
         typeof this.store.releaseIdempotencyKey !== "function")
       throw new Error("LIVE_IDEMPOTENCY_STORE_REQUIRED");
@@ -108,10 +110,15 @@ export class BingXLiveExecutionAdapter {
 
     let accepted = false;
     try {
-      const [account, positions, markPrice, contract] = await Promise.all([
-        this.client.getAccountSnapshot(), this.client.getOpenPositions(),
+      const [account, positions, openOrders, markPrice, contract] = await Promise.all([
+        this.client.getAccountSnapshot(), this.client.getOpenPositions(), this.client.getOpenOrders(),
         this.client.getMarkPrice(candidate?.symbol), this.client.getContractRules(candidate?.symbol)
       ]);
+      const requestedSide = candidate?.direction === "BULLISH" || candidate?.direction === "LONG" ? "LONG" : "SHORT";
+      if (openOrders.some(order => order.symbol === candidate?.symbol &&
+        String(order.positionSide).toUpperCase() === requestedSide &&
+        !["CANCELED", "CANCELLED", "FILLED", "EXPIRED", "FAILED"].includes(String(order.status).toUpperCase())))
+        throw new Error("LIVE_DUPLICATE_PENDING_ORDER");
       if (account?.asset !== "USDT" || account?.source !== "BINGX_LIVE" ||
           !finitePositive(account?.equity) || !finitePositive(account?.availableMargin))
         throw new Error("VERIFIED_LIVE_USDT_EQUITY_REQUIRED");
@@ -120,6 +127,8 @@ export class BingXLiveExecutionAdapter {
         contract, markPrice, riskMultiple, explicitConfirmation: true, idempotencyKey
       });
       if (!decision.eligible) throw new Error("LIVE_RISK_REJECTED:" + decision.reasons.join(","));
+      const sideMaxLeverage = decision.side === "LONG" ? Number(contract.maxLongLeverage ?? contract.maxLeverage) : Number(contract.maxShortLeverage ?? contract.maxLeverage);
+      if (!finitePositive(sideMaxLeverage) || decision.leverage > sideMaxLeverage) throw new Error("LIVE_SIDE_LEVERAGE_LIMIT");
       const symbol = candidate.symbol;
       const margin = await this.client.getMarginMode(symbol);
       if (margin !== "ISOLATED") await this.client.setMarginMode(symbol, "ISOLATED");
@@ -135,11 +144,11 @@ export class BingXLiveExecutionAdapter {
         stopLoss: Number(candidate.stopLoss), takeProfit: Number(candidate.takeProfit),
         workingType: "MARK_PRICE", quantity
       };
-      accepted = true; // From this point, a network timeout may still mean BingX accepted the order; never release the idempotency claim.\n      const order = await this.client.placeEntryWithProtection({
+      accepted = true; // From this point, a network timeout may still mean BingX accepted the order; never release the idempotency claim.
+      const order = await this.client.placeEntryWithProtection({
         symbol, side: decision.side, quantity, marginMode: "ISOLATED",
         leverage: decision.leverage, bracket, clientOrderId: idempotencyKey
       });
-      accepted = true;
       if (!order?.orderID && !order?.orderId) throw new Error("LIVE_ORDER_ID_MISSING_RECONCILE_REQUIRED");
       const synced = await this.client.reconcilePosition(symbol, decision.side);
       if (!synced?.position || synced.protection?.stopLoss !== true || synced.protection?.takeProfit !== true) {
