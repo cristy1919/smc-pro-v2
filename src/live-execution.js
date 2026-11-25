@@ -189,8 +189,9 @@ export class BingXLiveExecutionAdapter {
       throw new Error("INVALID_LIVE_POSITION");
     if (!finitePositive(stopLoss) || !finitePositive(takeProfit) || !finitePositive(position.entry))
       throw new Error("INVALID_LIVE_PROTECTION_LEVELS");
-    if (position.side === "LONG" ? !(stopLoss <= position.entry && takeProfit > position.entry && stopLoss < takeProfit) :
-      !(takeProfit < position.entry && stopLoss >= position.entry && stopLoss > takeProfit))
+    const markPrice = await this.client.getMarkPrice(position.symbol);
+    if (position.side === "LONG" ? !(stopLoss < markPrice && takeProfit > markPrice && stopLoss < takeProfit) :
+      !(takeProfit < markPrice && stopLoss > markPrice && stopLoss > takeProfit))
       throw new Error("LIVE_PROTECTION_DIRECTION_INVALID");
     await this.client.setPositionProtection(position, {
       stopLoss: Number(stopLoss), takeProfit: Number(takeProfit), workingType: "MARK_PRICE"
