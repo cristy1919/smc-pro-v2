@@ -160,13 +160,21 @@ export class BingXLiveExecutionAdapter {
       const position = {
         id: String(synced.position.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
         candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
-        quantity: Number(synced.position.positionAmt ?? quantity), entry: Number(synced.position.entryPrice ?? markPrice),
+        quantity: Math.abs(Number(synced.position.positionAmt ?? quantity)), entry: Number(synced.position.entryPrice ?? markPrice),
         stopLoss: bracket.stopLoss, takeProfit: bracket.takeProfit, leverage: decision.leverage,
         marginMode: "ISOLATED", riskMultiple, riskBudget: decision.riskBudget,
         mode: "BINGX_LIVE", state: "OPEN", openedAt: this.clock(),
         entryOrderId: String(order?.orderID ?? order?.orderId ?? idempotencyKey)
       };
-      await this.store.saveLivePosition(position);
+      try {
+        await this.store.saveLivePosition(position);
+      } catch (storageError) {
+        await this.client.emergencyClose({ symbol, side: decision.side, position: synced.position });
+        const afterClose = await this.client.getPosition(symbol, decision.side);
+        if (afterClose && Math.abs(Number(afterClose.positionAmt)) > 0)
+          throw new Error("LIVE_POSITION_PERSISTENCE_FAILED_EMERGENCY_CLOSE_UNCONFIRMED");
+        throw new Error("LIVE_POSITION_PERSISTENCE_FAILED_POSITION_CLOSED:" + String(storageError).slice(0, 100));
+      }
       return { ok: true, position };
     } catch (error) {
       if (!accepted) await this.store.releaseIdempotencyKey(idempotencyKey);
