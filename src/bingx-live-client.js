@@ -87,20 +87,16 @@ export class BingXLiveClient {
   async getOrder(symbol, { orderId, clientOrderId } = {}) {
     if (!LIVE_SYMBOL.test(symbol ?? "") || (orderId == null && !clientOrderId))
       throw new Error("LIVE_ORDER_LOOKUP_ARGUMENTS_INVALID");
-    const row = await this.privateRequest("GET", "/openApi/swap/v2/trade/order", {
-      symbol, ...(orderId != null ? { orderId: String(orderId) } : {}),
-      ...(clientOrderId ? { clientOrderId: String(clientOrderId) } : {})
-    });
+    const identifier = orderId != null ? { orderId: String(orderId) } : { clientOrderId: String(clientOrderId) };
+    const row = await this.privateRequest("GET", "/openApi/swap/v2/trade/order", { symbol, ...identifier });
     return unwrap(row);
   }
 
   async cancelOrder(symbol, { orderId, clientOrderId } = {}) {
     if (!LIVE_SYMBOL.test(symbol ?? "") || (orderId == null && !clientOrderId))
       throw new Error("LIVE_ORDER_CANCEL_ARGUMENTS_INVALID");
-    const row = await this.privateRequest("DELETE", "/openApi/swap/v2/trade/order", {
-      symbol, ...(orderId != null ? { orderId: String(orderId) } : {}),
-      ...(clientOrderId ? { clientOrderId: String(clientOrderId) } : {})
-    });
+    const identifier = orderId != null ? { orderId: String(orderId) } : { clientOrderId: String(clientOrderId) };
+    const row = await this.privateRequest("DELETE", "/openApi/swap/v2/trade/order", { symbol, ...identifier });
     return unwrap(row);
   }
 
