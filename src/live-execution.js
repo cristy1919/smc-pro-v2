@@ -92,11 +92,19 @@ export class BingXLiveExecutionAdapter {
     const readiness = this.readiness();
     if (!readiness.ready || this.env.LIVE_TRADING_ENABLED !== "true")
       throw new Error("LIVE_EXECUTION_LOCKED:" + readiness.blockers.join(","));
-    if (!confirmation || confirmation.confirmedByUser !== true ||
-        confirmation.token !== this.env.LIVE_CONTROL_TOKEN ||
-        !Number.isFinite(confirmation.confirmedAt) ||
-        this.clock() - confirmation.confirmedAt > 60000 ||
-        this.clock() < confirmation.confirmedAt)
+    const freshConfirmation = confirmation?.confirmedByUser === true &&
+      confirmation.token === this.env.LIVE_CONTROL_TOKEN &&
+      Number.isFinite(confirmation.confirmedAt) &&
+      this.clock() - confirmation.confirmedAt <= 60000 &&
+      this.clock() >= confirmation.confirmedAt;
+    let activationConfirmation = false;
+    if (!freshConfirmation && typeof this.store?.getActivation === "function") {
+      const activation = await this.store.getActivation();
+      activationConfirmation = activation?.active === true && activation.confirmedByUser === true &&
+        typeof activation.id === "string" && confirmation?.activationId === activation.id &&
+        confirmation?.token === this.env.LIVE_CONTROL_TOKEN;
+    }
+    if (!freshConfirmation && !activationConfirmation)
       throw new Error("LIVE_CONFIRMATION_INVALID_OR_EXPIRED");
     if (!this.client || !this.store) throw new Error("LIVE_EXECUTION_DEPENDENCIES_UNAVAILABLE");
     if (typeof this.client.getPositionMode !== "function" || !(await this.client.getPositionMode()))
