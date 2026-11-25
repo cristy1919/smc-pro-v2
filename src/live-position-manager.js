@@ -171,8 +171,8 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
         const currentQuantity = Math.abs(Number(currentPosition?.positionAmt ?? 0));
         const initialQuantity = Number(position.quantity ?? position.qty);
         const tp1FilledStatus = ["FILLED", "PARTIALLYFILLED", "CANCELLED", "CANCELED"].includes(tp1Status);
-        if (currentPosition && finitePositive(currentQuantity) && finitePositive(initialQuantity) &&
-            currentQuantity < initialQuantity - 1e-10 && tp1FilledStatus && finitePositive(tp1Executed)) {
+        if (currentPosition && positive(currentQuantity) && positive(initialQuantity) &&
+            currentQuantity < initialQuantity - 1e-10 && tp1FilledStatus && positive(tp1Executed)) {
           const confirmed = {
             ...position, quantity: currentQuantity, qty: currentQuantity, stage: 1,
             tp1ExecutionState: "CONFIRMED", tp1ReachedAt: Number(position.tp1ExecutionStartedAt) || clock(),
