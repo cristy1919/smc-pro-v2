@@ -191,7 +191,7 @@ export class BingXLiveExecutionAdapter {
           actualRewardRisk < RISK_CONFIG.minRewardRisk || actualRisk > decision.riskBudget * 1.1) {
         const emergencyRecord = {
           id: String(synced?.position?.positionId ?? order?.orderID ?? order?.orderId ?? idempotencyKey),
-          candidateId: candidate.id, engine: candidate.engine, symbol, side: decision.side,
+          candidateId: candidate.id, engine: candidate.engine, tradeStyle: candidate.engine.toUpperCase(), symbol, side: decision.side,
           quantity: finitePositive(actualQuantity) ? actualQuantity : quantity,
           qty: finitePositive(actualQuantity) ? actualQuantity : quantity,
           entry: finitePositive(actualEntry) ? actualEntry : markPrice,
