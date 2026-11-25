@@ -9,8 +9,7 @@ export function getLiveReadiness(env = {}) {
     ["LIVE_API_KEY", !!env.BINGX_LIVE_API_KEY],
     ["LIVE_API_SECRET", !!env.BINGX_LIVE_API_SECRET],
     ["LIVE_CREDENTIALS_SEPARATE_FROM_DEMO", !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET &&
-      (env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY || env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET)],
-    ["LIVE_EXECUTION_DISABLED_BY_DEFAULT", env.LIVE_TRADING_ENABLED !== "true"],
+      env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY && env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET],
     ["LIVE_CONFIRMATION_SECRET", !!env.LIVE_CONTROL_TOKEN],
     ["LIVE_BASE_URL_LOCKED", LIVE_BASE === "https://open-api.bingx.com"]
   ];
