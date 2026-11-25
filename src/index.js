@@ -15,3 +15,5 @@ export * from "./worker-compat.js";
 export * from "./dashboard-model.js";
 export * from "./legacy-dashboard-api.js";
 export * from "./risk-controller.js";
+
+export * from "./live-execution.js";
