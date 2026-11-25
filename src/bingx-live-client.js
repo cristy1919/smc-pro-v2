@@ -130,12 +130,12 @@ export class BingXLiveClient {
     const minQty = Number(row.tradeMinQuantity ?? row.minQty);
     const qtyStep = Number.isInteger(quantityPrecision) && quantityPrecision >= 0 ? 10 ** -quantityPrecision : NaN;
     const tickSize = Number.isInteger(pricePrecision) && pricePrecision >= 0 ? 10 ** -pricePrecision : NaN;
-    const minNotional = Number(row.tradeMinUSDT ?? row.minNotional ?? row.minNotionalValue);
-    const leverage = unwrap(await this.privateRequest("GET", "/openApi/swap/v2/trade/leverage", { symbol }));
-    const maxLongLeverage = Number(leverage.maxLongLeverage);
-    const maxShortLeverage = Number(leverage.maxShortLeverage);
+    const minNotional = Number(row.tradeMinUSDT ?? row.minNotional ?? row.minNotionalValue ?? 0);
+    const maxLongLeverage = Number(row.maxLongLeverage ?? row.max_leverage_long ?? row.longMaxLeverage ?? row.maxLeverageLong ?? row.maxLeverage);
+    const maxShortLeverage = Number(row.maxShortLeverage ?? row.max_leverage_short ?? row.shortMaxLeverage ?? row.maxLeverageShort ?? row.maxLeverage);
     const maxLeverage = Math.min(maxLongLeverage, maxShortLeverage);
-    if (![minQty, qtyStep, tickSize, minNotional, maxLongLeverage, maxShortLeverage].every(positive))
+    if (![minQty, qtyStep, tickSize, maxLongLeverage, maxShortLeverage].every(positive) ||
+        !Number.isFinite(minNotional) || minNotional < 0)
       throw new Error("LIVE_CONTRACT_FILTERS_INCOMPLETE");
     return { minQty, qtyStep, tickSize, minNotional, maxLeverage, maxLongLeverage, maxShortLeverage, quantityPrecision, pricePrecision };
   }
