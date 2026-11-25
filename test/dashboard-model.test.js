@@ -56,8 +56,8 @@ test("deployed dashboard module and inline browser script parse successfully", (
   const source = readFileSync(new URL("../cloudflare/dashboard/deployed/index.js", import.meta.url), "utf8");
   const moduleSource = source.replace("export default {", "const __default = {");
   assert.doesNotThrow(() => new vm.Script(moduleSource), "dashboard Worker module must parse");
-  const html = vm.runInNewContext(moduleSource + "\\nDASHBOARD_HTML");
-  const script = html.match(/<script>([\\s\\S]*?)<\\/script>/);
+  const html = vm.runInNewContext(moduleSource + "\nDASHBOARD_HTML");
+  const script = html.match(/<script>([\s\S]*?)<\/script>/);
   assert.ok(script, "inline dashboard script must be present");
   assert.doesNotThrow(() => new vm.Script(script[1]), "inline dashboard JavaScript must parse");
   for (const metric of ["LONG / SHORT performansı", "Sembol performansı", "Komisyon toplamı", "Funding toplamı", "En uzun kazanç serisi"]) {
