@@ -16,11 +16,18 @@ export function getLiveManagementReadiness(env = {}) {
 }
 
 export function getLiveReadiness(env = {}) {
+  const livePair = !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET;
+  const demoKeyPresent = !!env.BINGX_API_KEY;
+  const demoSecretPresent = !!env.BINGX_API_SECRET;
+  const demoPairPresent = demoKeyPresent && demoSecretPresent;
+  const demoAnyPresent = demoKeyPresent || demoSecretPresent;
+  const credentialsIndependent = livePair && (!demoAnyPresent ||
+    (demoPairPresent && env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY &&
+      env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET));
   const checks = [
     ["LIVE_API_KEY", !!env.BINGX_LIVE_API_KEY],
     ["LIVE_API_SECRET", !!env.BINGX_LIVE_API_SECRET],
-    ["LIVE_CREDENTIALS_SEPARATE_FROM_DEMO", !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET && !!env.BINGX_API_KEY && !!env.BINGX_API_SECRET &&
-      env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY && env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET],
+    ["LIVE_CREDENTIALS_SEPARATE_FROM_DEMO", credentialsIndependent],
     ["LIVE_CONFIRMATION_SECRET", !!env.LIVE_CONTROL_TOKEN],
     ["LIVE_BASE_URL_LOCKED", LIVE_BASE === "https://open-api.bingx.com"]
   ];
@@ -29,9 +36,9 @@ export function getLiveReadiness(env = {}) {
     mode: "live-readiness",
     ready: blockers.length === 0,
     liveTradingEnabled: env.LIVE_TRADING_ENABLED === "true",
-    apiCredentialsConfigured: !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET,
-    demoCredentialsIndependent: !!env.BINGX_LIVE_API_KEY && !!env.BINGX_LIVE_API_SECRET && !!env.BINGX_API_KEY && !!env.BINGX_API_SECRET &&
-      env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY && env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET,
+    apiCredentialsConfigured: livePair,
+    demoCredentialsConfigured: demoPairPresent,
+    demoCredentialsIndependent: credentialsIndependent,
     checks: checks.map(([name, passed]) => ({ name, passed })),
     blockers
   };
