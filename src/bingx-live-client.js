@@ -84,10 +84,33 @@ export class BingXLiveClient {
     return Array.isArray(rows) ? rows : rows?.orders ?? [];
   }
 
+  normalizePosition(row, hedgeMode) {
+    const amount = Number(row?.positionAmt);
+    const rawSide = String(row?.positionSide ?? "").toUpperCase();
+    const side = rawSide === "BOTH" || !["LONG", "SHORT"].includes(rawSide)
+      ? (amount < 0 ? "SHORT" : "LONG") : rawSide;
+    const isolated = row?.isolated === true || String(row?.isolated).toLowerCase() === "true" ||
+      String(row?.marginType ?? "").toUpperCase() === "ISOLATED";
+    return {
+      ...row,
+      positionSide: hedgeMode ? side : "BOTH",
+      side,
+      entryPrice: Number(row?.avgPrice ?? row?.entryPrice ?? row?.entry_price),
+      isolated,
+      marginType: isolated ? "ISOLATED" : String(row?.marginType ?? "").toUpperCase(),
+      state: "OPEN",
+      engine: "exchange"
+    };
+  }
+
   async getOpenPositions() {
-    const rows = await this.privateRequest("GET", "/openApi/swap/v2/user/positions");
-    return (Array.isArray(rows) ? rows : rows?.positions ?? []).filter(p => Math.abs(Number(p.positionAmt)) > 0)
-      .map(p => ({ ...p, side: String(p.positionSide).toUpperCase(), state: "OPEN", engine: "exchange" }));
+    const [rows, hedgeMode] = await Promise.all([
+      this.privateRequest("GET", "/openApi/swap/v2/user/positions"),
+      this.getPositionMode()
+    ]);
+    return (Array.isArray(rows) ? rows : rows?.positions ?? [])
+      .filter(p => Math.abs(Number(p.positionAmt)) > 0)
+      .map(p => this.normalizePosition(p, hedgeMode));
   }
 
   async getPositionMode() {
@@ -186,9 +209,14 @@ export class BingXLiveClient {
   }
 
   async getPosition(symbol, side) {
-    const rows = await this.privateRequest("GET", "/openApi/swap/v2/user/positions", { symbol });
-    return (Array.isArray(rows) ? rows : rows?.positions ?? []).find(p =>
-      p.symbol === symbol && String(p.positionSide).toUpperCase() === side && Math.abs(Number(p.positionAmt)) > 0) ?? null;
+    const [rows, hedgeMode] = await Promise.all([
+      this.privateRequest("GET", "/openApi/swap/v2/user/positions", { symbol }),
+      this.getPositionMode()
+    ]);
+    return (Array.isArray(rows) ? rows : rows?.positions ?? [])
+      .filter(p => p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0)
+      .map(p => this.normalizePosition(p, hedgeMode))
+      .find(p => p.side === side) ?? null;
   }
 
   async reconcilePosition(symbol, side) {
@@ -198,8 +226,9 @@ export class BingXLiveClient {
     ]);
     const list = Array.isArray(orders) ? orders : orders?.orders ?? [];
     const closingSide = side === "LONG" ? "SELL" : "BUY";
+    const orderPositionSide = await this.getPositionMode() ? side : "BOTH";
     const protective = list.filter(order => order.symbol === symbol && String(order.side).toUpperCase() === closingSide &&
-      String(order.positionSide).toUpperCase() === side);
+      String(order.positionSide).toUpperCase() === orderPositionSide);
     return {
       position,
       protection: {
@@ -214,7 +243,8 @@ export class BingXLiveClient {
     const current = await this.reconcilePosition(position.symbol, position.side);
     if (!current.position) throw new Error("LIVE_POSITION_NOT_FOUND");
     const closeSide = position.side === "LONG" ? "SELL" : "BUY";
-    const common = { symbol: position.symbol, side: closeSide, positionSide: position.side,
+    const hedgeMode = await this.getPositionMode();
+    const common = { symbol: position.symbol, side: closeSide, positionSide: hedgeMode ? position.side : "BOTH",
       quantity: Math.abs(Number(current.position.positionAmt)), workingType: "MARK_PRICE", closePosition: "true" };
     const old = (current.openOrders ?? []).filter(order => ["STOP_MARKET", "TAKE_PROFIT_MARKET"].includes(String(order.type).toUpperCase()));
     const newSl = await this.privateRequest("POST", "/openApi/swap/v2/trade/order", {
@@ -231,8 +261,9 @@ export class BingXLiveClient {
   }
 
   async reducePosition({ symbol, side, quantity }) {
-    const params = { symbol, side: side === "LONG" ? "SELL" : "BUY", positionSide: side, type: "MARKET", quantity };
-    if (!(await this.getPositionMode())) params.reduceOnly = "true";
+    const hedgeMode = await this.getPositionMode();
+    const params = { symbol, side: side === "LONG" ? "SELL" : "BUY", positionSide: hedgeMode ? side : "BOTH", type: "MARKET", quantity };
+    if (!hedgeMode) params.reduceOnly = "true";
     return this.privateRequest("POST", "/openApi/swap/v2/trade/order", params);
   }
 
