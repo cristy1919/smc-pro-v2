@@ -356,13 +356,16 @@ export class BingXLiveExecutionAdapter {
     return { ok: true, position: updated };
   }
 
-  async partialClose(position, fraction) {
+  async partialClose(position, fraction, clientOrderId) {
     if (!this.managementReadiness().ready)
       throw new Error("LIVE_PARTIAL_CLOSE_PATH_LOCKED");
     if (!position || position.mode !== "BINGX_LIVE" || position.state !== "OPEN")
       throw new Error("INVALID_LIVE_POSITION");
     if (!Number.isFinite(fraction) || fraction <= 0 || fraction >= 1)
       throw new Error("INVALID_PARTIAL_CLOSE_FRACTION");
+    if (typeof clientOrderId !== "string" || !/^[a-zA-Z0-9_-]{12,40}$/.test(clientOrderId) ||
+        typeof this.client.getOrder !== "function")
+      throw new Error("LIVE_PARTIAL_CLOSE_IDEMPOTENCY_REQUIRED");
     const current = await this.client.getPosition(position.symbol, position.side);
     const currentQty = Math.abs(Number(current?.positionAmt));
     if (!finitePositive(currentQty)) throw new Error("LIVE_POSITION_QUANTITY_UNAVAILABLE");
@@ -372,13 +375,24 @@ export class BingXLiveExecutionAdapter {
     const quantity = Math.floor(rawQty / Number(contract.qtyStep) + 1e-10) * Number(contract.qtyStep);
     if (!finitePositive(quantity) || quantity >= currentQty || quantity < Number(contract.minQty))
       throw new Error("LIVE_PARTIAL_CLOSE_QUANTITY_INVALID");
-    const result = await this.client.reducePosition({ symbol: position.symbol, side: position.side, quantity });
+    const result = await this.client.reducePosition({
+      symbol: position.symbol, side: position.side, quantity, clientOrderId
+    });
+    let order = await this.client.getOrder(position.symbol, { clientOrderId });
+    let status = String(order?.status ?? "").toUpperCase().replaceAll("_", "");
+    if (["NEW", "PENDING", "PARTIALLYFILLED"].includes(status)) {
+      if (typeof this.client.cancelOrder !== "function") throw new Error("LIVE_PARTIAL_CLOSE_CANCEL_REQUIRED");
+      await this.client.cancelOrder(position.symbol, { clientOrderId });
+      order = await this.client.getOrder(position.symbol, { clientOrderId });
+      status = String(order?.status ?? "").toUpperCase().replaceAll("_", "");
+    }
+    const executed = Math.abs(Number(order?.executedQty ?? 0));
     const remaining = await this.client.getPosition(position.symbol, position.side);
-    if (!remaining || !Number.isFinite(Number(remaining.positionAmt)) || Math.abs(Number(remaining.positionAmt)) >= currentQty)
-      throw new Error("LIVE_PARTIAL_CLOSE_NOT_CONFIRMED");
-    const remainingQuantity = Math.abs(Number(remaining.positionAmt));
-    await this.store.saveLivePosition({ ...position, quantity: remainingQuantity, qty: remainingQuantity, updatedAt: this.clock() });
-    return { ok: true, result, remainingQuantity };
+    if (!remaining || !finitePositive(remaining.positionAmt) ||
+        Math.abs(Number(remaining.positionAmt)) >= currentQty || !finitePositive(executed) ||
+        !["FILLED", "PARTIALLYFILLED", "CANCELLED", "CANCELED"].includes(status))
+      throw new Error("LIVE_PARTIAL_CLOSE_NOT_CONFIRMED:" + (status || "UNKNOWN"));
+    return { ok: true, result, remainingQuantity: Math.abs(Number(remaining.positionAmt)), executedQuantity: executed, orderStatus: status };
   }
 
   async close(position) {
