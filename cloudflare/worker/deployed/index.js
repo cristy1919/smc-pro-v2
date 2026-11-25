@@ -7493,15 +7493,36 @@ var index_default = {
       }, { status: 503, headers });
     }
     if (url.pathname === "/api/live/status") {
+      const liveKeyConfigured = !!env.BINGX_LIVE_API_KEY;
+      const liveSecretConfigured = !!env.BINGX_LIVE_API_SECRET;
+      const credentialsIndependent = liveKeyConfigured && liveSecretConfigured &&
+        env.BINGX_LIVE_API_KEY !== env.BINGX_API_KEY &&
+        env.BINGX_LIVE_API_SECRET !== env.BINGX_API_SECRET;
+      const blockers = [];
+      if (!liveKeyConfigured) blockers.push("LIVE_API_KEY_MISSING");
+      if (!liveSecretConfigured) blockers.push("LIVE_API_SECRET_MISSING");
+      if (!credentialsIndependent) blockers.push("LIVE_CREDENTIALS_NOT_INDEPENDENT");
+      blockers.push("LIVE_EXECUTION_LAYER_NOT_INTEGRATED");
+      if (env.LIVE_TRADING_ENABLED !== "true") blockers.push("LIVE_TRADING_DISABLED");
       return Response.json({
         ok: true,
-        mode: "locked",
+        mode: "live-readiness",
+        ready: false,
         liveTradingEnabled: false,
-        apiCredentialsConfigured: !!env.BINGX_API_KEY && !!env.BINGX_API_SECRET,
+        liveApiKeyConfigured: liveKeyConfigured,
+        liveApiSecretConfigured: liveSecretConfigured,
+        liveCredentialsIndependent: credentialsIndependent,
+        demoCredentialsConfigured: !!env.BINGX_API_KEY && !!env.BINGX_API_SECRET,
         demoModeSelected: env.BINGX_TRADING_MODE === "demo",
         demoTradingEnabled: isBingXDemoConfigured(env),
-        paperTradingOnly: false,
-        reason: "All authenticated trade and account requests are hard-pinned to the BingX VST demo host. Live execution is disabled."
+        maxOpenPositions: 10,
+        marginModeRequired: "ISOLATED",
+        normalRiskR: 1,
+        reducedRiskR: 0.5,
+        normalLeverage: { min: 20, max: 50 },
+        reducedRiskLeverage: { min: 5, max: 10 },
+        blockers,
+        reason: "Live execution remains fail-closed. The live adapter is in the repository but has not been integrated into this deployed Worker."
       }, { headers: { ...headers, "cache-control": "no-store" } });
     }
     if (url.pathname === "/api/live/execute" && request.method === "POST") {
