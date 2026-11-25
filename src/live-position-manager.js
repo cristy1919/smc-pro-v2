@@ -46,7 +46,14 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
       }
 
       const tp1 = Number(position.tp1);
-      const reachedTp1 = Number(position.stage ?? 0) === 0 && positive(tp1) &&
+      const stage = Number(position.stage ?? 0);
+      if (stage >= 1 && (position.side === "LONG" ? Number(position.stopLoss) > Number(position.entry) : Number(position.stopLoss) < Number(position.entry))) {
+        await adapter.updateProtection(position, { stopLoss: Number(position.entry), takeProfit: Number(position.takeProfit) });
+        await store.saveLivePosition({ ...position, stopLoss: Number(position.entry), lastManagedAt: clock() });
+        results.push({ id: position.id, action: "BREAKEVEN_PROTECTION_REPAIRED" });
+        continue;
+      }
+      const reachedTp1 = stage === 0 && positive(tp1) &&
         (position.side === "LONG" ? markPrice >= tp1 : markPrice <= tp1);
       if (reachedTp1) {
         const partial = await adapter.partialClose(position, 0.5);
@@ -58,8 +65,8 @@ export async function manageLivePositions({ env, client, store, adapter, clock =
           tp1ReachedAt: clock(),
           lastManagedAt: clock()
         };
-        await adapter.updateProtection(updated, { stopLoss: Number(position.entry), takeProfit: Number(position.takeProfit) });
         await store.saveLivePosition(updated);
+        await adapter.updateProtection(updated, { stopLoss: Number(position.entry), takeProfit: Number(position.takeProfit) });
         results.push({ id: position.id, action: "TP1_HALF_CLOSED_STOP_TO_BREAKEVEN", remainingQuantity: partial.remainingQuantity });
       } else {
         results.push({ id: position.id, action: "PROTECTION_VERIFIED" });
