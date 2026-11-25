@@ -7723,7 +7723,8 @@ var index_default = {
         const candidate = {
           id: setupId, engine: engineName, symbol, direction: side, status: "QUALIFIED", entryEligible: true,
           entryConfirmation: { status: "CONFIRMED" }, entry: Number(setup.entry), stopLoss, takeProfit,
-          tp1: Number(setup.tp1), tp2: Number(setup.tp2),
+          tp1: Number(setup.tp1), tp2: Number(setup.tp2), tp3: Number(setup.tp3 ?? setup.takeProfit),
+          setupTimeframe: setup.setupTimeframe, entryTimeframe: setup.entryTimeframe,
           score: Number(setup.score), leverage, marginMode: "ISOLATED", riskMultiplier
         };
         const result = await adapter.submit(candidate, {
