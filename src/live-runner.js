@@ -71,7 +71,7 @@ export async function runLiveSetupQueue({ env, setups = [], client, store, adapt
         id: setupId, engine, symbol, direction: side, status: "QUALIFIED", entryEligible: true,
         entryConfirmation: { status: "CONFIRMED" }, entry: Number(setup.entry),
         stopLoss, takeProfit, tp1: Number(setup.tp1), tp2: Number(setup.tp2),
-        score: Number(setup.score), leverage, marginMode: "ISOLATED", riskMultiplier
+        score: Number(setup.score), leverage, marginMode: "ISOLATED", riskMultiplier: riskMultiple
       };
       const result = await adapter.submit(candidate, {
         riskMultiple, idempotencyKey,
