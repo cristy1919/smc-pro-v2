@@ -57,10 +57,12 @@ test("deployed dashboard module and inline browser script parse successfully", (
   const moduleSource = source.replace("export default {", "const __default = {");
   assert.doesNotThrow(() => new vm.Script(moduleSource), "dashboard Worker module must parse");
   const html = vm.runInNewContext(moduleSource + "\nDASHBOARD_HTML");
-  const script = html.match(/<script>([\s\S]*?)<\/script>/);
-  assert.ok(script, "inline dashboard script must be present");
-  assert.doesNotThrow(() => new vm.Script(script[1]), "inline dashboard JavaScript must parse");
+  const scriptStart = html.indexOf("<script>") + 8;
+  const scriptEnd = html.indexOf("</script>", scriptStart);
+  assert.ok(scriptStart >= 8 && scriptEnd > scriptStart, "inline dashboard script must be present");
+  const script = html.slice(scriptStart, scriptEnd);
+  assert.doesNotThrow(() => new vm.Script(script), "inline dashboard JavaScript must parse");
   for (const metric of ["LONG / SHORT performansı", "Sembol performansı", "Komisyon toplamı", "Funding toplamı", "En uzun kazanç serisi"]) {
-    assert.ok(script[1].includes(metric), "missing statistics section: " + metric);
+    assert.ok(script.includes(metric), "missing statistics section: " + metric);
   }
 });
