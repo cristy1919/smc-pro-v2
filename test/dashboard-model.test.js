@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { DASHBOARD_TABS } from "../src/config.js";
 import { buildDashboardSnapshot, buildLegacyDashboardPayload, createDashboardActions, toLegacyDashboardCandidate } from "../src/dashboard-model.js";
 
-test("dashboard exposes the requested nine tabs in order", () => {
+test("dashboard exposes the exact ten required tabs in order", () => {
   assert.deepEqual(DASHBOARD_TABS, [
-    "Market Overview","Açık İşlemler","Grafik","Scanner","Bekleyen Setup",
-    "Candidates (İşlem Adayları)","Trade History","İstatistik","Diagnostics"
+    "Market Overview","Açık İşlemler","Scalp Scanner","Swing Scanner","Positions",
+    "Statistics","Candidates (İşlem Adayları)","Trade History","Diagnostics","Grafik"
   ]);
 });
 
