@@ -5128,7 +5128,7 @@ var EngineState = class {
       const btcWeeklyBias = valid(btcContextCandles["1w"]) ? toBtcBias(analyzeMarketStructure(btcContextCandles["1w"]).trend) : "UNAVAILABLE";
       const btcDailyBias = valid(btcContextCandles["1d"]) ? toBtcBias(analyzeMarketStructure(btcContextCandles["1d"]).trend) : "UNAVAILABLE";
       let dominanceContext;
-      try { dominanceContext = deriveDominanceDirections(await fetchGlobalDominanceSnapshot(this.env)); }
+      try { dominanceContext = deriveDominanceDirections(await fetchGlobalDominanceSnapshot(this.env, { get: (key, type) => this.readPaperState(key, type), put: (key, value) => this.writePaperState(key, value) })); }
       catch (dominanceError) { dominanceContext = deriveDominanceDirections(null); console.warn("Dominance scoring data unavailable", String(dominanceError).slice(0, 140)); }
       const altcoinBreadthBias = summarizeAltcoinBreadthBias(structuralBiasBySymbol, universeSymbols, biasMeasuredAt);
       ledger.structuralMarketBiasSnapshot = { ...altcoinBreadthBias, btcBias, measuredAt: biasMeasuredAt };
@@ -6448,7 +6448,7 @@ async function fetchHistoricalDominance30d() {
   return points;
 }
 __name(fetchHistoricalDominance30d, "fetchHistoricalDominance30d");
-async function fetchGlobalDominanceSnapshot(env) {
+async function fetchGlobalDominanceSnapshot(env, store = null) {
   const measuredAt = (/* @__PURE__ */ new Date()).toISOString(), today = measuredAt.slice(0, 10);
   let btc = null, usdt = null, stablecoin = null, totalMarketCapUsd = null, totalVolumeUsd = null, marketCapChange24hPct = null, error;
   try {
@@ -6475,7 +6475,7 @@ async function fetchGlobalDominanceSnapshot(env) {
   }
   let stored = null;
   try {
-    stored = await env.PAPER_STATE.get(DOMINANCE_HISTORY_KEY, "json");
+    stored = store ? await store.get(DOMINANCE_HISTORY_KEY, "json") : await env.PAPER_STATE.get(DOMINANCE_HISTORY_KEY, "json");
   } catch (storageError) {
     console.error("Dominance history read failed", String(storageError));
   }
@@ -6483,7 +6483,9 @@ async function fetchGlobalDominanceSnapshot(env) {
   let lastLiveCollectionDate = stored?.lastLiveCollectionDate ?? null;
   let lastBackfillAttemptDate = stored?.lastBackfillAttemptDate ?? null;
   let historySource = stored?.source ?? null, changed = false;
-  if (points.length < 25 && lastBackfillAttemptDate !== today) {
+  const lastAttemptAt = Date.parse(stored?.updatedAt ?? "");
+  const retryFailedBackfill = historySource === "unavailable" && (!Number.isFinite(lastAttemptAt) || Date.now() - lastAttemptAt >= 30 * 60 * 1e3);
+  if (points.length < 25 && (lastBackfillAttemptDate !== today || retryFailedBackfill)) {
     lastBackfillAttemptDate = today;
     try {
       const backfill = await fetchHistoricalDominance30d();
@@ -6506,7 +6508,9 @@ async function fetchGlobalDominanceSnapshot(env) {
   }
   if (changed) {
     try {
-      await env.PAPER_STATE.put(DOMINANCE_HISTORY_KEY, JSON.stringify({ points, lastLiveCollectionDate, lastBackfillAttemptDate, source: historySource ?? "unavailable", updatedAt: measuredAt }));
+      const serialized = JSON.stringify({ points, lastLiveCollectionDate, lastBackfillAttemptDate, source: historySource ?? "unavailable", updatedAt: measuredAt });
+      if (store) await store.put(DOMINANCE_HISTORY_KEY, serialized);
+      else await env.PAPER_STATE.put(DOMINANCE_HISTORY_KEY, serialized);
     } catch (storageError) {
       console.error("Dominance history persistence failed", String(storageError));
     }
