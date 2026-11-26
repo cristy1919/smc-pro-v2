@@ -548,12 +548,6 @@ __name(summarizeClosedTradeAnalytics, "summarizeClosedTradeAnalytics");
 
 // src/strategy-allowlist.ts
 var ACTIVE_SWING_MODEL_IDS = [
-  "S01_SWEEP_MSS_FVG",
-  "S02_BREAKER_RETEST",
-  "S03_BOS_DISPLACEMENT",
-  "S04_RANGE_DEVIATION",
-  "S05_FAILED_BREAKOUT",
-  "S06_OB_REACTION",
   "W01_HTF_OB_REVERSAL",
   "W02_SUPPLY_DEMAND_REVERSAL",
   "W03_SWEEP_CHOCH",
@@ -570,7 +564,7 @@ function isActiveSwingModelId(value) {
 }
 __name(isActiveSwingModelId, "isActiveSwingModelId");
 function filterActiveSwingSetups(setups) {
-  return Array.isArray(setups) ? setups.filter((x) => isActiveSwingModelId(x?.model)) : [];
+  return Array.isArray(setups) ? setups.filter((x) => isActiveSwingModelId(x?.model) && x?.tradeStyle === "SWING" && ["4h", "1d"].includes(String(x?.setupTimeframe ?? "").toLowerCase())) : [];
 }
 __name(filterActiveSwingSetups, "filterActiveSwingSetups");
 function filterActiveSwingDiagnostics(diagnostics) {
@@ -580,7 +574,7 @@ function filterActiveSwingDiagnostics(diagnostics) {
     const timeframeDiagnostics = {}, rejectionSummary = { ...(d.rejectionSummary ?? {}) };
     if (!Object.keys(rejectionSummary).length) for (const value of Object.values(td)) for (const [reason, count] of Object.entries(value?.rejections ?? {})) rejectionSummary[reason] = (rejectionSummary[reason] ?? 0) + Math.max(0, Number(count) || 0);
     for (const [key, value] of Object.entries(td)) { if (!isActiveSwingModelId(key)) continue; const count = Math.max(0, Number(value?.setups) || 0); if (count > 0) timeframeDiagnostics[key] = { setups: count }; }
-    const setupDetails = Array.isArray(d.setupDetails) ? d.setupDetails.filter((item) => isActiveSwingModelId(item?.model)).map((item) => ({
+    const setupDetails = Array.isArray(d.setupDetails) ? d.setupDetails.filter((item) => isActiveSwingModelId(item?.model) && ["4h", "1d"].includes(String(item?.setupTimeframe ?? "").toLowerCase())).map((item) => ({
       model: item.model, tradeStyle: item.tradeStyle, entryTimeframe: item.entryTimeframe, setupTimeframe: item.setupTimeframe, side: item.side,
       score: item.score, status: item.status, reason: String(item.reason ?? "").slice(0, 200), entry: item.entry, stopLoss: item.stopLoss, takeProfit: item.takeProfit,
       tp1: item.tp1, tp2: item.tp2, tp3: item.tp3, confidence: item.confidence, confidenceStatus: item.confidenceStatus, confidenceSampleSize: item.confidenceSampleSize, riskReward: item.riskReward
@@ -607,29 +601,13 @@ var SCORE_BANDS = Object.freeze([
   { min: 84, max: 100, label: "HIGH_QUALITY" }
 ]);
 var ENGINE_CONFIG = Object.freeze({
-  SCALP: Object.freeze({
-    id: "SCALP",
-    directionTimeframe: "1h",
-    zoneTimeframe: "15m",
-    setupTimeframe: "5m",
-    entryTimeframe: "5m",
-    scoreWeights: Object.freeze({ htf: 15, liquidity: 20, marketStructure: 20, zone: 15, entryConfirmation: 20, volume: 10 }),
-    setups: Object.freeze([
-      "S01_SWEEP_MSS_FVG",
-      "S02_BREAKER_RETEST",
-      "S03_BOS_DISPLACEMENT",
-      "S04_RANGE_DEVIATION",
-      "S05_FAILED_BREAKOUT",
-      "S06_OB_REACTION"
-    ])
-  }),
   SWING: Object.freeze({
     id: "SWING",
     directionTimeframe: "1d",
     zoneTimeframe: "4h",
-    setupTimeframe: "1h",
-    entryTimeframe: "15m",
-    scoreWeights: Object.freeze({ htf: 20, liquidity: 15, marketStructure: 20, zone: 20, entryConfirmation: 15, volume: 10 }),
+    setupTimeframe: "4h",
+    entryTimeframe: "4h",
+    scoreWeights: Object.freeze({ htf: 15, btcWeekly: 10, btcDaily: 10, dominance: 15, liquidity: 10, marketStructure: 15, zone: 10, entryConfirmation: 5, volume: 10 }),
     setups: Object.freeze([
       "W01_HTF_OB_REVERSAL",
       "W02_SUPPLY_DEMAND_REVERSAL",
