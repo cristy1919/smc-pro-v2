@@ -223,7 +223,13 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
   if (liquidation || p.qty <= 0) {
     p.status = "CLOSED";
     p.closedAt = now;
-    const closeExecutions = Array.isArray(p.executionEvents) ? p.executionEvents.filter((e) => Number(e.qty) > 0 && Number(e.executionPrice) > 0) : [];\n    const totalClosedQty = closeExecutions.reduce((sum, e) => sum + Number(e.qty), 0);\n    const weightedExitPrice = totalClosedQty > 0 ? round(closeExecutions.reduce((sum, e) => sum + Number(e.executionPrice) * Number(e.qty), 0) / totalClosedQty, 8) : executionPrice;\n    p.exitPrice = weightedExitPrice;\n    p.averageExitPrice = weightedExitPrice;\n    p.lastExitPrice = executionPrice;\n    p.totalClosedQty = totalClosedQty;
+    const closeExecutions = Array.isArray(p.executionEvents) ? p.executionEvents.filter((e) => Number(e.qty) > 0 && Number(e.executionPrice) > 0) : [];
+    const totalClosedQty = closeExecutions.reduce((sum, e) => sum + Number(e.qty), 0);
+    const weightedExitPrice = totalClosedQty > 0 ? round(closeExecutions.reduce((sum, e) => sum + Number(e.executionPrice) * Number(e.qty), 0) / totalClosedQty, 8) : executionPrice;
+    p.exitPrice = weightedExitPrice;
+    p.averageExitPrice = weightedExitPrice;
+    p.lastExitPrice = executionPrice;
+    p.totalClosedQty = totalClosedQty;
     p.exitTriggerPrice = triggerPrice;
     p.exitMarkPrice = markPrice;
     p.pnlUsdt = round(Number(p.realizedPnlUsdt) - (p.entryFeeUsdt ?? 0), 8);
