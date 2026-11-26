@@ -4756,7 +4756,7 @@ var EngineState = class {
               pendingReconciledPosition = true;
               continue;
             }
-            const retiredStrategyPending = !ACTIVE_VST_STRATEGY_MODELS.has(pending.setup.model);
+            const retiredStrategyPending = !ACTIVE_VST_STRATEGY_MODELS.has(pending.setup.model) || !["4h", "1d"].includes(String(pending.setup.setupTimeframe ?? "").toLowerCase());
             if (isBingXDemoPendingEntryAbsentFromSnapshot(pending, demoSnapshot)) {
               console.info("BingX VST pending record cleared after complete exchange snapshot confirmed no open order or position", pending.setup.symbol, pending.orderId);
               continue;
@@ -4997,6 +4997,26 @@ var EngineState = class {
         ledger.scanRotation = resetScanRotationProgress(ledger.scanRotation, (/* @__PURE__ */ new Date()).toISOString());
         scanRotationGenerationAtStart = ledger.scanRotation.generation;
         strategyResetState.strategyResetV7 = true;
+      }
+      if (strategyResetState.strategyResetV8 !== true) {
+        ledger.setups = [];
+        ledger.scanDiagnostics = [];
+        ledger.scannedSymbols = [];
+        ledger.modelTelemetry = void 0;
+        ledger.activitySnapshots = {};
+        ledger.activityRanking = void 0;
+        ledger.activityRankingBySymbol = {};
+        ledger.scanTelemetry = void 0;
+        ledger.scanUniverseSize = 0;
+        ledger.scanBatchSize = 0;
+        ledger.scanInvocationBatchSize = 0;
+        ledger.scanLogicalBatchRemaining = 0;
+        ledger.lastScanAt = null;
+        ledger.maxOpenPositions = 10;
+        ledger.cursor = 0;
+        ledger.scanRotation = resetScanRotationProgress(ledger.scanRotation, (/* @__PURE__ */ new Date()).toISOString());
+        scanRotationGenerationAtStart = ledger.scanRotation.generation;
+        strategyResetState.strategyResetV8 = true;
       }
       if (ledger.sequentialBatchScanV1 !== true) {
         ledger.cursor = 0;
@@ -5331,7 +5351,7 @@ var EngineState = class {
       if (!demoConfigured) for (const position of ledger.positions.filter((p) => p.status === "OPEN")) activeEngineKeys.add(engineKey(position));
       const executedKeySet = new Set(demoExecutedKeys);
       if (!demoConfigured) for (const trade of ledger.closedTrades ?? []) if (trade.id || trade.positionId) executedKeySet.add(String(trade.positionId ?? trade.id));
-      const maximumOpen = Math.min(20, Math.max(0, Number(ledger.maxOpenPositions ?? 20)));
+      const maximumOpen = Math.min(10, Math.max(0, Number(ledger.maxOpenPositions ?? 10)));
       const queueNow = Date.now();
       const previousEntryQueueRaw = await this.readPaperState(demoConfigured ? "bingx-vst-entry-queue-v1" : "internal-paper-entry-queue-v1");
       let previousEntryQueue = [];
@@ -5344,7 +5364,7 @@ var EngineState = class {
       const activeDirectionalModels = ACTIVE_VST_STRATEGY_MODELS;
       const queueByEngineKey = /* @__PURE__ */ new Map();
       for (const item of previousEntryQueue) {
-        if (!item?.setup || !item.setupKey || !activeDirectionalModels.has(item.setup.model) || setupIsExpired(item.setup, queueNow)) continue;
+        if (!item?.setup || !item.setupKey || !activeDirectionalModels.has(item.setup.model) || !["4h", "1d"].includes(String(item.setup.setupTimeframe ?? "").toLowerCase()) || setupIsExpired(item.setup, queueNow)) continue;
         const key = engineKey(item.setup);
         const instanceKey = item.setupInstanceKey ?? setupInstanceKey(item.setup);
         if (executedKeySet.has(item.setupKey) || executedSetupInstances.has(instanceKey) || activeEngineKeys.has(key)) continue;
