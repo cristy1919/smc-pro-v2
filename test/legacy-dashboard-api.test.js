@@ -21,9 +21,7 @@ test("legacy API adapter rejects forbidden chart intervals and invalid close por
  assert.throws(()=>api.getKlines({symbol:"BTC-USDT",interval:"1m"}),/FORBIDDEN/);
  assert.throws(()=>api.closePosition({positionId:"p1",closePercent:101}),/between 0 and 100/);
 });
-test("legacy dashboard candidates stay WAIT until a separate risk gate makes them entry eligible",()=>{
- const payload=buildLegacyDashboardPayload({scalpCandidates:[{id:"s1",symbol:"BTC-USDT",engine:"scalp",direction:"BULLISH",setupId:"S01_SWEEP_MSS_FVG",score:85,confidence:"INSUFFICIENT_DATA",entry:100,stop:98,target:107,entryConfirmation:{status:"PENDING"},evidence:["SWEEP"]}]});
- assert.equal(payload.health.setups[0].status,"WAIT");
- assert.equal(payload.health.setups[0].entryEligible,false);
- assert.match(payload.health.setups[0].reasonTr,/likidite süpürmesi/i);
+test("legacy dashboard publishes only Swing candidates on 4H or 1D",()=>{
+ const payload=buildLegacyDashboardPayload({swingCandidates:[{id:"w1",symbol:"BTC-USDT",engine:"swing",direction:"BULLISH",setupId:"W03_SWEEP_CHOCH",setupTimeframe:"4h",score:85,confidence:"INSUFFICIENT_DATA",entry:100,stop:98,target:107,entryConfirmation:{status:"PENDING"},evidence:["SWEEP"]},{id:"old",symbol:"BTC-USDT",engine:"swing",direction:"BULLISH",setupId:"W03_SWEEP_CHOCH",setupTimeframe:"1h"}]});
+ assert.equal(payload.health.scalpCandidateCount,0);assert.equal(payload.health.swingCandidateCount,1);assert.equal(payload.health.setups[0].status,"WAIT");
 });
