@@ -7814,6 +7814,11 @@ var index_default = {
         error: data.demoConnected === true ? void 0 : "BingX VST demo account authentication or balance check failed."
       }, { status: status.ok ? 200 : 503, headers });
     }
+    if (request.method === "GET" && url.pathname === "/api/paper/internal-status") {
+      const id = env.ENGINE_STATE_V2.idFromName("main-engine");
+      const engine = env.ENGINE_STATE_V2.get(id);
+      return engine.fetch(new Request("https://engine.internal/paper/status"));
+    }
     if (request.method === "GET" && env.BINGX_TRADING_MODE === "demo" && ["/api/paper/status", "/api/paper/live-pnl", "/api/demo/status"].includes(url.pathname)) {
       if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, mode: "bingx-demo", error: "BingX demo control token required." }, { status: 401, headers });
       return url.pathname === "/api/paper/live-pnl" ? dashboardBingXDemoLivePnl(env) : dashboardBingXDemoStatus(env);
