@@ -31,7 +31,7 @@ export function classifyRangeRegime(candles, { period = 20, maxEfficiency = 0.28
   return { regime, efficiency: Number(efficiency.toFixed(4)), overlapRatio: Number(overlapRatio.toFixed(4)), directionalCloses: Number(directionalCloses.toFixed(4)) };
 }
 export function detectRollingRanges(candles, { period = 20 } = {}) {
-  validateCandles(candles); if (!Number.isInteger(period) || period < 12) throw new RangeError("period must be >= 12"); const out = [];
+  validateCandles(candles); if (!Number.isInteger(period) || period < 2) throw new RangeError("period must be >= 2"); const out = [];
   for (let i = period; i < candles.length; i++) { const w = candles.slice(i - period, i), high = Math.max(...w.map(x => x.high)), low = Math.min(...w.map(x => x.low)), regime = classifyRangeRegime(w, { period }); out.push({ index: i, formedAt: i - period, confirmedAt: i - 1, high, low, equilibrium: (high + low) / 2, width: high - low, ...regime }); }
   return out;
 }
