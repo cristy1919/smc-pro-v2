@@ -5280,8 +5280,30 @@ var EngineState = class {
         const rows = structuralCandlesBySymbol.get(symbol);
         const activity = activityBySymbol[symbol];
         const quoteVolume24h = Number(activity?.quoteVolume24h), average30dQuoteVolume = Number(activity?.average30dQuoteVolume), spreadPct = Number(activity?.spreadPct);
-        if (!activity || !Number.isFinite(quoteVolume24h) || quoteVolume24h < 5e6 || !Number.isFinite(average30dQuoteVolume) || average30dQuoteVolume < 1e6 || !Number.isFinite(spreadPct) || spreadPct > 0.15) {
-          diagnostics.push({ symbol, scannedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "rejected-low-liquidity-or-unavailable-market-quality", setups: 0, missingCandleFrames: [], timeframeDiagnostics: {}, rejectionSummary: { LOW_OR_UNAVAILABLE_LIQUIDITY: 1 }, setupDetails: [], engineAvailability: { swing: { available: false, unavailable: ["LOW_OR_UNAVAILABLE_LIQUIDITY"] } } });
+        const liquidityRejectionReasons = [];
+        if (!activity) liquidityRejectionReasons.push("ACTIVITY_SNAPSHOT_UNAVAILABLE");
+        else {
+          if (!Number.isFinite(quoteVolume24h)) liquidityRejectionReasons.push("QUOTE_VOLUME_24H_UNAVAILABLE");
+          else if (quoteVolume24h < 5e5) liquidityRejectionReasons.push("LOW_24H_QUOTE_VOLUME");
+          if (!Number.isFinite(average30dQuoteVolume)) liquidityRejectionReasons.push("AVERAGE_30D_QUOTE_VOLUME_UNAVAILABLE");
+          else if (average30dQuoteVolume < 1e6) liquidityRejectionReasons.push("LOW_30D_AVERAGE_QUOTE_VOLUME");
+          if (!Number.isFinite(spreadPct)) liquidityRejectionReasons.push("SPREAD_UNAVAILABLE");
+          else if (spreadPct > 0.15) liquidityRejectionReasons.push("WIDE_SPREAD");
+          if (!["GOOD", "ACCEPTABLE"].includes(String(activity.liquidityStatus))) liquidityRejectionReasons.push(activity.liquidityStatus === "POOR" ? "POOR_RELATIVE_LIQUIDITY" : "LIQUIDITY_QUALITY_UNVERIFIED");
+          if (activity.pairEligible === false) liquidityRejectionReasons.push("LOW_RELATIVE_ACTIVITY_OR_LIQUIDITY");
+        }
+        if (liquidityRejectionReasons.length) {
+          diagnostics.push({
+            symbol,
+            scannedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            status: "rejected-low-liquidity-or-unavailable-market-quality",
+            setups: 0,
+            missingCandleFrames: [],
+            timeframeDiagnostics: {},
+            rejectionSummary: Object.fromEntries(liquidityRejectionReasons.map((reason) => [reason, 1])),
+            setupDetails: [],
+            engineAvailability: { swing: { available: false, unavailable: liquidityRejectionReasons } }
+          });
           continue;
         }
         const input = { "4h": rows?.["4h"], "1d": rows?.["1d"] };
