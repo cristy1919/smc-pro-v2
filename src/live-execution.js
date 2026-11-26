@@ -85,8 +85,8 @@ export function validateLiveCandidate(candidate, {
     ? Math.abs(target - entry) / Math.abs(entry - stop) : 0;
   if (rr < RISK_CONFIG.minRewardRisk) reasons.push("MINIMUM_RR_NOT_MET");
   const risky = riskMultiple === 0.5;
-  const minLeverage = risky ? 5 : RISK_CONFIG.minLeverage;
-  const maxLeverage = risky ? 10 : RISK_CONFIG.maxLeverage;
+  const minLeverage = RISK_CONFIG.minLeverage;
+  const maxLeverage = RISK_CONFIG.maxLeverage;
   const requestedLeverage = Number(candidate?.leverage);
   if (!Number.isInteger(requestedLeverage) || requestedLeverage < minLeverage || requestedLeverage > maxLeverage)
     reasons.push("LEVERAGE_OUTSIDE_POLICY");
