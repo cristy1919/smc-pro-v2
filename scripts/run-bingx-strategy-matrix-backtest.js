@@ -23,6 +23,13 @@ const ENGINES = [
   { name:"scalp", evaluate:evaluateScalp, entryTimeframes:["5m"] },
   { name:"swing", evaluate:evaluateSwing, entryTimeframes:["15m","1h"] }
 ];
+const ALL_MODEL_KEYS = ENGINES.flatMap(engine =>
+  engine.entryTimeframes.flatMap(tf =>
+    SETUPS[engine.name].flatMap(setupId =>
+      DIRECTIONS.map(direction => modelKey(engine.name,tf,setupId,direction))
+    )
+  )
+);
 
 if (!Number.isInteger(TARGET_SYMBOLS) || TARGET_SYMBOLS < 1 || TARGET_SYMBOLS > 100) throw new Error("TARGET_SYMBOLS must be 1..100");
 if (![30,60,90].includes(WINDOW_DAYS) || WINDOW_DAYS % SEGMENT_DAYS !== 0) throw new Error("WINDOW_DAYS must be 30, 60 or 90");
@@ -261,10 +268,18 @@ if(datasets.size!==TARGET_SYMBOLS)throw new Error("DATASET_COLLECTION_INCOMPLETE
 
 const segmentReports=[];
 const allTradesByModel=new Map(),allCounters=new Map();
+for (const key of ALL_MODEL_KEYS) {
+  allTradesByModel.set(key,[]);
+  allCounters.set(key,emptyCounter());
+}
 for(let segmentIndex=0;segmentIndex<WINDOW_DAYS/SEGMENT_DAYS;segmentIndex++) {
   const segmentStart=startTime+segmentIndex*SEGMENT_DAYS*DAY;
   const segmentEnd=segmentStart+SEGMENT_DAYS*DAY;
   const segmentTradesByModel=new Map(),segmentCounters=new Map();
+  for (const key of ALL_MODEL_KEYS) {
+    segmentTradesByModel.set(key,[]);
+    segmentCounters.set(key,emptyCounter());
+  }
   process.stdout.write("SEGMENT "+(segmentIndex+1)+"/"+(WINDOW_DAYS/SEGMENT_DAYS)+"\n");
   for(const [symbol,data] of datasets) {
     for(const engine of ENGINES) {
