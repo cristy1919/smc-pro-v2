@@ -66,7 +66,7 @@ test("engine dataset fetch uses only independent approved timeframe sets",async(
 test("walk-forward backtest produces separate trade ledger and refuses missing 90d history",()=>{
   const hour=3600000, day=24*hour, start=Date.UTC(2026,0,1);
   const make=(n,step)=>Array.from({length:n},(_,i)=>({timestamp:start+i*step,open:100.1,high:101,low:100.2,close:100.8,volume:100,closed:true}));
-  const timeframes={"1d":make(100,day),"4h":make(600,4*hour)};
+  const timeframes={"1d":make(80,day),"4h":make(480,4*hour)};
   let emitted=false; const fundingRates=[];
   const report=runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[30],maxHoldBars:5,fundingRates,evaluate:({timeframes:tf})=>{
     if(emitted)return [];
