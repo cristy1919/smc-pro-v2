@@ -12,17 +12,41 @@ export class BingXPublicKlineProvider {
     this.minRequestIntervalMs = minRequestIntervalMs; this.lastRequestAt = 0; this.cache = new Map();
   }
   async #request(params, path = "/openApi/swap/v3/quote/klines") {
-    const wait = this.minRequestIntervalMs - (this.now() - this.lastRequestAt);
-    if (wait > 0) await this.sleep(wait);
     const url = new URL(path, this.baseUrl);
     for (const [key,value] of Object.entries(params)) url.searchParams.set(key, String(value));
-    this.lastRequestAt = this.now();
-    const response = await this.fetchImpl(url.toString());
-    if (!response.ok) throw new Error("BINGX_HTTP_" + response.status);
-    const payload = await response.json();
-    if (payload.code !== 0) throw new Error("BINGX_API_" + payload.code + ":" + (payload.msg || "unknown"));
-    if (!Array.isArray(payload.data)) throw new Error("BINGX_INVALID_KLINE_PAYLOAD");
-    return payload.data;
+    const maxAttempts = 6;
+    let lastError;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const wait = this.minRequestIntervalMs - (this.now() - this.lastRequestAt);
+      if (wait > 0) await this.sleep(wait);
+      this.lastRequestAt = this.now();
+      try {
+        const response = await this.fetchImpl(url.toString());
+        if (!response.ok) {
+          const error = new Error("BINGX_HTTP_" + response.status);
+          error.retryable = response.status === 429 || response.status === 418 || response.status >= 500;
+          const retryAfter = Number(response.headers?.get?.("retry-after"));
+          if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfterMs = retryAfter * 1000;
+          throw error;
+        }
+        const payload = await response.json();
+        if (payload.code !== 0) {
+          const error = new Error("BINGX_API_" + payload.code + ":" + (payload.msg || "unknown"));
+          error.retryable = Number(payload.code) === 100410 || Number(payload.code) === 100500;
+          throw error;
+        }
+        if (!Array.isArray(payload.data)) throw new Error("BINGX_INVALID_KLINE_PAYLOAD");
+        return payload.data;
+      } catch (error) {
+        lastError = error;
+        const retryable = error?.retryable === true || /^(?:TypeError|FetchError|TimeoutError)$/.test(error?.name || "");
+        if (!retryable || attempt === maxAttempts - 1) throw error;
+        const backoffMs = Math.min(30000, 2000 * (2 ** attempt));
+        const delayMs = Math.max(backoffMs, Number(error?.retryAfterMs) || 0);
+        await this.sleep(delayMs);
+      }
+    }
+    throw lastError || new Error("BINGX_REQUEST_FAILED");
   }
   async getCandles(args) {
     const key = [args.symbol,args.timeframe,args.startTime,args.endTime,args.limit ?? 1440,args.includeForming === true].join(":");
