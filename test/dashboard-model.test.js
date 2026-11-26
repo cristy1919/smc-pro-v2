@@ -61,16 +61,7 @@ test("deployed dashboard module and inline browser script parse successfully", (
   const scriptEnd = html.indexOf("</script>", scriptStart);
   assert.ok(scriptStart >= 8 && scriptEnd > scriptStart, "inline dashboard script must be present");
   const script = html.slice(scriptStart, scriptEnd);
-  try {
-    new vm.Script(script, { filename: "inline-dashboard.js" });
-  } catch (error) {
-    const stack = String(error?.stack ?? error);
-    const lines = stack.split("\n");
-    const caretLine = lines.find(line => /^\\s*\\^/.test(line));
-    const offset = caretLine ? caretLine.indexOf("^") : -1;
-    const details = { message: String(error), keys: Object.getOwnPropertyNames(error), pos: error?.pos, lineNumber: error?.lineNumber, columnNumber: error?.columnNumber, stack: stack.slice(0, 1800), offset };
-    assert.fail("inline dashboard JavaScript must parse: " + JSON.stringify(details));
-  }
+  assert.doesNotThrow(() => new vm.Script(script), "inline dashboard JavaScript must parse");
   for (const metric of ["LONG / SHORT performansı", "Sembol performansı", "Komisyon toplamı", "Funding toplamı", "En uzun kazanç serisi"]) {
     assert.ok(script.includes(metric), "missing statistics section: " + metric);
   }
