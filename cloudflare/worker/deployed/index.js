@@ -779,6 +779,7 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
   const ev = [...st.events].reverse().find((x) => x.side === side && x.candleIndex >= rows.length - 4);
   const fvg = [...z].reverse().find((x) => x.kind === "FVG" && x.side === side && x.formedAt >= rows[rows.length - 8].time);
   const breaker = [...z].reverse().find((x) => x.kind === "BREAKER" && x.side === side && (id !== "W04_BREAKER_RETEST" || x.sourceTimeframe === "4h")), ob = [...z].reverse().find((x) => (x.kind === "ORDER_BLOCK" || x.kind === "MITIGATION") && x.side === side), htfOb = [...z].reverse().find((x) => x.kind === "ORDER_BLOCK" && x.side === side && x.sourceTimeframe === "4h"), supplyDemand = [...z].reverse().find((x) => x.kind === "SUPPLY_DEMAND" && x.side === side && x.sourceTimeframe === "4h"), range = z.find((x) => x.kind === "RANGE" && x.regime === "RANGE");
+  const rangeDeviation = range ? side === "LONG" ? c.low < range.bottom && c.close > range.bottom : c.high > range.top && c.close < range.top : false;
   const retest = /* @__PURE__ */ __name((x) => !!x && hit(c, x), "retest");
   switch (id) {
     case "S01_SWEEP_MSS_FVG":
@@ -793,7 +794,7 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
       return { ok: !!ev && (ev.type === "BOS" || ev.type === "MSB") && ev.displacement, zone: fvg, reason: "Close-confirmed BOS/MSB + displacement" };
     case "S04_RANGE_DEVIATION":
     case "W05_RANGE_DEVIATION":
-      return { ok: !!range && sweep, zone: range, reason: "Range deviation and reclaim", liquiditySweep: sweep };
+      return { ok: !!range && range.regime === "RANGE" && rangeDeviation && sweep, zone: range, reason: "Confirmed horizontal range deviation and close-confirmed re-entry", liquiditySweep: rangeDeviation };
     case "S05_FAILED_BREAKOUT":
       return { ok: sweep && !!ev, zone: range, reason: "Failed breakout reclaim", liquiditySweep: sweep };
     case "S06_OB_REACTION":
