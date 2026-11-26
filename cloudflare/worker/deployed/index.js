@@ -6530,7 +6530,9 @@ __name(fetchGlobalDominanceSnapshot, "fetchGlobalDominanceSnapshot");
 function deriveDominanceDirections(snapshot) {
   const history = Array.isArray(snapshot?.history) ? snapshot.history.filter((x) => x && typeof x.date === "string") : [];
   if (history.length < 8) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: snapshot?.btc ?? null, altDomPct: snapshot?.altcoin ?? null, usdtDomPct: snapshot?.usdt ?? null, measuredAt: snapshot?.measuredAt ?? null, available: false };
-  const latestPoint = history.at(-1), cutoff = Date.parse(latestPoint.date) - 6 * 864e5;
+  const latestPoint = history.at(-1), latestDate = Date.parse(latestPoint.date);
+  if (!Number.isFinite(latestDate) || Date.now() - latestDate > 2 * 864e5) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: null, altDomPct: null, usdtDomPct: null, measuredAt: snapshot?.measuredAt ?? null, available: false };
+  const cutoff = latestDate - 6 * 864e5;
   const baseline = [...history].reverse().find((x) => Date.parse(x.date) <= cutoff) ?? history[Math.max(0, history.length - 8)];
   const trend = (key) => {
     const current = Number(latestPoint[key]), prior = Number(baseline?.[key]);
