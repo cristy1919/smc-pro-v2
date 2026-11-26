@@ -4372,7 +4372,7 @@ var EngineState = class {
       try {
         engine = await this.readEngineState();
       } catch (error) {
-        return Response.json({ ok: true, mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo", storageDegraded: true, balance: null, equity: null, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: false, stateRecoveryNotice: this.recoveryNotice, recoveryRetryAfter: this.recoveryRetryAfter || null, error: String(error), message: "Paper status is read-only while original ledger recovery is blocked. No replacement balance is used." }, { status: 503 });
+        return Response.json({ ok: true, mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo", storageDegraded: true, balance: null, equity: null, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: false, stateRecoveryNotice: this.recoveryNotice, recoveryRetryAfter: this.recoveryRetryAfter || null, error: String(error), message: "Paper status is read-only while original ledger recovery is blocked. No replacement balance is used." }, { status: 503 });
       }
       const ledger = engine.paperLedger ?? DEFAULT_STATE.paperLedger;
       const positionLimitMigrationKey = "paper-position-limit-v21-migrated";
@@ -4416,7 +4416,7 @@ var EngineState = class {
       const liveEquity = allOpenMarksAvailable ? Number((ledger.balance + liveUnrealized + livePositions.reduce((sum, position) => sum + (Number(position.entryFeeUsdt) || 0), 0)).toFixed(4)) : null;
       return Response.json({
         ok: true,
-        mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo",
+        mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo",
         paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true",
         manualPause,
         internalPaperAccount: engine.internalPaperAccount ?? null,
@@ -4452,7 +4452,7 @@ var EngineState = class {
         return Response.json({ ok: false, storageDegraded: true, error: String(error), message: "Analytics unavailable until the original ledger is readable." }, { status: 503 });
       }
       const ledger = engine.paperLedger ?? DEFAULT_STATE.paperLedger;
-      return Response.json({ ok: true, mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo", generatedAt: (/* @__PURE__ */ new Date()).toISOString(), ...summarizeClosedTradeAnalytics(ledger.closedTrades ?? []) }, { headers: { "cache-control": "no-store" } });
+      return Response.json({ ok: true, mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo", generatedAt: (/* @__PURE__ */ new Date()).toISOString(), ...summarizeClosedTradeAnalytics(ledger.closedTrades ?? []) }, { headers: { "cache-control": "no-store" } });
     }
     if (request.method === "POST" && url.pathname === "/paper/capital-adjustment") {
       if (!isTrustedManualCloseOrigin(request.headers.get("origin"), request.headers.get("x-smcprov2-public-origin"))) return Response.json({ ok: false, code: "UNTRUSTED_CAPITAL_ADJUSTMENT_ORIGIN", error: "Paper account initialization must originate from the dashboard." }, { status: 403, headers: { "cache-control": "no-store" } });
@@ -4502,7 +4502,7 @@ var EngineState = class {
       await this.saveEngineState(engine);
       bingxDemoStatusCache = null;
       console.info("Paper position limit updated", JSON.stringify({ maxOpenPositions: requested, openPositions: ledger.positions.length }));
-      return Response.json({ ok: true, mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo", paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true", maxOpenPositions: requested, openPositions: ledger.positions.length });
+      return Response.json({ ok: true, mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo", paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true", maxOpenPositions: requested, openPositions: ledger.positions.length });
     }
     if (request.method === "POST" && url.pathname === "/paper/close-all") {
       let closeAllBody;
@@ -5697,8 +5697,9 @@ var EngineState = class {
       const reservedEntryCapacity = (demoConfigured ? (demoSnapshot?.positions.length ?? 0) : ledger.positions.filter((p) => p.status === "OPEN").length) + pendingEntryCount;
       const availableEntrySlots = Math.max(0, maximumOpen - reservedEntryCapacity);
       const eligibleDueQueueCount = vstEntryQueue.filter((item) => item.nextAttemptAt <= Date.now() && !activeEngineKeys.has(engineKey(item.setup))).length;
+      const internalPaperActive = this.env.PAPER_TRADING_ONLY === "true" && !demoConfigured && this.env.LIVE_TRADING_ENABLED !== "true";
       const entryGateBlockedBy = [];
-      if (this.env.BINGX_TRADING_MODE === "demo" && !demoConfigured) entryGateBlockedBy.push("BINGX_VST_CREDENTIALS_MISSING");
+      if (this.env.BINGX_TRADING_MODE === "demo" && !demoConfigured && !internalPaperActive) entryGateBlockedBy.push("BINGX_VST_CREDENTIALS_MISSING");
       if (!STRATEGY_GENERATION_ENABLED) entryGateBlockedBy.push("STRATEGY_GENERATION_DISABLED");
       if (!NEW_PAPER_ENTRIES_ENABLED) entryGateBlockedBy.push("NEW_PAPER_ENTRIES_DISABLED");
       if (!demoConfigured && paperOpened === 0 && readyCandidateCount > 0) entryGateBlockedBy.push("PAPER_ENTRY_WAITING_FOR_ZONE_OR_RISK_FILTER");
@@ -5733,6 +5734,7 @@ var EngineState = class {
           liquidationRiskWarningSymbols: [...new Set(liquidationRiskWarningSymbols)],
           openOrdersComplete: demoSnapshot ? demoSnapshot.openOrdersComplete !== false : null,
           demoConfigured,
+          internalPaperEnabled: internalPaperActive,
           demoSnapshotAvailable: !!demoSnapshot,
           demoAccountError: demoAccountError ? String(demoAccountError).slice(0, 180) : null
         },
@@ -6032,7 +6034,7 @@ var EngineState = class {
       return Response.json({
         ok: true,
         runnerEnabled: true,
-        mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo",
+        mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo",
         strategyMode: "SWING_4H_1D_ONLY",
         strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
         newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
