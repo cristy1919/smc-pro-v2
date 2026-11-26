@@ -20,5 +20,5 @@ export function createLegacyWorkerCompatibilityAdapter({readEngineSnapshot,write
 }
 function sanitizeCandidate(c){
   if(!c||typeof c!=="object"||c.engine!=="swing"||!["4h","1d"].includes(String(c.setupTimeframe??c.timeframe??"").toLowerCase()))throw new TypeError("invalid research candidate");
-  return {id:String(c.id),engine:c.engine,symbol:String(c.symbol),direction:c.direction,setupId:c.setupId,state:c.state,score:c.score,confidence:c.confidence,entry:c.entry,stop:c.stop,target:c.target,createdAt:c.createdAt,evidence:Array.isArray(c.evidence)?c.evidence:[],entryConfirmation:c.entryConfirmation??{status:"PENDING"}};
+  return {id:String(c.id),engine:"swing",symbol:String(c.symbol),direction:c.direction,setupId:c.setupId,state:c.state,score:c.score,confidence:c.confidence,entry:c.entry,stop:c.stop,target:c.target,setupTimeframe:c.setupTimeframe??c.timeframe,entryTimeframe:c.setupTimeframe??c.timeframe,createdAt:c.createdAt,evidence:Array.isArray(c.evidence)?c.evidence:[],entryConfirmation:c.entryConfirmation??{status:"PENDING"}};
 }
