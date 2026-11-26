@@ -53,7 +53,7 @@ const results = [];
 const failures = [];
 for (let index = 0; index < universe.length && results.length < TARGET_SYMBOLS; index++) {
   const selected = universe[index];
-  process.stdout.write("[" + (results.length + 1) + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " fetching 90d Swing data\\n");
+  process.stdout.write("[" + (results.length + 1) + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " fetching 90d Swing data\n");
   try {
     const timeframes = await fetchEngineDataset({
       provider, symbol: selected.symbol, engine: "swing", startTime, endTime: now
@@ -85,10 +85,10 @@ for (let index = 0; index < universe.length && results.length < TARGET_SYMBOLS; 
       trades1h: entry1h.tradesByPeriod[WINDOW_DAYS],
       assumptions: { entry15m: entry15m.assumptions, entry1h: entry1h.assumptions }
     });
-    process.stdout.write("[" + results.length + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " complete\\n");
+    process.stdout.write("[" + results.length + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " complete\n");
   } catch (error) {
     failures.push({ symbol: selected.symbol, error: String(error?.message || error) });
-    process.stderr.write(selected.symbol + " FAILED: " + String(error?.message || error) + "\\n");
+    process.stderr.write(selected.symbol + " FAILED: " + String(error?.message || error) + "\n");
   }
 }
 
@@ -140,8 +140,8 @@ const output = {
   failures
 };
 
-await writeFile("swing-50-pairs-90d-report.json", JSON.stringify(output, null, 2) + "\\n", { encoding: "utf8" });
-process.stdout.write(JSON.stringify({ metadata: output.metadata, aggregate: output.aggregate, failures }, null, 2) + "\\n");
+await writeFile("swing-50-pairs-90d-report.json", JSON.stringify(output, null, 2) + "\n", { encoding: "utf8" });
+process.stdout.write(JSON.stringify({ metadata: output.metadata, aggregate: output.aggregate, failures }, null, 2) + "\n");
 if (results.length !== TARGET_SYMBOLS) {
   throw new Error("SWING_BACKTEST_INCOMPLETE: completed " + results.length + " of " + TARGET_SYMBOLS + " pairs; report artifact retained for diagnosis");
 }
