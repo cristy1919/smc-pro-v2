@@ -63,7 +63,7 @@ test("walk-forward backtest produces separate trade ledger and refuses missing 9
   }});
   assert.equal(report.periods.length,1);
   assert.equal(report.tradesByPeriod[30].length,1);
-  assert.equal(report.tradesByPeriod[30][0].exitReason,"DATA_END");
+  assert.equal(report.tradesByPeriod[30][0].exitReason,"MAX_OBSERVATION_HORIZON");
   assert.ok(report.tradesByPeriod[30][0].fundingR>0);
   assert.equal(report.tradesByPeriod[30][0].fundingSettlements,1);
   assert.equal(report.assumptions.compounding,"NORMALIZED_EQUITY_INDEX_ONLY");
