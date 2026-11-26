@@ -13,25 +13,27 @@ function assertCandles(rows,name){
     prev=c.timestamp;
   }
 }
-function summarize(engine,symbol,days,trades,initialEquity,skipped){
+function summarize(engine,symbol,days,trades,skipped){
   const wins=trades.filter(t=>t.netR>0),losses=trades.filter(t=>t.netR<=0);
   const grossWin=wins.reduce((s,t)=>s+t.netR,0),grossLoss=Math.abs(losses.reduce((s,t)=>s+t.netR,0));
-  let equity=initialEquity,peak=equity,maxDrawdown=0;
-  for(const t of trades){equity*=1+t.netR*RISK_CONFIG.riskUnitFraction;peak=Math.max(peak,equity);maxDrawdown=Math.max(maxDrawdown,(peak-equity)/peak);}
+  // Normalized equity index: starts at 1.0 and is not represented as a USDT balance.
+  let equityIndex=1,peak=1,maxDrawdown=0;
+  for(const t of trades){equityIndex*=1+t.netR*RISK_CONFIG.riskUnitFraction;peak=Math.max(peak,equityIndex);maxDrawdown=Math.max(maxDrawdown,(peak-equityIndex)/peak);}
   const totalR=trades.reduce((s,t)=>s+t.netR,0);
-  return {engine,symbol,periodDays:days,initialEquity,endingEquity:Number(equity.toFixed(4)),trades:trades.length,wins:wins.length,losses:losses.length,winRate:trades.length?wins.length/trades.length:0,profitFactor:grossLoss?grossWin/grossLoss:grossWin?Infinity:0,expectancyR:trades.length?totalR/trades.length:0,totalR,maxDrawdownPct:maxDrawdown*100,skipped,feesIncluded:true,confidence:trades.length<30?"INSUFFICIENT_DATA":"SAMPLE_AVAILABLE"};
+  return {engine,symbol,periodDays:days,startingEquityIndex:1,endingEquityIndex:Number(equityIndex.toFixed(6)),trades:trades.length,wins:wins.length,losses:losses.length,winRate:trades.length?wins.length/trades.length:0,profitFactor:grossLoss?grossWin/grossLoss:grossWin?null:0,expectancyR:trades.length?totalR/trades.length:0,totalR,maxDrawdownPct:maxDrawdown*100,skipped,feesIncluded:true,confidence:trades.length<30?"INSUFFICIENT_DATA":"SAMPLE_AVAILABLE"};
 }
-export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],initialEquity,feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars=500,maxWaitBars=6,entryTimeframe,setupIdFilter,directionFilter}){
+export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars,maxWaitBars=6,entryTimeframe,setupIdFilter,directionFilter}){
   if(!["scalp","swing"].includes(engine))throw new Error("INVALID_ENGINE");
   if(typeof evaluate!=="function")throw new TypeError("evaluate callback is required");
-  if(!finite(initialEquity)||initialEquity<=0)throw new RangeError("VERIFIED_INITIAL_EQUITY_REQUIRED");
   const entryTf=engine==="scalp"?"5m":(entryTimeframe??"15m");
   if(engine==="swing"&&!["15m","1h"].includes(entryTf))throw new Error("UNSUPPORTED_SWING_ENTRY_TIMEFRAME");
   const entryRows=timeframes?.[entryTf];
   for(const [tf,rows] of Object.entries(timeframes??{})){if(!TF_MS[tf])throw new Error("UNSUPPORTED_BACKTEST_TIMEFRAME_"+tf);assertCandles(rows,tf);}
   if(!entryRows)throw new Error("MISSING_ENTRY_TIMEFRAME_"+entryTf);
   for(const tf of engine==="scalp"?["1h","15m","5m"]:["1d","4h","1h",entryTf])if(!timeframes[tf])throw new Error("MISSING_TIMEFRAME_"+tf);
-  if(!Number.isInteger(maxHoldBars)||maxHoldBars<1)throw new RangeError("INVALID_MAX_HOLD_BARS");
+  // Equal 30-day maximum observation horizon across entry timeframes; this is a backtest data cap, not a live exit rule.
+  const holdBars=maxHoldBars??Math.ceil(30*DAY/TF_MS[entryTf]);
+  if(!Number.isInteger(holdBars)||holdBars<1)throw new RangeError("INVALID_MAX_HOLD_BARS");
   const reports=[];
   for(const days of periodDays){
     if(![30,60,90].includes(days))throw new Error("PERIOD_MUST_BE_30_60_OR_90_DAYS");
@@ -61,9 +63,9 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
       const entry=confirmation.entry,stop=candidate.stop,risk=Math.abs(entry-stop);
       if(!(risk>0)||(candidate.direction==="BULLISH"&&stop>=entry)||(candidate.direction==="BEARISH"&&stop<=entry)){skipped++;continue;}
       const target=candidate.direction==="BULLISH"?entry+risk*3.5:entry-risk*3.5;
-      const after=entryRows.filter(c=>c.timestamp>confirmation.confirmedAt).slice(0,maxHoldBars);
+      const after=entryRows.filter(c=>c.timestamp>confirmation.confirmedAt).slice(0,holdBars);
       if(!after.length){skipped++;continue;}
-      let exit=after.at(-1).close,exitAt=after.at(-1).timestamp,exitReason="DATA_END";
+      let exit=after.at(-1).close,exitAt=after.at(-1).timestamp,exitReason=after.length===holdBars?"MAX_OBSERVATION_HORIZON":"DATA_END";
       for(const c of after){
         const stopHit=candidate.direction==="BULLISH"?c.low<=stop:c.high>=stop;
         const targetHit=candidate.direction==="BULLISH"?c.high>=target:c.low<=target;
@@ -73,13 +75,12 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
       const grossR=(candidate.direction==="BULLISH"?exit-entry:entry-exit)/risk;
       const feeSlippageR=(2*feeRate+2*slippageRate)*entry/risk;
       const settlements=Array.isArray(fundingRates)?fundingRates.filter(x=>x.fundingTime>confirmation.confirmedAt&&x.fundingTime<=exitAt):[];
-      const fundingR=settlements.length?settlements.reduce((sum,x)=>sum+x.fundingRate*(candidate.direction==="BULLISH"?1:-1),0)*entry/risk:fundingRate*(candidate.direction==="BULLISH"?1:-1)*entry/risk;
-      const costR=feeSlippageR+fundingR;
-      const netR=grossR-costR;
+      const fundingR=settlements.reduce((sum,x)=>sum+x.fundingRate*(candidate.direction==="BULLISH"?1:-1),0)*entry/risk;
+      const costR=feeSlippageR+fundingR,netR=grossR-costR;
       trades.push({candidateId:candidate.id,setupId:candidate.setupId,direction:candidate.direction,signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,target,exit,exitAt,exitReason,grossR,estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,netR});
       lastExit=exitAt;
     }
-    reports.push({summary:summarize(engine,symbol,days,trades,initialEquity,skipped),trades});
+    reports.push({summary:summarize(engine,symbol,days,trades,skipped),trades});
   }
-  return {engine,symbol,periods:reports.map(r=>r.summary),tradesByPeriod:Object.fromEntries(reports.map(r=>[r.summary.periodDays,r.trades])),assumptions:{riskPerTrade:RISK_CONFIG.riskUnitFraction,compounding:"CURRENT_EQUITY",feeRate,slippageRate,fundingMode:fundingRates.length?"HISTORICAL_SETTLEMENTS":"FLAT_RATE_FALLBACK",fundingRateFallback:fundingRate,stopFirstWhenStopAndTargetSameCandle:true,maxWaitBars,maxHoldBars,entryTimeframe:entryTf,entryTimeframeComparison:engine==="swing"?"1d-bias/4h-zone/1h-confirmation-for-15m-entry; 1d-bias/4h-zone/1h-entry-for-1h-entry":"NOT_APPLICABLE",setupIdFilter:setupIdFilter??null,directionFilter:directionFilter??null},dataRange:{start:entryRows[0].timestamp,end:entryRows.at(-1).timestamp}};
+  return {engine,symbol,periods:reports.map(r=>r.summary),tradesByPeriod:Object.fromEntries(reports.map(r=>[r.summary.periodDays,r.trades])),assumptions:{riskPerTrade:RISK_CONFIG.riskUnitFraction,compounding:"NORMALIZED_EQUITY_INDEX_ONLY",startingEquityIndex:1,usdtBalanceUsed:false,feeRate,slippageRate,fundingMode:"HISTORICAL_SETTLEMENTS_ONLY",fundingRateFallbackUsed:false,stopFirstWhenStopAndTargetSameCandle:true,maxWaitBars,maxHoldBars:holdBars,maxObservationHorizonDays:30,entryTimeframe:entryTf,entryTimeframeComparison:engine==="swing"?"1d-bias/4h-zone/1h-confirmation-for-15m-entry; 1d-bias/4h-zone/1h-entry-for-1h-entry":"NOT_APPLICABLE",setupIdFilter:setupIdFilter??null,directionFilter:directionFilter??null},dataRange:{start:entryRows[0].timestamp,end:entryRows.at(-1).timestamp}};
 }
