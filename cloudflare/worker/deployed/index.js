@@ -223,7 +223,7 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
   if (liquidation || p.qty <= 0) {
     p.status = "CLOSED";
     p.closedAt = now;
-    p.exitPrice = executionPrice;
+    const closeExecutions = Array.isArray(p.executionEvents) ? p.executionEvents.filter((e) => Number(e.qty) > 0 && Number(e.executionPrice) > 0) : [];\n    const totalClosedQty = closeExecutions.reduce((sum, e) => sum + Number(e.qty), 0);\n    const weightedExitPrice = totalClosedQty > 0 ? round(closeExecutions.reduce((sum, e) => sum + Number(e.executionPrice) * Number(e.qty), 0) / totalClosedQty, 8) : executionPrice;\n    p.exitPrice = weightedExitPrice;\n    p.averageExitPrice = weightedExitPrice;\n    p.lastExitPrice = executionPrice;\n    p.totalClosedQty = totalClosedQty;
     p.exitTriggerPrice = triggerPrice;
     p.exitMarkPrice = markPrice;
     p.pnlUsdt = round(Number(p.realizedPnlUsdt) - (p.entryFeeUsdt ?? 0), 8);
@@ -233,7 +233,7 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
     p.pnlAccountingStatus = p.fundingDataStatus === "UNAVAILABLE" || p.fundingDataStatus === "UNAVAILABLE_MISSED_SETTLEMENT" ? "UNVERIFIED_FUNDING" : "VERIFIED"; p.closeEventId = closeEventId; p.positionId = positionId;
     p.closeReason = reason;
     p.closeSource = liquidation ? "LIQUIDATION" : "AUTOMATED_SL_TP";
-    p.qty = initialQty || closeQty;
+    p.qty = totalClosedQty || initialQty || closeQty;\n    p.initialQty = p.qty;
     if (Number.isFinite(initialMargin) && initialMargin >= 0) {
       p.marginUsdt = initialMargin;
       p.allocationUsdt = initialMargin;
