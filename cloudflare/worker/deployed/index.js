@@ -7606,7 +7606,7 @@ var index_default = {
       wakeRunnerEnabled = wake.runnerEnabled === true;
       wakeReady = wakeRunnerEnabled && wake.alarmScheduled === true;
       const lastScanMs = Date.parse(wake.lastScanAt ?? "");
-      scanStale = !Number.isFinite(lastScanMs) || Date.now() - lastScanMs > 3 * 60 * 1000;
+      scanStale = !Number.isFinite(lastScanMs) || Date.now() - lastScanMs > 90 * 1000;
       console.info("Paper runner scheduler wake", JSON.stringify({ cron: controller.cron, at: (/* @__PURE__ */ new Date()).toISOString(), ...wake, scanStale }));
     } catch (error) {
       console.error("Paper runner scheduler wake failed", String(error));
