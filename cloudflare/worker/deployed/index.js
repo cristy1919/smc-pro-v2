@@ -4854,10 +4854,10 @@ var EngineState = class {
         await this.saveEngineState(engine);
         await this.writePaperState(positionLimitMigrationKey, "true");
       }
-      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 20) ledger.maxOpenPositions = 20;
+      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 10) ledger.maxOpenPositions = 10;
       const positionLimitV22Key = "paper-position-limit-v22-20";
       if (await this.readPaperState(positionLimitV22Key) !== "true") {
-        ledger.maxOpenPositions = 20; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
+        ledger.maxOpenPositions = 10; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
         await this.saveEngineState(engine); await this.writePaperState(positionLimitV22Key, "true");
       }
       const positionMarginMigrationKey = "paper-position-margin-metadata-v1";
@@ -7796,7 +7796,7 @@ var index_default = {
           code: d.code,
           stage: d.stage
         })) : [],
-        maxOpenPositions: Math.min(20, Math.max(0, Number(data.maxOpenPositions ?? 20))),
+        maxOpenPositions: Math.min(10, Math.max(0, Number(data.maxOpenPositions ?? 10))),
         error: data.demoConnected === true ? void 0 : "BingX VST demo account authentication or balance check failed."
       }, { status: status.ok ? 200 : 503, headers });
     }
@@ -7936,7 +7936,7 @@ var index_default = {
         demoTradingEnabled: isBingXDemoConfigured(env),
         liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true, livePositionManagementIntegrated: true, liveRunnerIntegrated: true, explicitActivationRequired: true,
         runtimeChecks, activation: { active: activation.active === true, activatedAt: activation.activatedAt ?? null },
-        maxOpenPositions: 20, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
+        maxOpenPositions: 10, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
         normalLeverage: { min: 20, max: 50 }, reducedRiskLeverage: { min: 20, max: 50 },
         blockers, reason: blockers.length ? "Live execution is integrated but blocked until the listed prerequisites and account checks pass." : "Live execution is configured and remains disabled until the separate activation flag and fresh user confirmation are supplied."
       }, { headers: { ...headers, "cache-control": "no-store" } });
