@@ -716,7 +716,23 @@ function zones(rows, tf) {
   if (equalHigh) out.push(equalHigh);
   if (equalLow) out.push(equalLow);
   const r = rows.slice(-40, -1), hi = Math.max(...r.map((x) => x.high)), lo = Math.min(...r.map((x) => x.low)), cl = last(rows).close;
-  if (r.length >= 20 && (hi - lo) / cl <= 0.12) out.push({ kind: "RANGE", side: cl < (hi + lo) / 2 ? "LONG" : "SHORT", bottom: lo, top: hi, formedAt: last(r).time, sourceTimeframe: tf });
+  if (r.length >= 20 && cl > 0) {
+    const path = r.slice(1).reduce((sum, c, i) => sum + Math.abs(c.close - r[i].close), 0);
+    const efficiency = path > 0 ? Math.abs(r.at(-1).close - r[0].close) / path : 0;
+    const overlaps = r.slice(1).map((c, i) => {
+      const p = r[i], overlap = Math.max(0, Math.min(c.high, p.high) - Math.max(c.low, p.low));
+      return overlap / Math.max(1e-12, Math.min(c.high - c.low, p.high - p.low));
+    });
+    const overlapRatio = overlaps.reduce((sum, value) => sum + value, 0) / Math.max(1, overlaps.length);
+    const upCloses = r.slice(1).filter((c, i) => c.close > r[i].close).length;
+    const downCloses = r.slice(1).filter((c, i) => c.close < r[i].close).length;
+    const directionalCloses = Math.max(upCloses, downCloses) / Math.max(1, r.length - 1);
+    const widthPct = (hi - lo) / cl;
+    const regime = widthPct <= 0.12 && efficiency <= 0.28 && overlapRatio >= 0.55 ? "RANGE" :
+      efficiency >= 0.38 && directionalCloses >= 0.62 ? "DIRECTIONAL_ORDERFLOW" : "MIXED";
+    if (regime === "RANGE") out.push({ kind: "RANGE", regime, efficiency, overlapRatio, directionalCloses, side: cl < (hi + lo) / 2 ? "LONG" : "SHORT", bottom: lo, top: hi, formedAt: last(r).time, sourceTimeframe: tf });
+    else if (regime === "DIRECTIONAL_ORDERFLOW") out.push({ kind: "ORDERFLOW_REGIME", regime, efficiency, overlapRatio, directionalCloses, side: upCloses > downCloses ? "LONG" : "SHORT", bottom: lo, top: hi, formedAt: last(r).time, sourceTimeframe: tf });
+  }
   return out.slice(-60);
 }
 __name(zones, "zones");
@@ -758,7 +774,7 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
   const sweep = side === "LONG" ? c.low < lo && c.close > lo || !!equalLow && c.low < equalLow.bottom && c.close > equalLow.top : c.high > hi && c.close < hi || !!equalHigh && c.high > equalHigh.top && c.close < equalHigh.bottom;
   const ev = [...st.events].reverse().find((x) => x.side === side && x.candleIndex >= rows.length - 4);
   const fvg = [...z].reverse().find((x) => x.kind === "FVG" && x.side === side && x.formedAt >= rows[rows.length - 8].time);
-  const breaker = [...z].reverse().find((x) => x.kind === "BREAKER" && x.side === side && (id !== "W04_BREAKER_RETEST" || x.sourceTimeframe === "4h")), ob = [...z].reverse().find((x) => (x.kind === "ORDER_BLOCK" || x.kind === "MITIGATION") && x.side === side), htfOb = [...z].reverse().find((x) => x.kind === "ORDER_BLOCK" && x.side === side && x.sourceTimeframe === "4h"), supplyDemand = [...z].reverse().find((x) => x.kind === "SUPPLY_DEMAND" && x.side === side && x.sourceTimeframe === "4h"), range = z.find((x) => x.kind === "RANGE");
+  const breaker = [...z].reverse().find((x) => x.kind === "BREAKER" && x.side === side && (id !== "W04_BREAKER_RETEST" || x.sourceTimeframe === "4h")), ob = [...z].reverse().find((x) => (x.kind === "ORDER_BLOCK" || x.kind === "MITIGATION") && x.side === side), htfOb = [...z].reverse().find((x) => x.kind === "ORDER_BLOCK" && x.side === side && x.sourceTimeframe === "4h"), supplyDemand = [...z].reverse().find((x) => x.kind === "SUPPLY_DEMAND" && x.side === side && x.sourceTimeframe === "4h"), range = z.find((x) => x.kind === "RANGE" && x.regime === "RANGE");
   const retest = /* @__PURE__ */ __name((x) => !!x && hit(c, x), "retest");
   switch (id) {
     case "S01_SWEEP_MSS_FVG":
