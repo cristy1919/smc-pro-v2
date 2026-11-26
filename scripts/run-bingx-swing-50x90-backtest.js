@@ -103,11 +103,11 @@ function lossDiagnosis(trades) {
 }
 function learnRules(completedTrades, priorRules, learnedAfterSegment) {
   const rules = [...priorRules];
-  const bySetupDirection = groupBy(completedTrades, t => t.setupId + "|" + t.direction);
+  const bySetupDirection = groupBy(completedTrades, t => t.timeframe + "|" + t.setupId + "|" + t.direction);
   for (const row of bySetupDirection) {
-    const rows = completedTrades.filter(t => t.setupId + "|" + t.direction === row.key);
+    const rows = completedTrades.filter(t => t.timeframe + "|" + t.setupId + "|" + t.direction === row.key);
     if (rows.length >= 5 && row.profitFactor !== null && row.profitFactor < 0.35 && row.expectancyR < 0) {
-      const [setupId, direction] = row.key.split("|");
+      const [timeframe, setupId, direction] = row.key.split("|");
       const rule = {
         id: "BLOCK_SETUP_DIRECTION:" + row.key,
         type: "SETUP_DIRECTION",
@@ -119,11 +119,11 @@ function learnRules(completedTrades, priorRules, learnedAfterSegment) {
       if (!rules.some(x => x.id === rule.id)) rules.push(rule);
     }
   }
-  const bySetupBias = groupBy(completedTrades, t => [t.setupId, t.direction, evidenceValue(t, "HTF_")].join("|"));
+  const bySetupBias = groupBy(completedTrades, t => [t.timeframe, t.setupId, t.direction, evidenceValue(t, "HTF_")].join("|"));
   for (const row of bySetupBias) {
-    const rows = completedTrades.filter(t => [t.setupId, t.direction, evidenceValue(t, "HTF_")].join("|") === row.key);
+    const rows = completedTrades.filter(t => [t.timeframe, t.setupId, t.direction, evidenceValue(t, "HTF_")].join("|") === row.key);
     if (rows.length >= 3 && row.profitFactor !== null && row.profitFactor < 0.5 && row.expectancyR < 0) {
-      const [setupId, direction, htfBias] = row.key.split("|");
+      const [timeframe, setupId, direction, htfBias] = row.key.split("|");
       const rule = {
         id: "BLOCK_SETUP_DIRECTION_HTF:" + row.key,
         type: "SETUP_DIRECTION_HTF",
@@ -217,7 +217,7 @@ for (let segmentIndex = 0; segmentIndex < 3; segmentIndex++) {
     appliedLearningRules: [...learnedRules],
     entry15m: { metrics: metrics(segmentTrades["15m"]), setupBreakdown: groupBy(segmentTrades["15m"], t => t.setupId), directionBreakdown: groupBy(segmentTrades["15m"], t => t.direction), lossDiagnosis: lossDiagnosis(segmentTrades["15m"]), trades: segmentTrades["15m"] },
     entry1h: { metrics: metrics(segmentTrades["1h"]), setupBreakdown: groupBy(segmentTrades["1h"], t => t.setupId), directionBreakdown: groupBy(segmentTrades["1h"], t => t.direction), lossDiagnosis: lossDiagnosis(segmentTrades["1h"]), trades: segmentTrades["1h"] },
-    combined: { metrics: metrics(allSegmentTrades), byPair: groupBy(allSegmentTrades, t => t.symbol), bySetup: groupBy(allSegmentTrades, t => t.setupId), byTimeframe: groupBy(allSegmentTrades, t => t.timeframe) },
+    entryTimeframeComparison: { "15m": metrics(segmentTrades["15m"]), "1h": metrics(segmentTrades["1h"]) },
     pairs: perPair,
     learning: { rulesLearnedFromThisSegment: [], ruleMethod: "Only rules supported by repeated negative out-of-sample outcomes are applied to the NEXT 30-day segment; no same-segment filtering." }
   };
@@ -230,7 +230,7 @@ for (let segmentIndex = 0; segmentIndex < 3; segmentIndex++) {
 
 const all15m = combineReports(segments, "entry15m");
 const all1h = combineReports(segments, "entry1h");
-const allTrades = [...all15m.flatMap(x => x.trades), ...all1h.flatMap(x => x.trades)];
+
 const output = {
   metadata: {
     generatedAt: new Date().toISOString(),
@@ -264,7 +264,7 @@ const output = {
   total90d: {
     entry15m: { metrics: metrics(all15m.flatMap(x => x.trades)), setupBreakdown: groupBy(all15m.flatMap(x => x.trades), t => t.setupId), lossDiagnosis: lossDiagnosis(all15m.flatMap(x => x.trades)), trades: all15m.flatMap(x => x.trades) },
     entry1h: { metrics: metrics(all1h.flatMap(x => x.trades)), setupBreakdown: groupBy(all1h.flatMap(x => x.trades), t => t.setupId), lossDiagnosis: lossDiagnosis(all1h.flatMap(x => x.trades)), trades: all1h.flatMap(x => x.trades) },
-    combined: { metrics: metrics(allTrades), byPair: groupBy(allTrades, t => t.symbol), bySetup: groupBy(allTrades, t => t.setupId), byDirection: groupBy(allTrades, t => t.direction), byEntryTimeframe: groupBy(allTrades, t => t.timeframe), lossDiagnosis: lossDiagnosis(allTrades) }
+    entryTimeframeComparison: { "15m": metrics(all15m.flatMap(x => x.trades)), "1h": metrics(all1h.flatMap(x => x.trades)) }
   },
   finalLearnedRules: learnedRules
 };
