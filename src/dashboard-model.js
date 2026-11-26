@@ -13,7 +13,7 @@ const normalizeCandidate = c => ({
  structure:c.structure ?? c.structureType ?? null,createdAt:c.createdAt ?? null
 });
 export function buildDashboardSnapshot({market={},positions=[],swingCandidates=[],pendingSetups=[],statistics={},diagnostics={},cloudflareUsage={},scanHealth={},runner={},historical={},tickerData={},globalContext={}}={}) {
- const open=openPositions(positions),swing=swingCandidates.filter(validSetup),pending=pendingSetups.filter(validSetup);
+ const open=openPositions(positions),swing=swingCandidates.filter(validSetup),pending=[...pendingSetups,...swingCandidates.filter(c=>["WAIT","PENDING"].includes(String(c.status??"").toUpperCase()))].filter(validSetup);
  return {
   generatedAt:Date.now(),tabs:[...DASHBOARD_TABS],
   marketOverview:{market,cloudflareUsage,scanHealth,globalContext,tickerData,runner:{lastScannedAt:runner.lastScannedAt??null,lastScannedSymbol:runner.lastScannedSymbol??null,status:runner.status??"UNKNOWN"},historical:{lastArchivedAt:historical.lastArchivedAt??null,lastArchivedSymbol:historical.lastArchivedSymbol??null,status:historical.status??"UNKNOWN"}},
