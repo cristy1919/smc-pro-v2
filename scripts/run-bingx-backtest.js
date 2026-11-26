@@ -19,7 +19,16 @@ const timeframes=await fetchEngineDataset({provider,symbol,engine,startTime,endT
 const evaluate=engine==="scalp"?evaluateScalp:evaluateSwing;
 const fundingRates=await provider.getFundingRates({symbol,startTime,endTime:now,limit:100});
 if(!fundingRates.length)throw new Error("BINGX_HISTORICAL_FUNDING_DATA_MISSING");
-const report=runHistoricalBacktest({engine,symbol,timeframes,evaluate,fundingRates,periodDays:[30,60,90],initialEquity:balance.equity,feeRate:Number(process.env.FEE_RATE??0.0005),slippageRate:Number(process.env.SLIPPAGE_RATE??0.0002),fundingRate:Number(process.env.FUNDING_RATE??0)});
+const common={engine,symbol,timeframes,evaluate,fundingRates,periodDays:[30,60,90],initialEquity:balance.equity,feeRate:Number(process.env.FEE_RATE??0.0005),slippageRate:Number(process.env.SLIPPAGE_RATE??0.0002),fundingRate:Number(process.env.FUNDING_RATE??0)};
+let report;
+if(engine==="swing"){
+  const run=(entryTimeframe,filters={})=>runHistoricalBacktest({...common,entryTimeframe,...filters});
+  report={
+    comparison:{entry15m:run("15m"),entry1h:run("1h")},
+    w05Short:{entry15m:run("15m",{setupIdFilter:"W05_RANGE_DEVIATION",directionFilter:"BEARISH"}),entry1h:run("1h",{setupIdFilter:"W05_RANGE_DEVIATION",directionFilter:"BEARISH"})},
+    methodology:{sameSymbol:symbol,same90dDataset:true,periodDays:[30,60,90],setupScoreMinimum:80,stopFirstOnSameCandle:true,manualClosesIncluded:false,entryTimeframeComparison:"15m retains 1h confirmation; 1h variant uses 1h entry after 1d bias and 4h zone context",w05ShortOnly:true}
+  };
+}else report=runHistoricalBacktest(common);
 const output={account:{source:balance.source,asset:balance.asset,equity:balance.equity,availableMargin:balance.availableMargin,fetchedAt:balance.fetchedAt},report};
 const serialized=JSON.stringify(output,null,2);
 await writeFile("backtest-report.json",serialized+"\n",{encoding:"utf8"});
