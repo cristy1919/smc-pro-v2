@@ -27,7 +27,7 @@ Existing resources were inspected in place. No new repository, Worker, Durable O
 - `DEMO_TRADING_ENABLED=false`, `LIVE_TRADING_ENABLED=false`, and `PAPER_TRADING_ONLY=true`.
 - The configured `PAPER_START_BALANCE_USDT=1000` is an existing internal paper-account setting. It is **not** verified BingX VST equity and must not be represented as the user's VST balance.
 - The persisted internal ledger currently contains two open paper positions, one closed trade, and a balance of approximately 988.81 USDT. These records were not reset or rewritten.
-- To enforce the requested BingX VST-only execution target, the existing Worker entry gate was changed to `NEW_PAPER_ENTRIES_ENABLED=false`. Scanner/strategy generation and existing-position management remain enabled; new internal-paper entries are blocked until the VST demo credentials are configured. Existing positions and history were preserved.
+- Current production Worker version `1986` (`ef4af70d-7c07-4508-a624-ad6fe15b7a30`) has `NEW_PAPER_ENTRIES_ENABLED=true`; it continues in internal-paper mode. This is not BingX VST execution. `DEMO_TRADING_ENABLED=false`, `ORDERFLOW_DEMO_EXECUTION_ENABLED=false`, `LIVE_TRADING_ENABLED=false`, and `PAPER_TRADING_ONLY=true` remain enforced.
 - Funding snapshots can be available; open interest, aggressor flow, and BTC/USDT/altcoin dominance are explicitly marked unavailable in the current signal audit where no verified feed is present.
 - The Worker has an embedded production bundle and existing API routes. The repository's research modules are not yet built into or deployed by that Worker. Do not assume changes in this repository automatically change the running Worker.
 
@@ -55,3 +55,14 @@ Existing resources were inspected in place. No new repository, Worker, Durable O
 5. Prove zero future leakage, invalid stops, duplicate same-engine entries, and unsupported metric fabrication.
 6. Verify dashboard endpoints and all ten tabs against the live Worker API; dashboard refresh must not trigger scans.
 7. Enable BingX demo execution only after VST equity, isolated margin, leverage, liquidation buffer, TP/SL, cancellation, and position reconciliation pass. Live trading remains disabled.
+
+
+## Production paper analytics repair (2026-11-26)
+
+- Deployed Worker version: `1986`; deployment `1135de92-e109-4a8c-ab0a-5da7d0c148a4`, 100% traffic. Existing `EngineState` / `EngineStateV2` Durable Object exports, namespace IDs, KV binding, and migration tag `v1` were preserved.
+- Analytics now separates verified P/L, provisional numeric P/L where funding accounting is unverified, and truly missing P/L. Provisional values are reported separately and are not included in verified win rate or profit factor.
+- Closed-trade analytics now recover historical `primaryTrend` and `marketPhase` from the entry-time `audit.htfTrend` and `audit.marketRegime` fields when the top-level fields are absent. New positions persist those fields at entry, along with BTC bias.
+- Analytics now separates manual exits from automated exits and exposes setup-timeframe and model/side/entry-timeframe/exit-type groupings.
+- New internal-paper entries for `W05_RANGE_DEVIATION + SHORT` are temporarily held at `WATCH` with reason `MODEL_SIDE_QUARANTINED`. The last report showed 17 trades, 35.29% win rate, PF 0.28, and -44.69 USDT. This is a targeted paper quarantine, not deletion of W05 or a claim that the model is permanently invalid. W05 LONG remains observable pending sufficient verified sample size.
+- The 26 Nov report contained 97 closed trades: 66 Scalp (5m entry) and 31 Swing (15m entry). It also showed 45 manual closes. Timeframe comparisons remain confounded with engine type; Swing 15m must be compared against controlled 1h-entry variants before declaring the timeframe itself defective.
+- Deployment changed code only. No paper ledger, open position, balance, or trade-history record was reset or rewritten. Public HTTP runtime verification was blocked by the Cloudflare execution environment's network policy; the active deployment and bindings were verified through the Cloudflare API.
