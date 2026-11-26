@@ -109,11 +109,12 @@ export class BingXPublicKlineProvider {
 
 export async function fetchEngineDataset({ provider, symbol, engine, startTime, endTime }) {
   if (!provider || typeof provider.getCandles !== "function") throw new TypeError("provider.getCandles is required");
-  const timeframes = engine === "scalp" ? ["1h","15m","5m"] : engine === "swing" ? ["1d","4h","1h","15m"] : null;
+  if (engine === "scalp") throw new Error("SCALP_ENGINE_REMOVED");
+  const timeframes = engine === "swing" ? ["1d","4h"] : null;
   if (!timeframes) throw new Error("INVALID_ENGINE");
   const result = {};
   for (const timeframe of timeframes) {
-    const warmupMs = ["1h","4h","1d"].includes(timeframe) ? 30 * 86400000 : 2 * 86400000;
+    const warmupMs = 45 * 86400000;
     const requestStart = Math.max(0, startTime - warmupMs);
     const intervalMs = INTERVAL_MS[timeframe];
     const requiredCandles = Math.min(30000, Math.ceil((endTime - requestStart) / intervalMs) + 2);
