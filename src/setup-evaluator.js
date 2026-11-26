@@ -36,7 +36,7 @@ function features(candles) {
  return {...s,pools,sweeps,fvgs,obs,breakers,supplyDemand,ranges,deviations,otes,crt};
 }
 function inZone(zones,price,direction) {
- return zones.find(z=>z.direction===direction&&z.confirmedAt<Infinity&&price>=z.low&&price<=z.high)??null;
+ return zones.find(z=>z.direction===direction&&(z.confirmedAt==null||Number.isFinite(z.confirmedAt))&&price>=z.low&&price<=z.high)??null;
 }
 function contextDirection(x) {
  const v=String(x?.direction??x?.bias??x??"").toUpperCase();
@@ -44,9 +44,10 @@ function contextDirection(x) {
 }
 function btcContextScore(direction, context) {
  const weekly=contextDirection(context?.btc?.weekly),daily=contextDirection(context?.btc?.daily);
- if(weekly==="NEUTRAL"||daily==="NEUTRAL")return {score:null,weekly,daily,aligned:false,opposed:false};
- const aligned=(weekly===direction?1:0)+(daily===direction?1:0);
- return {score:aligned===2?100:aligned===1?55:10,weekly,daily,aligned:aligned===2,opposed:aligned===0};
+ const known=[weekly,daily].filter(x=>x!=="NEUTRAL");
+ if(!known.length)return {score:null,weekly,daily,aligned:false,opposed:false};
+ const aligned=known.filter(x=>x===direction).length,opposed=known.some(x=>x!==direction);
+ return {score:Math.round(aligned/known.length*100),weekly,daily,aligned:known.length===2&&aligned===2,opposed};
 }
 function dominanceScore(direction, context) {
  const d=context?.dominance??{},btc=contextDirection(d.btc),alt=contextDirection(d.altcoin),usdt=contextDirection(d.usdt);
