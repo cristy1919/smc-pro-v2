@@ -59,21 +59,19 @@ test("BingX provider refuses forbidden 1m/3m trading intervals",async()=>{
 test("engine dataset fetch uses only independent approved timeframe sets",async()=>{
   const calls=[];
   const provider={getCandles:async args=>{calls.push(args.timeframe);return [];}};
-  await fetchEngineDataset({provider,symbol:"BTC-USDT",engine:"scalp",startTime:0,endTime:1000000});
-  assert.deepEqual(calls,["1h","15m","5m"]);
-  calls.length=0;
+  await assert.rejects(()=>fetchEngineDataset({provider,symbol:"BTC-USDT",engine:"scalp",startTime:0,endTime:1000000}),/SCALP_ENGINE_REMOVED/);
   await fetchEngineDataset({provider,symbol:"BTC-USDT",engine:"swing",startTime:0,endTime:1000000});
-  assert.deepEqual(calls,["1d","4h","1h","15m"]);
+  assert.deepEqual(calls,["1d","4h"]);
 });
 test("walk-forward backtest produces separate trade ledger and refuses missing 90d history",()=>{
   const hour=3600000, day=24*hour, start=Date.UTC(2026,0,1);
   const make=(n,step)=>Array.from({length:n},(_,i)=>({timestamp:start+i*step,open:100.1,high:101,low:100.2,close:100.8,volume:100,closed:true}));
-  const timeframes={"1d":make(32,day),"4h":make(192,4*hour),"1h":make(768,hour),"15m":make(32*96,15*60*1000)};
+  const timeframes={"1d":make(100,day),"4h":make(600,4*hour)};
   let emitted=false; const fundingRates=[];
   const report=runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[30],maxHoldBars:5,fundingRates,evaluate:({timeframes:tf})=>{
     if(emitted)return [];
     emitted=true;
-    const last=tf["15m"].at(-1); fundingRates.push({fundingTime:last.timestamp+30*60*1000,fundingRate:0.0001});
+    const last=tf["4h"].at(-1); fundingRates.push({fundingTime:last.timestamp+30*60*1000,fundingRate:0.0001});
     return [{id:"one-trade",engine:"swing",symbol:"BTC-USDT",direction:"BULLISH",setupId:"W01_HTF_OB_REVERSAL",state:"QUALIFIED",score:85,createdAt:last.timestamp,entry:100.8,stop:99,target:107.1,zoneBounds:{low:100,high:101},hardFilters:{validStop:true,minimumRR:true}}];
   }});
   assert.equal(report.periods.length,1);
@@ -90,15 +88,15 @@ test("walk-forward backtest produces separate trade ledger and refuses missing 9
 test("legacy compatibility adapter only publishes candidate snapshots and guards close action",async()=>{
   let saved;
   const adapter=createLegacyWorkerCompatibilityAdapter({readEngineSnapshot:async()=>({runnerEnabled:true}),writeCandidateSnapshot:async v=>{saved=v;}});
-  const result=await adapter.publishCandidates({scalp:[{id:"s1",engine:"scalp",symbol:"BTC-USDT",direction:"BULLISH",setupId:"S01",state:"WATCH",score:70,evidence:[]}],swing:[]});
-  assert.equal(result.scalpCount,1);
+  const result=await adapter.publishCandidates({swing:[{id:"w1",engine:"swing",symbol:"BTC-USDT",direction:"BULLISH",setupId:"W01",setupTimeframe:"4h",state:"WATCH",score:70,evidence:[]}]});
+  assert.equal(result.scalpCount,0);
   assert.equal(saved.schemaVersion,1);
   await assert.rejects(()=>adapter.close({positionId:"p1",closePercent:100}),/NOT_CONFIGURED/);
 });
 test("dashboard model publishes required tabs, independent counters and compact open positions",()=>{
-  const snap=buildDashboardSnapshot({positions:[{id:"p1",status:"OPEN",engine:"scalp",symbol:"BTC-USDT",side:"LONG",entry:100,target:110,stop:95,reasonTr:"Sweep ve MSS teyidi"}],scalpCandidates:[{id:"s1"}],swingCandidates:[{id:"w1"},{id:"w2"}]});
+  const snap=buildDashboardSnapshot({positions:[{id:"p1",status:"OPEN",engine:"swing",symbol:"BTC-USDT",side:"LONG",entry:100,target:110,stop:95,reasonTr:"Sweep ve MSS teyidi"}],swingCandidates:[{id:"w1",engine:"swing",setupTimeframe:"4h"},{id:"w2",engine:"swing",setupTimeframe:"1d"},{id:"old",engine:"swing",setupTimeframe:"1h"}]});
   assert.deepEqual(snap.tabs,DASHBOARD_TABS);
-  assert.equal(snap.counters.scalpPositions,1);
+  assert.equal(snap.counters.swingPositions,1);
   assert.equal(snap.counters.swingCandidates,2);
   assert.equal(snap.openPositions[0].reason,"Sweep ve MSS teyidi");
 });
@@ -126,7 +124,7 @@ test("90d Swing dataset requests enough candles for a full 15m and 1h comparison
   assert.ok(byTf["1h"] > 1440, "1h history must cover the 90d window plus warmup");
   assert.ok(byTf["1d"] >= 120, "daily history must include the 90d window plus warmup");
 });
-test("walk-forward backtest uses the requested 1h Swing entry candles", () => {
+test("walk-forward backtest rejects 1H and lower setup timeframes", () => {
   const hour = 3600000, day = 24 * hour, start = Date.UTC(2026, 0, 1);
   const make = (n, step) => Array.from({ length: n }, (_, i) => ({ timestamp: start + i * step, open: 100.1, high: 101, low: 100.2, close: 100.8, volume: 100, closed: true }));
   const timeframes = { "1d": make(32, day), "4h": make(192, 4 * hour), "1h": make(32 * 24, hour), "15m": make(32 * 96, 15 * 60 * 1000) };
