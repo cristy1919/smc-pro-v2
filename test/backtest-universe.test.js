@@ -6,7 +6,7 @@ const contract = (symbol, asset = symbol.replace(/-USDT$/, "")) => ({
   symbol, asset, currency: "USDT", status: 1, apiStateOpen: "true"
 });
 const ticker = (symbol, quoteVolume) => ({
-  symbol, quoteVolume: String(quoteVolume), bidPrice: "99", askPrice: "101", lastPrice: "100"
+  symbol, quoteVolume: String(quoteVolume), bidPrice: "99.9", askPrice: "100.1", lastPrice: "100"
 });
 
 test("accepts genuine crypto perpetual contracts and excludes TradFi and gold references", () => {
