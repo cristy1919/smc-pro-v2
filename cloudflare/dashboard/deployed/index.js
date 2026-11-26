@@ -9,7 +9,7 @@ export default {
    try {
     const headers=new Headers({origin:API_ORIGIN});
     const auth=request.headers.get("authorization"); if(auth) headers.set("authorization",auth);
-    const upstream=await env.ENGINE.fetch(new Request(new URL("https://engine.internal/api/paper/status"),{method:"GET",headers}));
+    const upstream=await env.ENGINE.fetch(new Request(new URL("https://engine.internal/api/paper/internal-status"),{method:"GET",headers}));
     upstreamStatus=upstream.status;
     upstreamData=await upstream.json();
     if(!upstream.ok) upstreamError=upstreamData?.error||("Engine HTTP "+upstream.status);
