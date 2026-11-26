@@ -221,7 +221,7 @@ for (let segmentIndex = 0; segmentIndex < 3; segmentIndex++) {
     pairs: perPair,
     learning: { rulesLearnedFromThisSegment: [], ruleMethod: "Only rules supported by repeated negative out-of-sample outcomes are applied to the NEXT 30-day segment; no same-segment filtering." }
   };
-  const nextRules = learnRules(allSegmentTrades, learnedRules, segmentIndex + 1);
+  const nextRules = learnRules([...segmentTrades["15m"], ...segmentTrades["1h"]], learnedRules, segmentIndex + 1);
   segmentReport.learning.rulesLearnedFromThisSegment = nextRules.filter(r => !learnedRules.some(old => old.id === r.id));
   segments.push(segmentReport);
   learnedRules = nextRules;
@@ -272,6 +272,6 @@ await writeFile("swing-50-pairs-90d-walk-forward-report.json", JSON.stringify(ou
 process.stdout.write(JSON.stringify({
   completedPairs: datasets.size,
   segments: segments.map(s => ({ segment: s.segment, entry15m: s.entry15m.metrics, entry1h: s.entry1h.metrics, rulesLearned: s.learning.rulesLearnedFromThisSegment.length })),
-  total90d: { entry15m: output.total90d.entry15m.metrics, entry1h: output.total90d.entry1h.metrics, combined: output.total90d.combined.metrics },
+  total90d: { entry15m: output.total90d.entry15m.metrics, entry1h: output.total90d.entry1h.metrics },
   finalLearnedRules: learnedRules.length
 }, null, 2) + "\n");
