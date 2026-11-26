@@ -38,3 +38,12 @@ test("unavailable optional volume is explicit and not fabricated", () => {
   const result = evaluateSwing(input);
   assert.ok(result.every(x => x.dataStatus.relativeVolume === "UNAVAILABLE"));
 });
+
+test("Swing evaluator accepts a genuine 1h entry mode without reusing the 1h confirmation gate", () => {
+  const result = evaluateSwing({ ...input, entryTimeframe: "1h" });
+  assert.ok(Array.isArray(result));
+  assert.ok(result.every(x => x.engine === "swing" && x.timeframe === "1h"));
+});
+test("Swing evaluator rejects unsupported entry timeframes", () => {
+  assert.throws(() => evaluateSwing({ ...input, entryTimeframe: "5m" }), /UNSUPPORTED_SWING_ENTRY_TIMEFRAME/);
+});

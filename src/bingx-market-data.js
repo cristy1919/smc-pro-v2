@@ -57,11 +57,11 @@ export class BingXPublicKlineProvider {
     const duration = INTERVAL_MS[timeframe];
     if (!duration) throw new Error("UNSUPPORTED_KLINE_INTERVAL");
     if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) throw new RangeError("INVALID_TIME_RANGE");
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1440) throw new RangeError("KLINE_LIMIT_MUST_BE_1_TO_1440");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 30000) throw new RangeError("KLINE_LIMIT_MUST_BE_1_TO_30000");
     const rows = [];
     let cursor = startTime;
     while (cursor < endTime) {
-      const page = await this.#request({ symbol, interval: timeframe, startTime: cursor, endTime, limit });
+      const page = await this.#request({ symbol, interval: timeframe, startTime: cursor, endTime, limit: Math.min(1440, limit - rows.length) });
       if (!page.length) break;
       const normalized = page.map(row => ({
         timestamp: Number(row.time), open: Number(row.open), high: Number(row.high),
@@ -88,7 +88,9 @@ export async function fetchEngineDataset({ provider, symbol, engine, startTime, 
   for (const timeframe of timeframes) {
     const warmupMs = ["1h","4h","1d"].includes(timeframe) ? 30 * 86400000 : 2 * 86400000;
     const requestStart = Math.max(0, startTime - warmupMs);
-    result[timeframe] = await provider.getCandles({symbol,timeframe,startTime:requestStart,endTime,limit:1440});
+    const intervalMs = INTERVAL_MS[timeframe];
+    const requiredCandles = Math.min(30000, Math.ceil((endTime - requestStart) / intervalMs) + 2);
+    result[timeframe] = await provider.getCandles({symbol,timeframe,startTime:requestStart,endTime,limit:requiredCandles});
   }
   return result;
 }

@@ -63,7 +63,7 @@ function features(candles) {
 function zoneAtPrice(zones, price, direction) {
   return zones.find(z => (z.direction ?? (String(z.type).startsWith("BULLISH") ? "BULLISH" : String(z.type).startsWith("BEARISH") ? "BEARISH" : null)) === direction && price >= z.low && price <= z.high) ?? null;
 }
-function makeCandidate({ engine, symbol, direction, setupId, entryCandles, htf, middle, entryFeatures, evidence, zone, volumeData }) {
+function makeCandidate({ engine, symbol, direction, setupId, entryCandles, entryTimeframe, htf, middle, entryFeatures, evidence, zone, volumeData }) {
   const last = entryCandles.at(-1);
   const entry = last.close;
   const stop = recentExtreme(entryCandles.slice(0, -1), direction, 12);
@@ -96,7 +96,7 @@ function makeCandidate({ engine, symbol, direction, setupId, entryCandles, htf, 
   return {
     id: [engine, symbol, setupId, last.timestamp].join(":"),
     engine, symbol, direction, setupId, state: rejected ? "REJECTED" : score >= 80 ? "QUALIFIED" : "WATCH",
-    timeframe: engine === "scalp" ? "5m" : "15m",
+    timeframe: entryTimeframe,
     entry, stop, target, stopLoss: stop, takeProfit: target, zoneBounds: zone ? { low: zone.low, high: zone.high, type: zone.type } : null, rewardRisk: Number(rr.toFixed(2)), score, band,
     entryConfirmation: { status: "PENDING", maxWaitBars: 6, method: zone ? "ZONE_RETEST_CLOSE" : "CLOSE_CONFIRMATION" },
     confidence: "INSUFFICIENT_DATA", factors, factorCoveragePct: Math.round(availableWeight),
@@ -117,8 +117,12 @@ function validateInput(input, engine) {
 function evaluate(input, engine) {
   const validated = validateInput(input, engine);
   const [higherCandles, middleCandles] = validated;
-  const confirmationCandles = engine === "swing" ? validated[2] : null;
-  const entryCandles = validated.at(-1);
+  const entryTimeframe = engine === "scalp" ? "5m" : (input.entryTimeframe ?? "15m");
+  if (engine === "swing" && !["15m", "1h"].includes(entryTimeframe)) throw new Error("UNSUPPORTED_SWING_ENTRY_TIMEFRAME");
+  const confirmationCandles = engine === "swing" && entryTimeframe === "15m" ? validated[2] : null;
+  const entryCandles = input.timeframes[entryTimeframe];
+  validateCandles(entryCandles);
+  if (entryCandles.length < 25) throw new Error("INSUFFICIENT_ENTRY_TIMEFRAME_" + entryTimeframe);
   const htf = features(higherCandles), middle = features(middleCandles), entryF = features(entryCandles);
   const confirmationF = confirmationCandles ? features(confirmationCandles) : null;
   const price = entryCandles.at(-1).close;
@@ -129,8 +133,8 @@ function evaluate(input, engine) {
   const direction = recentSweep?.direction ?? recentDeviation?.direction ?? recentCrt?.direction ?? triggerEvent?.direction ?? candleDirection(entryCandles.at(-1));
   if (direction === "NEUTRAL") return [];
   if (engine === "swing") {
-    const confirmationEvent = latest(confirmationF.events, x => x.index >= confirmationCandles.length - 4);
-    if (!confirmationEvent || confirmationEvent.direction !== direction) return [];
+    const confirmationEvent = confirmationF ? latest(confirmationF.events, x => x.index >= confirmationCandles.length - 4) : null;
+    if (confirmationF && (!confirmationEvent || confirmationEvent.direction !== direction)) return [];
   }
   const candidates = [];
   const sweep = recentSweep?.direction === direction ? recentSweep : null;
@@ -145,7 +149,7 @@ function evaluate(input, engine) {
   const ote = middle.otes.find(x => x.direction === direction && price >= x.low && price <= x.high);
   const inOte = Boolean(ote);
   const add = (key, evidence, zone = null) => {
-    const item = makeCandidate({ engine, symbol: input.symbol, direction, setupId: SETUP_IDS[engine][key], entryCandles, htf, middle, entryFeatures: entryF, evidence, zone, volumeData: input.volumeData });
+    const item = makeCandidate({ engine, symbol: input.symbol, direction, setupId: SETUP_IDS[engine][key], entryCandles, entryTimeframe, htf, middle, entryFeatures: entryF, evidence, zone, volumeData: input.volumeData });
     if (item) candidates.push(item);
   };
   if (sweep && displacementEvent && triggerEvent?.direction === direction && triggerEvent?.type === "CHoCH" && triggerEvent?.mss === true && fvg) add("sweep", ["LIQUIDITY_SWEEP", "DISPLACEMENT_MSS", "FVG_RETEST"], fvg);
