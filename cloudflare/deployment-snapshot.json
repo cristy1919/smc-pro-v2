@@ -1,15 +1,16 @@
 {
-  "updatedAt": "2026-11-25T12:32:00Z",
+  "updatedAt": "2026-11-26T13:16:55.621883Z",
   "repository": "cristy1919/smc-pro-v2",
   "production": {
     "worker": {
       "name": "smcprov2",
-      "versionId": "65b86fa0-f51a-449d-b9fe-b1d3c297b3af",
+      "versionId": "ef4af70d-7c07-4508-a624-ad6fe15b7a30",
       "snapshot": "cloudflare/worker/deployed/index.js",
       "runnerEnabled": true,
       "internalPaperEntriesEnabled": true,
       "bingxVstEnabled": false,
-      "liveTradingEnabled": false
+      "liveTradingEnabled": false,
+      "w05SwingShortQuarantine": true
     },
     "dashboard": {
       "name": "smcprov2-dashboard",
