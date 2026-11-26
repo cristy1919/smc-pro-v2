@@ -37,6 +37,21 @@ test("BingX provider normalizes public OHLCV and drops forming candle",async()=>
   assert.equal(rows[0].open,100);
   assert.ok(rows.every(c=>c.closed));
 });
+test("BingX klines paginate backwards from newest-first pages to recover full history",async()=>{
+  const requests=[];
+  const pages=[
+    [{time:600000,open:"3",high:"3",low:"3",close:"3",volume:"1"},{time:300000,open:"2",high:"2",low:"2",close:"2",volume:"1"}],
+    [{time:0,open:"1",high:"1",low:"1",close:"1",volume:"1"}]
+  ];
+  const provider=new BingXPublicKlineProvider({fetchImpl:async url=>{
+    requests.push(new URL(url));
+    return {ok:true,json:async()=>({code:0,data:pages.shift()??[]})};
+  },now:()=>2000000,minRequestIntervalMs:0});
+  const rows=await provider.getCandles({symbol:"BTC-USDT",timeframe:"5m",startTime:0,endTime:900000,limit:4});
+  assert.deepEqual(rows.map(x=>x.timestamp),[0,300000,600000]);
+  assert.equal(requests.length,2);
+  assert.equal(Number(requests[1].searchParams.get("endTime")),299999);
+});
 test("BingX provider refuses forbidden 1m/3m trading intervals",async()=>{
   const provider=new BingXPublicKlineProvider({fetchImpl:async()=>{throw new Error("should not fetch");},now:()=>1000000,minRequestIntervalMs:0});
   await assert.rejects(()=>provider.getCandles({symbol:"BTC-USDT",timeframe:"1m",startTime:0,endTime:1000000}),/Forbidden timeframe/);
