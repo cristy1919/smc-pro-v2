@@ -73,7 +73,7 @@ export class BingXPublicKlineProvider {
       })).filter(c => Number.isFinite(c.timestamp) && c.timestamp >= startTime && c.timestamp < endTime);
       rows.push(...normalized);
       const oldestTime = Math.min(...normalized.map(c => c.timestamp));
-      if (!Number.isFinite(oldestTime) || oldestTime <= startTime || page.length < pageLimit) break;
+      if (!Number.isFinite(oldestTime) || oldestTime <= startTime) break;
       cursorEnd = oldestTime - 1;
     }
     const deduped = [...new Map(rows.map(c => [c.timestamp,c])).values()].sort((a,b)=>a.timestamp-b.timestamp);
