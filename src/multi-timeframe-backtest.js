@@ -63,25 +63,26 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
       if(confirmation.status!=="CONFIRMED"){skipped++;continue;}
       const entry=confirmation.entry,stop=candidate.stop,risk=Math.abs(entry-stop);
       if(!(risk>0)||(candidate.direction==="BULLISH"&&stop>=entry)||(candidate.direction==="BEARISH"&&stop<=entry)){skipped++;continue;}
-      const target=candidate.direction==="BULLISH"?entry+risk*3.5:entry-risk*3.5;
+      const stopDistancePct=risk/entry,roundTripCostRate=2*(feeRate+slippageRate),projectedCostR=roundTripCostRate*entry/risk;
+      if(stopDistancePct<0.007||projectedCostR>0.20){skipped++;continue;}
+      const sign=candidate.direction==="BULLISH"?1:-1,target=entry+sign*risk*3.5,tp1=entry+sign*risk;
       const after=entryRows.filter(c=>c.timestamp>confirmation.confirmedAt&&c.timestamp<boundary).slice(0,holdBars);
       if(!after.length){skipped++;continue;}
       let exit=after.at(-1).close,exitAt=after.at(-1).timestamp,exitReason=after.length===holdBars?"MAX_OBSERVATION_HORIZON":Number.isFinite(boundary)?"SEGMENT_END":"DATA_END";
+      let tp1Hit=false,tp1At=null,realizedGrossR=0,remainingFraction=1;
       for(const c of after){
-        const stopHit=candidate.direction==="BULLISH"?c.low<=stop:c.high>=stop;
-        const targetHit=candidate.direction==="BULLISH"?c.high>=target:c.low<=target;
-        if(stopHit){exit=stop;exitAt=c.timestamp;exitReason="STOP";break;}
-        if(targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET";break;}
+        const stopLevel=tp1Hit?entry:stop,stopHit=candidate.direction==="BULLISH"?c.low<=stopLevel:c.high>=stopLevel;
+        const tp1Touched=candidate.direction==="BULLISH"?c.high>=tp1:c.low<=tp1,targetHit=candidate.direction==="BULLISH"?c.high>=target:c.low<=target;
+        if(stopHit){exit=stopLevel;exitAt=c.timestamp;exitReason=tp1Hit?"BREAKEVEN_STOP":"STOP";if(tp1Hit)realizedGrossR+=remainingFraction*sign*(exit-entry)/risk;else realizedGrossR=sign*(exit-entry)/risk;remainingFraction=0;break;}
+        if(!tp1Hit&&tp1Touched){tp1Hit=true;tp1At=c.timestamp;realizedGrossR+=0.5;remainingFraction=0.5;if(targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET_AFTER_TP1";realizedGrossR+=0.5*3.5;remainingFraction=0;break;}continue;}
+        if(tp1Hit&&targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET";realizedGrossR+=remainingFraction*3.5;remainingFraction=0;break;}
       }
-      const observed=after.filter(c=>c.timestamp<=exitAt);
-      const favorableMove=observed.reduce((m,c)=>Math.max(m,candidate.direction==="BULLISH"?c.high-entry:entry-c.low),0);
-      const adverseMove=observed.reduce((m,c)=>Math.max(m,candidate.direction==="BULLISH"?entry-c.low:c.high-entry),0);
-      const grossR=(candidate.direction==="BULLISH"?exit-entry:entry-exit)/risk;
-      const feeSlippageR=(2*feeRate+2*slippageRate)*entry/risk;
+      if(remainingFraction>0)realizedGrossR+=remainingFraction*sign*(exit-entry)/risk;
+      const observed=after.filter(c=>c.timestamp<=exitAt),favorableMove=observed.reduce((v,c)=>Math.max(v,candidate.direction==="BULLISH"?c.high-entry:entry-c.low),0),adverseMove=observed.reduce((v,c)=>Math.max(v,candidate.direction==="BULLISH"?entry-c.low:c.high-entry),0);
+      const exitTurnover=tp1Hit?0.5*tp1+0.5*exit:exit,feeSlippageR=(feeRate+slippageRate)*(entry+exitTurnover)/risk;
       const settlements=Array.isArray(fundingRates)?fundingRates.filter(x=>x.fundingTime>confirmation.confirmedAt&&x.fundingTime<=exitAt):[];
-      const fundingR=settlements.reduce((sum,x)=>sum+x.fundingRate*(candidate.direction==="BULLISH"?1:-1),0)*entry/risk;
-      const costR=feeSlippageR+fundingR,netR=grossR-costR;
-      trades.push({candidateId:candidate.id,setupId:candidate.setupId,direction:candidate.direction,timeframe:entryTf,score:candidate.score,band:candidate.band,factors:candidate.factors,evidence:candidate.evidence,zoneBounds:candidate.zoneBounds,rewardRisk:candidate.rewardRisk,signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,target,exit,exitAt,exitReason,grossR,estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,maeR:Number((adverseMove/risk).toFixed(4)),mfeR:Number((favorableMove/risk).toFixed(4)),netR});
+      const fundingR=settlements.reduce((sum,x)=>sum+x.fundingRate*sign*(tp1At&&x.fundingTime>tp1At?0.5:1),0)*entry/risk,costR=feeSlippageR+fundingR,netR=realizedGrossR-costR;
+      trades.push({candidateId:candidate.id,setupId:candidate.setupId,direction:candidate.direction,timeframe:entryTf,score:candidate.score,band:candidate.band,factors:candidate.factors,evidence:candidate.evidence,zoneBounds:candidate.zoneBounds,rewardRisk:candidate.rewardRisk,signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,tp1,tp1At,tp1Hit,tp1ClosedFraction:tp1Hit?0.5:0,stopMovedToBreakeven:tp1Hit,target,exit,exitAt,exitReason,grossR:realizedGrossR,estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,stopDistancePct,projectedCostR,maeR:Number((adverseMove/risk).toFixed(4)),mfeR:Number((favorableMove/risk).toFixed(4)),netR});
       lastExit=exitAt;
     }
     reports.push({summary:summarize(engine,symbol,days,trades,skipped),trades});
