@@ -5947,7 +5947,7 @@ var EngineState = class {
           latestLedger.cursor = ledger.cursor;
           latestLedger.scanLogicalBatchRemaining = ledger.scanLogicalBatchRemaining;
         }
-        for (const resetFlag of ["strategyResetV2", "strategyResetV3", "strategyResetV4", "strategyResetV5", "strategyResetV6", "strategyResetV7", "sequentialBatchScanV1"]) {
+        for (const resetFlag of ["strategyResetV2", "strategyResetV3", "strategyResetV4", "strategyResetV5", "strategyResetV6", "strategyResetV7", "strategyResetV8", "sequentialBatchScanV1"]) {
           if (ledger[resetFlag] === true) latestLedger[resetFlag] = true;
         }
         latestLedger.lastScanAt = ledger.lastScanAt;
