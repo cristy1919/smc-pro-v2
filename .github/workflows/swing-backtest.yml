@@ -1,6 +1,9 @@
 name: BingX Swing 50-pair 90-day backtest
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - scripts/run-bingx-swing-50x90-backtest.js
 concurrency:
   group: bingx-swing-50x90-backtest
   cancel-in-progress: false
