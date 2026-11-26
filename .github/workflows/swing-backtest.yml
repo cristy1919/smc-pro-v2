@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - scripts/run-bingx-swing-50x90-backtest.js
+      - scripts/run-bingx-swing-50x90-backtest.js\n      - src/multi-timeframe-backtest.js
 concurrency:
   group: bingx-swing-50x90-backtest
   cancel-in-progress: false
@@ -22,7 +22,7 @@ jobs:
         run: node --check scripts/run-bingx-swing-50x90-backtest.js
       - name: Run repository tests
         run: npm test
-      - name: Run 50-pair 90-day Swing backtest
+      - name: Run sequential 3x30-day Swing walk-forward backtest
         env:
           WINDOW_DAYS: "90"
           TARGET_SYMBOLS: "50"
@@ -33,7 +33,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bingx-swing-50-pairs-90-days
-          path: swing-50-pairs-90d-report.json
+          name: bingx-swing-50-pairs-90-days-walk-forward
+          path: swing-50-pairs-90d-walk-forward-report.json
           if-no-files-found: warn
           retention-days: 14
