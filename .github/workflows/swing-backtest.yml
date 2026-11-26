@@ -6,8 +6,10 @@ on:
       - .github/workflows/swing-backtest.yml
       - scripts/run-bingx-swing-50x90-backtest.js
       - src/multi-timeframe-backtest.js
+      - src/backtest-universe.js
       - src/bingx-market-data.js
       - test/bingx-market-data-retry.test.js
+      - test/backtest-universe.test.js
 concurrency:
   group: bingx-swing-50x90-walk-forward
   cancel-in-progress: true
