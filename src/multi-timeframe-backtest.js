@@ -22,11 +22,11 @@ function summarize(engine,symbol,days,trades,skipped){
   const totalR=trades.reduce((s,t)=>s+t.netR,0);
   return {engine,symbol,periodDays:days,startingEquityIndex:1,endingEquityIndex:Number(equityIndex.toFixed(6)),trades:trades.length,wins:wins.length,losses:losses.length,winRate:trades.length?wins.length/trades.length:0,profitFactor:grossLoss?grossWin/grossLoss:grossWin?null:0,expectancyR:trades.length?totalR/trades.length:0,totalR,maxDrawdownPct:maxDrawdown*100,skipped,feesIncluded:true,confidence:trades.length<30?"INSUFFICIENT_DATA":"SAMPLE_AVAILABLE"};
 }
-export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars,maxWaitBars=6,entryTimeframe,setupIdFilter,directionFilter,startTime,endTime,candidateFilter}){
+export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars,maxWaitBars=6,setupTimeframe,setupIdFilter,directionFilter,startTime,endTime,candidateFilter}){
   if(engine==="scalp")throw new Error("SCALP_ENGINE_REMOVED");
   if(engine!=="swing")throw new Error("INVALID_ENGINE");
   if(typeof evaluate!=="function")throw new TypeError("evaluate callback is required");
-  const setupTf=arguments[0]?.setupTimeframe??"4h";
+  const setupTf=setupTimeframe??"4h";
   if(!["4h","1d"].includes(setupTf))throw new Error("FORBIDDEN_SETUP_TIMEFRAME_"+setupTf);
   const setupRows=timeframes?.[setupTf];
   for(const [tf,rows] of Object.entries(timeframes??{})){if(!TF_MS[tf])throw new Error("FORBIDDEN_BACKTEST_TIMEFRAME_"+tf);assertCandles(rows,tf);}
