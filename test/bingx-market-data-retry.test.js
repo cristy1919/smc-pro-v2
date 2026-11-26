@@ -6,7 +6,7 @@ test("BingX public provider retries transient 100410 responses with backoff", as
   let calls = 0;
   const delays = [];
   const provider = new BingXPublicKlineProvider({
-    now: () => 100000,
+    now: () => 2000000,
     sleep: async ms => { delays.push(ms); },
     minRequestIntervalMs: 0,
     fetchImpl: async () => {
