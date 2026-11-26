@@ -3,7 +3,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - scripts/run-bingx-swing-50x90-backtest.js\n      - src/multi-timeframe-backtest.js
+      - scripts/run-bingx-swing-50x90-backtest.js
+      - src/multi-timeframe-backtest.js
 concurrency:
   group: bingx-swing-50x90-backtest
   cancel-in-progress: false
