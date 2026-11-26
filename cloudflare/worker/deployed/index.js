@@ -5058,21 +5058,20 @@ var EngineState = class {
       const structuralCandlesBySymbol = /* @__PURE__ */ new Map();
       for (const symbol of batchSymbols) {
         const rows = {};
-        const specs = [["5m", 1e3, 3e5], ["15m", 600, 9e5], ["1h", 300, 36e5], ["4h", 180, 144e5], ["1d", 180, 864e5]];
+        const specs = [["15m", 600, 9e5], ["1h", 300, 36e5], ["4h", 180, 144e5], ["1d", 180, 864e5], ...(symbol === "BTC-USDT" ? [["1w", 100, 6048e5]] : [])];
         for (const [interval, limit, duration] of specs) {
           try {
             const candles = await fetchMarketCandles(symbol, interval, limit, duration);
-            const minimum = interval === "5m" ? 251 : interval === "15m" ? 200 : interval === "1h" ? 100 : 60;
+            const minimum = interval === "15m" ? 200 : interval === "1h" ? 100 : interval === "1w" ? 20 : 60;
             if (candles.length >= minimum) rows[interval] = candles;
           } catch (error) {
-            if (!scanErrors.some((x) => x.symbol === symbol && x.timeframe === interval)) scanErrors.push({ symbol, timeframe: interval, engine: interval === "5m" || interval === "15m" || interval === "1h" ? "SCALP+SWING" : "SWING", error: String(error).slice(0, 180) });
+            if (!scanErrors.some((x) => x.symbol === symbol && x.timeframe === interval)) scanErrors.push({ symbol, timeframe: interval, engine: interval === "15m" || interval === "1h" ? "POSITION_MANAGEMENT" : "SWING", error: String(error).slice(0, 180) });
           }
         }
         if (rows["1h"]) rows["2h"] = aggregateClosedCandles(rows["1h"], 72e5, 36e5);
         structuralCandlesBySymbol.set(symbol, rows);
         const missingByEngine = {
-          SCALP: ["5m", "15m", "1h"].filter((tf) => !rows[tf]),
-          SWING: ["15m", "1h", "4h", "1d"].filter((tf) => !rows[tf])
+          SWING: ["4h", "1d"].filter((tf) => !rows[tf])
         };
         for (const [engineName, missing] of Object.entries(missingByEngine)) {
           if (missing.length && !scanErrors.some((x) => x.symbol === symbol && x.engine === engineName && x.error.startsWith("INSUFFICIENT_OR_STALE_CANDLES:"))) {
@@ -5090,6 +5089,13 @@ var EngineState = class {
       }
       const btcBiasState = structuralBiasBySymbol["BTC-USDT"];
       const btcBias = btcBiasState && biasMeasuredAt - btcBiasState.updatedAt <= 36 * 60 * 60 * 1e3 ? btcBiasState.activeBias : "NEUTRAL";
+      const btcContextCandles = structuralCandlesBySymbol.get("BTC-USDT") ?? {};
+      const toBtcBias = (trend) => trend === "LONG" ? "BULLISH" : trend === "SHORT" ? "BEARISH" : "NEUTRAL";
+      const btcWeeklyBias = valid(btcContextCandles["1w"]) ? toBtcBias(analyzeMarketStructure(btcContextCandles["1w"]).trend) : "UNAVAILABLE";
+      const btcDailyBias = valid(btcContextCandles["1d"]) ? toBtcBias(analyzeMarketStructure(btcContextCandles["1d"]).trend) : "UNAVAILABLE";
+      let dominanceContext;
+      try { dominanceContext = deriveDominanceDirections(await fetchGlobalDominanceSnapshot(this.env)); }
+      catch (dominanceError) { dominanceContext = deriveDominanceDirections(null); console.warn("Dominance scoring data unavailable", String(dominanceError).slice(0, 140)); }
       const altcoinBreadthBias = summarizeAltcoinBreadthBias(structuralBiasBySymbol, universeSymbols, biasMeasuredAt);
       ledger.structuralMarketBiasSnapshot = { ...altcoinBreadthBias, btcBias, measuredAt: biasMeasuredAt };
       const activitySnapshots = ledger.activitySnapshots ?? (ledger.activitySnapshots = {});
@@ -5237,7 +5243,13 @@ var EngineState = class {
       const diagnostics = [];
       for (const symbol of batchSymbols) {
         const rows = structuralCandlesBySymbol.get(symbol);
-        const input = { "5m": rows?.["5m"], "15m": rows?.["15m"], "1h": rows?.["1h"], "4h": rows?.["4h"], "1d": rows?.["1d"] };
+        const activity = activityBySymbol[symbol];
+        const quoteVolume24h = Number(activity?.quoteVolume24h), average30dQuoteVolume = Number(activity?.average30dQuoteVolume), spreadPct = Number(activity?.spreadPct);
+        if (!activity || !Number.isFinite(quoteVolume24h) || quoteVolume24h < 5e6 || !Number.isFinite(average30dQuoteVolume) || average30dQuoteVolume < 1e6 || !Number.isFinite(spreadPct) || spreadPct > 0.15) {
+          diagnostics.push({ symbol, scannedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "rejected-low-liquidity-or-unavailable-market-quality", setups: 0, missingCandleFrames: [], timeframeDiagnostics: {}, rejectionSummary: { LOW_OR_UNAVAILABLE_LIQUIDITY: 1 }, setupDetails: [], engineAvailability: { swing: { available: false, unavailable: ["LOW_OR_UNAVAILABLE_LIQUIDITY"] } } });
+          continue;
+        }
+        const input = { "4h": rows?.["4h"], "1d": rows?.["1d"] };
         const engineBtcBias = btcBiasState && biasMeasuredAt - btcBiasState.updatedAt <= 36 * 60 * 60 * 1e3 ? btcBiasState.activeBias : "UNAVAILABLE";
         let historyEvidence = [...ledger.closedTrades ?? []];
         try {
@@ -5245,33 +5257,35 @@ var EngineState = class {
           const stored = raw ? JSON.parse(raw) : [];
           if (Array.isArray(stored)) historyEvidence.push(...stored.filter((trade) => trade && trade.status === "CLOSED" && trade.model !== "BINGX VST"));
         } catch (error) {
-          console.warn("Historical Scalp/Swing confidence data unavailable", String(error).slice(0, 140));
+          console.warn("Historical Swing confidence data unavailable", String(error).slice(0, 140));
         }
-        const scalp = evaluateEngine("SCALP", symbol, input, engineBtcBias, historyEvidence);
-        const swing = evaluateEngine("SWING", symbol, input, engineBtcBias, historyEvidence);
-        const candidates = [...scalp.setups, ...swing.setups];
+        const swing4h = evaluateEngine("SWING", symbol, input, engineBtcBias, historyEvidence, "4h", btcWeeklyBias, btcDailyBias, dominanceContext);
+        const swing1d = evaluateEngine("SWING", symbol, input, engineBtcBias, historyEvidence, "1d", btcWeeklyBias, btcDailyBias, dominanceContext);
+        const swing = { setups: [...swing4h.setups, ...swing1d.setups], unavailable: [...new Set([...swing4h.unavailable, ...swing1d.unavailable])] };
+        const candidates = swing.setups;
         generatedSetups.push(...candidates);
-        const missingCandleFrames = [.../* @__PURE__ */ new Set([...scalp.unavailable, ...swing.unavailable])];
+        const missingCandleFrames = swing.unavailable;
         const timeframeDiagnostics = {};
         const rejectionSummary = {};
-        for (const result of [scalp, swing]) for (const setupId of result.engine === "SCALP" ? ["S01_SWEEP_MSS_FVG", "S02_BREAKER_RETEST", "S03_BOS_DISPLACEMENT", "S04_RANGE_DEVIATION", "S05_FAILED_BREAKOUT", "S06_OB_REACTION"] : ["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W06_CRT", "W07_OTE", "W08_BOS_CONTINUATION"]) for (const side of ["LONG", "SHORT"]) {
+        const setupIds = ["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W06_CRT", "W07_OTE", "W08_BOS_CONTINUATION"];
+        for (const result of [swing4h, swing1d]) for (const setupId of setupIds) for (const side of ["LONG", "SHORT"]) {
           const key = setupId + ":" + side, hasSetup = candidates.some((setup) => setup.model === setupId && setup.side === side);
-          if (hasSetup) timeframeDiagnostics[key] = { setups: 1 };
+          if (hasSetup) timeframeDiagnostics[key] = { setups: (timeframeDiagnostics[key]?.setups ?? 0) + 1 };
           else { const reason = result.unavailable.length ? "INSUFFICIENT_CANDLE_HISTORY" : "STRUCTURAL_PATTERN_NOT_CONFIRMED"; rejectionSummary[reason] = (rejectionSummary[reason] ?? 0) + 1; }
         }
         diagnostics.push({
           symbol,
           scannedAt: (/* @__PURE__ */ new Date()).toISOString(),
-          status: scalp.unavailable.length && swing.unavailable.length ? "insufficient-candle-history" : candidates.length ? "setup-candidate" : missingCandleFrames.length ? "partial-candle-history" : "fresh-no-setup",
+          status: swing4h.unavailable.length && swing1d.unavailable.length ? "insufficient-candle-history" : candidates.length ? "setup-candidate" : missingCandleFrames.length ? "partial-candle-history" : "fresh-no-setup",
           setups: candidates.length,
           timeframeDiagnostics,
           rejectionSummary,
           setupDetails: candidates.map((setup) => ({ model: setup.model, tradeStyle: setup.tradeStyle, entryTimeframe: setup.entryTimeframe, setupTimeframe: setup.setupTimeframe, side: setup.side, score: setup.score, status: setup.status, reason: setup.reason, candleTime: setup.candleTime, entry: setup.entry, stopLoss: setup.stopLoss, takeProfit: setup.takeProfit, tp1: setup.tp1, tp2: setup.tp2, tp3: setup.tp3, confidence: setup.confidence, confidenceStatus: setup.confidenceStatus, confidenceSampleSize: setup.confidenceSampleSize, riskReward: setup.riskReward })),
           missingCandleFrames,
           engineAvailability: {
-            scalp: { available: scalp.unavailable.length === 0, unavailable: scalp.unavailable },
-            swing: { available: swing.unavailable.length === 0, unavailable: swing.unavailable }
-          },
+            swing: { available: swing.unavailable.length === 0, unavailable: swing.unavailable },
+            setupTimeframes: { "4h": { available: swing4h.unavailable.length === 0, unavailable: swing4h.unavailable }, "1d": { available: swing1d.unavailable.length === 0, unavailable: swing1d.unavailable } }
+          }
         });
       }
       ledger.activitySnapshots = activitySnapshots;
