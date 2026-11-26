@@ -4420,8 +4420,8 @@ var EngineState = class {
         alarmScheduled: engine.runnerEnabled === true && !manualPause && !AUTOMATION_STOP && alarmAt !== null,
         alarmAt,
         runnerEnabled: engine.runnerEnabled === true && !AUTOMATION_STOP,
-        strategy: "Independent Scalp + Swing Futures Engines",
-        strategyMode: "SCALP_SWING_INDEPENDENT",
+        strategy: "Swing Futures Engine · 4H/1D only",
+        strategyMode: "SWING_4H_1D_ONLY",
         strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
         newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
         positionManagementEnabled: true,
@@ -5416,7 +5416,7 @@ var EngineState = class {
       await this.writePaperState(demoConfigured ? "bingx-vst-entry-queue-v1" : "internal-paper-entry-queue-v1", JSON.stringify(vstEntryQueue));
       let paperOpened = 0;
       let paperEntryAttempts = 0;
-      if (!demoConfigured && STRATEGY_GENERATION_ENABLED && NEW_PAPER_ENTRIES_ENABLED && !liquidationRiskGateActive) {
+      if (this.env.BINGX_TRADING_MODE === "paper" && !demoConfigured && STRATEGY_GENERATION_ENABLED && NEW_PAPER_ENTRIES_ENABLED && !liquidationRiskGateActive) {
         for (const nextEntry of [...vstEntryQueue]) {
           if (this.manualClosePendingCount > 0) break;
           if (Number(nextEntry.nextAttemptAt ?? 0) > Date.now()) continue;
@@ -5695,6 +5695,7 @@ var EngineState = class {
       const availableEntrySlots = Math.max(0, maximumOpen - reservedEntryCapacity);
       const eligibleDueQueueCount = vstEntryQueue.filter((item) => item.nextAttemptAt <= Date.now() && !activeEngineKeys.has(engineKey(item.setup))).length;
       const entryGateBlockedBy = [];
+      if (this.env.BINGX_TRADING_MODE === "demo" && !demoConfigured) entryGateBlockedBy.push("BINGX_VST_CREDENTIALS_MISSING");
       if (!STRATEGY_GENERATION_ENABLED) entryGateBlockedBy.push("STRATEGY_GENERATION_DISABLED");
       if (!NEW_PAPER_ENTRIES_ENABLED) entryGateBlockedBy.push("NEW_PAPER_ENTRIES_DISABLED");
       if (!demoConfigured && paperOpened === 0 && readyCandidateCount > 0) entryGateBlockedBy.push("PAPER_ENTRY_WAITING_FOR_ZONE_OR_RISK_FILTER");
@@ -5962,10 +5963,10 @@ var EngineState = class {
       return Response.json({
         ok: true,
         mode: demoConfigured ? "bingx-demo" : "internal-paper",
-        strategyMode: "SCALP_SWING_INDEPENDENT",
+        strategyMode: "SWING_4H_1D_ONLY",
         strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
         newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
-        paperTradingEnabled: !demoConfigured && this.env.PAPER_TRADING_ONLY === "true",
+        paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && !demoConfigured && this.env.PAPER_TRADING_ONLY === "true",
         demoTradingEnabled: demoConfigured && !!demoSnapshot,
         positionManagementEnabled: true,
         scannerPaused: SCANNER_PAUSED,
@@ -6029,7 +6030,7 @@ var EngineState = class {
         ok: true,
         runnerEnabled: true,
         mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo",
-        strategyMode: "SCALP_SWING_INDEPENDENT",
+        strategyMode: "SWING_4H_1D_ONLY",
         strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
         newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
         paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true",
@@ -7147,7 +7148,7 @@ async function loadBingXDemoStatus(env) {
       newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
       scannerPaused: false,
       scannerActive: !SCANNER_PAUSED && !AUTOMATION_STOP && (paperStatusResult.status ? paperStatusResult.status.runnerEnabled === true : engine?.runnerEnabled === true),
-      strategyMode: "SCALP_SWING_INDEPENDENT",
+      strategyMode: "SWING_4H_1D_ONLY",
       balance: snapshot.balance?.balance ?? null,
       equity: snapshot.balance?.equity ?? null,
       availableMargin: snapshot.balance?.availableMargin ?? null,
@@ -7386,7 +7387,7 @@ async function dashboardPaperStatus(env) {
       scanRotation: ledger.scanRotation ? { ...ledger.scanRotation, seenSymbols: [] } : ledger.scanRotation,
       positions: livePositions,
       equity: Number((ledger.balance + liveUnrealized).toFixed(4)),
-      strategyMode: "SCALP_SWING_INDEPENDENT",
+      strategyMode: "SWING_4H_1D_ONLY",
       strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
       newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
       positionManagementEnabled: true,
@@ -7712,7 +7713,7 @@ var index_default = {
         automationStopped: data.automationStopped === true,
         storageDegraded: data.storageDegraded === true,
         lastScanAt: data.lastScanAt ?? null,
-        strategyMode: "SCALP_SWING_INDEPENDENT",
+        strategyMode: "SWING_4H_1D_ONLY",
         strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
         newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
         scannerPaused: SCANNER_PAUSED,
@@ -7861,7 +7862,7 @@ var index_default = {
         paperTradingEnabled: env.BINGX_TRADING_MODE === "paper" && env.PAPER_TRADING_ONLY === "true",
         demoTradingConfigured: isBingXDemoConfigured(env),
         liveTradingEnabled: false,
-        strategyMode: "SCALP_SWING_INDEPENDENT",
+        strategyMode: "SWING_4H_1D_ONLY",
         serverTime: (/* @__PURE__ */ new Date()).toISOString(),
         storageHealth: "reported-separately"
       }, { headers: { ...headers, "cache-control": "no-store" } });
