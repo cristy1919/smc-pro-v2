@@ -38,23 +38,22 @@ async function selectTopSymbols() {
     .filter(t => Number.isFinite(t.quoteVolume) && t.quoteVolume > 0 &&
       Number.isFinite(t.lastPrice) && t.lastPrice > 0 &&
       Number.isFinite(t.spreadPct) && t.spreadPct >= 0 && t.spreadPct <= 0.5)
-    .sort((a, b) => b.quoteVolume - a.quoteVolume)
-    .slice(0, TARGET_SYMBOLS);
+    .sort((a, b) => b.quoteVolume - a.quoteVolume);
 }
 
 const now = Date.now();
 const startTime = now - WINDOW_DAYS * DAY;
 const provider = new BingXPublicKlineProvider({ minRequestIntervalMs: 1050 });
 const universe = await selectTopSymbols();
-if (universe.length !== TARGET_SYMBOLS) {
-  throw new Error("INSUFFICIENT_LIQUID_USDT_PERPETUALS: expected " + TARGET_SYMBOLS + ", found " + universe.length);
+if (universe.length < TARGET_SYMBOLS) {
+  throw new Error("INSUFFICIENT_LIQUID_USDT_PERPETUALS: expected at least " + TARGET_SYMBOLS + ", found " + universe.length);
 }
 
 const results = [];
 const failures = [];
-for (let index = 0; index < universe.length; index++) {
+for (let index = 0; index < universe.length && results.length < TARGET_SYMBOLS; index++) {
   const selected = universe[index];
-  process.stdout.write("[" + (index + 1) + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " fetching 90d Swing data\\n");
+  process.stdout.write("[" + (results.length + 1) + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " fetching 90d Swing data\\n");
   try {
     const timeframes = await fetchEngineDataset({
       provider, symbol: selected.symbol, engine: "swing", startTime, endTime: now
@@ -86,7 +85,7 @@ for (let index = 0; index < universe.length; index++) {
       trades1h: entry1h.tradesByPeriod[WINDOW_DAYS],
       assumptions: { entry15m: entry15m.assumptions, entry1h: entry1h.assumptions }
     });
-    process.stdout.write("[" + (index + 1) + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " complete\\n");
+    process.stdout.write("[" + results.length + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " complete\\n");
   } catch (error) {
     failures.push({ symbol: selected.symbol, error: String(error?.message || error) });
     process.stderr.write(selected.symbol + " FAILED: " + String(error?.message || error) + "\\n");
