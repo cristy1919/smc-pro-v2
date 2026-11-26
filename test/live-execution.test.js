@@ -41,12 +41,13 @@ test("normal setup enforces isolated margin and 20x-50x leverage", () => {
   assert.equal(result.riskBudget, 200);
 });
 
-test("reduced-risk setup enforces 0.5R and 5x-10x leverage", () => {
+test("reduced-risk setup enforces 0.5R while keeping leverage within 20x-50x", () => {
   const result = validateLiveCandidate(baseCandidate({ leverage: 10 }), {
     equity: 10000, availableMargin: 5000, openPositions: [], contract,
     markPrice: 100000, riskMultiple: 0.5, explicitConfirmation: true, idempotencyKey: "swing-btc-20261126"
   });
   assert.equal(result.eligible, true);
+  assert.equal(result.leverage, 20);
   assert.equal(result.riskBudget, 100);
   const invalid = validateLiveCandidate(baseCandidate({ leverage: 20 }), {
     equity: 10000, availableMargin: 5000, openPositions: [], contract,
@@ -233,7 +234,7 @@ test("activated live runner uses current READY scanner setup only when mark is i
   assert.equal(result.results[0].action,"LIVE_ENTRY_OPENED");
   assert.equal(submitted.candidate.engine,"swing");
   assert.equal(submitted.candidate.riskMultiplier,0.5);
-  assert.equal(submitted.candidate.leverage>=5 && submitted.candidate.leverage<=10,true);
+  assert.equal(submitted.candidate.leverage>=20 && submitted.candidate.leverage<=50,true);
   assert.equal(submitted.options.confirmation.activationId,"activation-123456");
   assert.match(submitted.options.idempotencyKey,/^smc-[a-f0-9]{32}$/);
 });
