@@ -2,7 +2,7 @@ import { RISK_CONFIG } from "./config.js";
 import { advanceEntryConfirmation } from "./entry-confirmation.js";
 
 const DAY=86400000;
-const TF_MS={"5m":300000,"15m":900000,"1h":3600000,"4h":14400000,"1d":86400000};
+const TF_MS={"4h":14400000,"1d":86400000};
 const finite=Number.isFinite;
 function assertCandles(rows,name){
   if(!Array.isArray(rows)||rows.length<30)throw new Error("INSUFFICIENT_BACKTEST_DATA_"+name);
@@ -23,27 +23,28 @@ function summarize(engine,symbol,days,trades,skipped){
   return {engine,symbol,periodDays:days,startingEquityIndex:1,endingEquityIndex:Number(equityIndex.toFixed(6)),trades:trades.length,wins:wins.length,losses:losses.length,winRate:trades.length?wins.length/trades.length:0,profitFactor:grossLoss?grossWin/grossLoss:grossWin?null:0,expectancyR:trades.length?totalR/trades.length:0,totalR,maxDrawdownPct:maxDrawdown*100,skipped,feesIncluded:true,confidence:trades.length<30?"INSUFFICIENT_DATA":"SAMPLE_AVAILABLE"};
 }
 export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars,maxWaitBars=6,entryTimeframe,setupIdFilter,directionFilter,startTime,endTime,candidateFilter}){
-  if(!["scalp","swing"].includes(engine))throw new Error("INVALID_ENGINE");
+  if(engine==="scalp")throw new Error("SCALP_ENGINE_REMOVED");
+  if(engine!=="swing")throw new Error("INVALID_ENGINE");
   if(typeof evaluate!=="function")throw new TypeError("evaluate callback is required");
-  const entryTf=engine==="scalp"?"5m":(entryTimeframe??"15m");
-  if(engine==="swing"&&!["15m","1h"].includes(entryTf))throw new Error("UNSUPPORTED_SWING_ENTRY_TIMEFRAME");
-  const entryRows=timeframes?.[entryTf];
-  for(const [tf,rows] of Object.entries(timeframes??{})){if(!TF_MS[tf])throw new Error("UNSUPPORTED_BACKTEST_TIMEFRAME_"+tf);assertCandles(rows,tf);}
-  if(!entryRows)throw new Error("MISSING_ENTRY_TIMEFRAME_"+entryTf);
-  for(const tf of engine==="scalp"?["1h","15m","5m"]:["1d","4h","1h",entryTf])if(!timeframes[tf])throw new Error("MISSING_TIMEFRAME_"+tf);
+  const setupTf=arguments[0]?.setupTimeframe??"4h";
+  if(!["4h","1d"].includes(setupTf))throw new Error("FORBIDDEN_SETUP_TIMEFRAME_"+setupTf);
+  const setupRows=timeframes?.[setupTf];
+  for(const [tf,rows] of Object.entries(timeframes??{})){if(!TF_MS[tf])throw new Error("FORBIDDEN_BACKTEST_TIMEFRAME_"+tf);assertCandles(rows,tf);}
+  if(!setupRows)throw new Error("MISSING_SETUP_TIMEFRAME_"+setupTf);
+  for(const tf of ["1d","4h"])if(!timeframes[tf])throw new Error("MISSING_TIMEFRAME_"+tf);
   // Equal 30-day maximum observation horizon across entry timeframes; this is a backtest data cap, not a live exit rule.
-  const holdBars=maxHoldBars??Math.ceil(30*DAY/TF_MS[entryTf]);
+  const holdBars=maxHoldBars??Math.ceil(30*DAY/TF_MS[setupTf]);
   if(!Number.isInteger(holdBars)||holdBars<1)throw new RangeError("INVALID_MAX_HOLD_BARS");
   const reports=[];
   for(const days of periodDays){
     if(![30,60,90].includes(days))throw new Error("PERIOD_MUST_BE_30_60_OR_90_DAYS");
-    const cutoff=Number.isFinite(startTime)?startTime:entryRows.at(-1).timestamp-days*DAY;
+    const cutoff=Number.isFinite(startTime)?startTime:setupRows.at(-1).timestamp-days*DAY;
     const boundary=Number.isFinite(endTime)?endTime:Infinity;
-    if(entryRows[0].timestamp>cutoff)throw new Error("INSUFFICIENT_PERIOD_HISTORY_"+days+"D");
+    if(setupRows[0].timestamp>cutoff)throw new Error("INSUFFICIENT_PERIOD_HISTORY_"+days+"D");
     const pointers=Object.fromEntries(Object.keys(timeframes).map(tf=>[tf,-1]));
     const trades=[],seen=new Set();let skipped=0,lastExit=-Infinity;
-    for(let i=30;i<entryRows.length-1;i++){
-      const signal=entryRows[i],asOf=signal.timestamp+TF_MS[entryTf];
+    for(let i=30;i<setupRows.length-1;i++){
+      const signal=setupRows[i],asOf=signal.timestamp+TF_MS[setupTf];
       for(const [tf,rows] of Object.entries(timeframes)){
         let p=pointers[tf];
         while(p+1<rows.length&&rows[p+1].timestamp+TF_MS[tf]<=asOf)p++;
@@ -54,11 +55,11 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
       for(const [tf,rows] of Object.entries(timeframes))sliced[tf]=rows.slice(Math.max(0,pointers[tf]-399),pointers[tf]+1);
       if(Object.values(sliced).some(rows=>rows.length<25)){skipped++;continue;}
       let candidates;
-      try{candidates=evaluate({symbol,timeframes:sliced,entryTimeframe:entryTf});}catch{skipped++;continue;}
+      try{candidates=evaluate({symbol,timeframes:sliced,setupTimeframe:setupTf});}catch{skipped++;continue;}
       const candidate=candidates.find(c=>c.state==="QUALIFIED"&&c.score>=80&&c.hardFilters?.validStop&&c.hardFilters?.minimumRR&&(!setupIdFilter||c.setupId===setupIdFilter)&&(!directionFilter||c.direction===directionFilter)&&(!candidateFilter||candidateFilter(c)));
       if(!candidate||seen.has(candidate.id))continue;
       seen.add(candidate.id);
-      const future=entryRows.slice(i+1,i+1+maxWaitBars);
+      const future=setupRows.slice(i+1,i+1+maxWaitBars);
       const confirmation=advanceEntryConfirmation(candidate,future,{maxWaitBars});
       if(confirmation.status!=="CONFIRMED"){skipped++;continue;}
       const entry=confirmation.entry,stop=candidate.stop,risk=Math.abs(entry-stop);
@@ -66,7 +67,7 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
       const stopDistancePct=risk/entry,roundTripCostRate=2*(feeRate+slippageRate),projectedCostR=roundTripCostRate*entry/risk;
       if(stopDistancePct<0.007||projectedCostR>0.20){skipped++;continue;}
       const sign=candidate.direction==="BULLISH"?1:-1,target=entry+sign*risk*3.5,tp1=entry+sign*risk;
-      const after=entryRows.filter(c=>c.timestamp>confirmation.confirmedAt&&c.timestamp<boundary).slice(0,holdBars);
+      const after=setupRows.filter(c=>c.timestamp>confirmation.confirmedAt&&c.timestamp<boundary).slice(0,holdBars);
       if(!after.length){skipped++;continue;}
       let exit=after.at(-1).close,exitAt=after.at(-1).timestamp,exitReason=after.length===holdBars?"MAX_OBSERVATION_HORIZON":Number.isFinite(boundary)?"SEGMENT_END":"DATA_END";
       let tp1Hit=false,tp1At=null,realizedGrossR=0,remainingFraction=1;
@@ -82,10 +83,10 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
       const exitTurnover=tp1Hit?0.5*tp1+0.5*exit:exit,feeSlippageR=(feeRate+slippageRate)*(entry+exitTurnover)/risk;
       const settlements=Array.isArray(fundingRates)?fundingRates.filter(x=>x.fundingTime>confirmation.confirmedAt&&x.fundingTime<=exitAt):[];
       const fundingR=settlements.reduce((sum,x)=>sum+x.fundingRate*sign*(tp1At&&x.fundingTime>tp1At?0.5:1),0)*entry/risk,costR=feeSlippageR+fundingR,netR=realizedGrossR-costR;
-      trades.push({candidateId:candidate.id,setupId:candidate.setupId,direction:candidate.direction,timeframe:entryTf,score:candidate.score,band:candidate.band,factors:candidate.factors,evidence:candidate.evidence,zoneBounds:candidate.zoneBounds,rewardRisk:candidate.rewardRisk,signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,tp1,tp1At,tp1Hit,tp1ClosedFraction:tp1Hit?0.5:0,stopMovedToBreakeven:tp1Hit,target,exit,exitAt,exitReason,grossR:realizedGrossR,estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,stopDistancePct,projectedCostR,maeR:Number((adverseMove/risk).toFixed(4)),mfeR:Number((favorableMove/risk).toFixed(4)),netR});
+      trades.push({candidateId:candidate.id,setupId:candidate.setupId,direction:candidate.direction,timeframe:setupTf,setupTimeframe:setupTf,score:candidate.score,band:candidate.band,factors:candidate.factors,evidence:candidate.evidence,zoneBounds:candidate.zoneBounds,rewardRisk:candidate.rewardRisk,signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,tp1,tp1At,tp1Hit,tp1ClosedFraction:tp1Hit?0.5:0,stopMovedToBreakeven:tp1Hit,target,exit,exitAt,exitReason,grossR:realizedGrossR,estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,stopDistancePct,projectedCostR,maeR:Number((adverseMove/risk).toFixed(4)),mfeR:Number((favorableMove/risk).toFixed(4)),netR});
       lastExit=exitAt;
     }
     reports.push({summary:summarize(engine,symbol,days,trades,skipped),trades});
   }
-  return {engine,symbol,periods:reports.map(r=>r.summary),tradesByPeriod:Object.fromEntries(reports.map(r=>[r.summary.periodDays,r.trades])),assumptions:{riskPerTrade:RISK_CONFIG.riskUnitFraction,compounding:"NORMALIZED_EQUITY_INDEX_ONLY",startingEquityIndex:1,usdtBalanceUsed:false,feeRate,slippageRate,fundingMode:"HISTORICAL_SETTLEMENTS_ONLY",fundingRateFallbackUsed:false,stopFirstWhenStopAndTargetSameCandle:true,maxWaitBars,maxHoldBars:holdBars,maxObservationHorizonDays:30,entryTimeframe:entryTf,entryTimeframeComparison:engine==="swing"?"1d-bias/4h-zone/1h-confirmation-for-15m-entry; 1d-bias/4h-zone/1h-entry-for-1h-entry":"NOT_APPLICABLE",setupIdFilter:setupIdFilter??null,directionFilter:directionFilter??null},dataRange:{start:entryRows[0].timestamp,end:entryRows.at(-1).timestamp}};
+  return {engine,symbol,periods:reports.map(r=>r.summary),tradesByPeriod:Object.fromEntries(reports.map(r=>[r.summary.periodDays,r.trades])),assumptions:{riskPerTrade:RISK_CONFIG.riskUnitFraction,compounding:"NORMALIZED_EQUITY_INDEX_ONLY",startingEquityIndex:1,usdtBalanceUsed:false,feeRate,slippageRate,fundingMode:"HISTORICAL_SETTLEMENTS_ONLY",fundingRateFallbackUsed:false,stopFirstWhenStopAndTargetSameCandle:true,maxWaitBars,maxHoldBars:holdBars,maxObservationHorizonDays:30,setupTimeframe:setupTf,entryTimeframe:setupTf,entryTimeframeComparison:"NOT_APPLICABLE; setups and confirmation remain on 4H or 1D",setupIdFilter:setupIdFilter??null,directionFilter:directionFilter??null},dataRange:{start:entryRows[0].timestamp,end:entryRows.at(-1).timestamp}};
 }
