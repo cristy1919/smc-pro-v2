@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - .github/workflows/swing-backtest.yml
       - scripts/run-bingx-swing-50x90-backtest.js
       - src/multi-timeframe-backtest.js
 concurrency:
