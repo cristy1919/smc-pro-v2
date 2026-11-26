@@ -1,17 +1,15 @@
-name: BingX VST read-only backtest
+name: Public-data SMC historical backtest
 on:
   workflow_dispatch:
     inputs:
-      engine:
-        description: Engine to test
-        required: true
-        type: choice
-        options: [scalp, swing]
       symbol:
         description: BingX USDT-M symbol
         required: true
         default: BTC-USDT
         type: string
+concurrency:
+  group: public-smc-backtest
+  cancel-in-progress: false
 jobs:
   backtest:
     runs-on: ubuntu-latest
@@ -23,26 +21,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Validate read-only VST secrets
-        env:
-          BINGX_API_KEY: ${{ secrets.BINGX_API_KEY }}
-          BINGX_SECRET_KEY: ${{ secrets.BINGX_SECRET_KEY }}
-        run: |
-          test -n "$BINGX_API_KEY" || (echo "Missing repository secret BINGX_API_KEY" && exit 1)
-          test -n "$BINGX_SECRET_KEY" || (echo "Missing repository secret BINGX_SECRET_KEY" && exit 1)
-      - name: Run tests
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run repository tests
         run: npm test
-      - name: Run historical backtest
+      - name: Run 30/60/90-day public-data backtests
         env:
-          ENGINE: ${{ inputs.engine }}
           SYMBOL: ${{ inputs.symbol }}
-          BINGX_API_KEY: ${{ secrets.BINGX_API_KEY }}
-          BINGX_SECRET_KEY: ${{ secrets.BINGX_SECRET_KEY }}
+          FEE_RATE: "0.0005"
+          SLIPPAGE_RATE: "0.0002"
         run: node scripts/run-bingx-backtest.js
-      - name: Upload backtest report
+      - name: Upload detailed report
         uses: actions/upload-artifact@v4
         with:
-          name: bingx-vst-${{ inputs.engine }}-${{ inputs.symbol }}
+          name: smc-public-backtest-${{ inputs.symbol }}
           path: backtest-report.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
