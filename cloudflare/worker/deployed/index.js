@@ -743,9 +743,12 @@ __name(zones, "zones");
 function classifyMarketRegime(structure, candles, timeframeZones) {
   const recentTransition = structure.events.some((event) => (event.type === "CHoCH" || event.type === "MSS") && event.candleIndex >= Math.max(0, candles.length - 3));
   if (recentTransition) return "TRANSITION";
+  const regimeZones = timeframeZones.filter((zone) => zone.kind === "RANGE" || zone.kind === "ORDERFLOW_REGIME").sort((a, b) => Number(a.formedAt ?? 0) - Number(b.formedAt ?? 0));
+  const latestRegime = regimeZones.at(-1);
+  if (latestRegime?.kind === "RANGE") return "RANGE";
+  if (latestRegime?.kind === "ORDERFLOW_REGIME") return "DIRECTIONAL_ORDERFLOW";
   if (structure.trend === "LONG") return "BULLISH";
   if (structure.trend === "SHORT") return "BEARISH";
-  if (timeframeZones.some((zone) => zone.kind === "RANGE")) return "RANGE";
   return "UNAVAILABLE";
 }
 __name(classifyMarketRegime, "classifyMarketRegime");
@@ -4394,7 +4397,7 @@ var EngineState = class {
         alarmAt = Date.now() + 15e3;
         await this.setDurableAlarm(alarmAt);
       }
-      const paperTradingEnabled = this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true";
+      const paperTradingEnabled = this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true";
       const openForStatus = (ledger.positions ?? []).filter((p) => p.status === "OPEN");
       const statusMarks = await getBingXMarkPrices(openForStatus.map((p) => p.symbol), 7e3);
       const livePositions = openForStatus.map((position) => {
@@ -5080,17 +5083,17 @@ var EngineState = class {
       const structuralCandlesBySymbol = /* @__PURE__ */ new Map();
       for (const symbol of batchSymbols) {
         const rows = {};
-        const specs = [["15m", 600, 9e5], ["1h", 300, 36e5], ["4h", 180, 144e5], ["1d", 180, 864e5], ...(symbol === "BTC-USDT" ? [["1w", 100, 6048e5]] : [])];
+        const specs = [["4h", 180, 144e5], ["1d", 180, 864e5], ...(symbol === "BTC-USDT" ? [["1w", 100, 6048e5]] : [])];
         for (const [interval, limit, duration] of specs) {
           try {
             const candles = await fetchMarketCandles(symbol, interval, limit, duration);
-            const minimum = interval === "15m" ? 200 : interval === "1h" ? 100 : interval === "1w" ? 20 : 60;
+            const minimum = interval === "1w" ? 20 : 60;
             if (candles.length >= minimum) rows[interval] = candles;
           } catch (error) {
-            if (!scanErrors.some((x) => x.symbol === symbol && x.timeframe === interval)) scanErrors.push({ symbol, timeframe: interval, engine: interval === "15m" || interval === "1h" ? "POSITION_MANAGEMENT" : "SWING", error: String(error).slice(0, 180) });
+            if (!scanErrors.some((x) => x.symbol === symbol && x.timeframe === interval)) scanErrors.push({ symbol, timeframe: interval, engine: interval === "1w" ? "BTC_CONTEXT" : "SWING", error: String(error).slice(0, 180) });
           }
         }
-        if (rows["1h"]) rows["2h"] = aggregateClosedCandles(rows["1h"], 72e5, 36e5);
+        
         structuralCandlesBySymbol.set(symbol, rows);
         const missingByEngine = {
           SWING: ["4h", "1d"].filter((tf) => !rows[tf])
@@ -5416,7 +5419,7 @@ var EngineState = class {
       await this.writePaperState(demoConfigured ? "bingx-vst-entry-queue-v1" : "internal-paper-entry-queue-v1", JSON.stringify(vstEntryQueue));
       let paperOpened = 0;
       let paperEntryAttempts = 0;
-      if (this.env.BINGX_TRADING_MODE === "paper" && !demoConfigured && STRATEGY_GENERATION_ENABLED && NEW_PAPER_ENTRIES_ENABLED && !liquidationRiskGateActive) {
+      if (this.env.PAPER_TRADING_ONLY === "true" && !demoConfigured && this.env.LIVE_TRADING_ENABLED !== "true" && STRATEGY_GENERATION_ENABLED && NEW_PAPER_ENTRIES_ENABLED && !liquidationRiskGateActive) {
         for (const nextEntry of [...vstEntryQueue]) {
           if (this.manualClosePendingCount > 0) break;
           if (Number(nextEntry.nextAttemptAt ?? 0) > Date.now()) continue;
@@ -6630,7 +6633,7 @@ async function getBingXMarkPrice(symbol, timeoutMs = 4500) {
   }
 }
 __name(getBingXMarkPrice, "getBingXMarkPrice");
-var PAPER_SCAN_BATCH_NORMAL = 25;
+var PAPER_SCAN_BATCH_NORMAL = 16;
 var PAPER_SCAN_INTERVAL_MS = 6e4;
 var latestFundingSnapshots = new Map();
 var VST_ENTRY_QUEUE_MAX = 1e3;
