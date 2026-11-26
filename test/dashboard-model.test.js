@@ -68,8 +68,8 @@ test("deployed dashboard module and inline browser script parse successfully", (
     const lines = stack.split("\\n");
     const caretLine = lines.find(line => /^\\s*\\^/.test(line));
     const offset = caretLine ? caretLine.indexOf("^") : -1;
-    const snippet = offset >= 0 ? script.slice(Math.max(0, offset - 120), offset + 120) : stack.slice(-500);
-    assert.fail("inline dashboard JavaScript must parse: " + String(error) + "; offset=" + offset + "; context=" + snippet);
+    const details = { message: String(error), keys: Object.getOwnPropertyNames(error), pos: error?.pos, lineNumber: error?.lineNumber, columnNumber: error?.columnNumber, stack: stack.slice(0, 1800), offset };
+    assert.fail("inline dashboard JavaScript must parse: " + JSON.stringify(details));
   }
   for (const metric of ["LONG / SHORT performansı", "Sembol performansı", "Komisyon toplamı", "Funding toplamı", "En uzun kazanç serisi"]) {
     assert.ok(script.includes(metric), "missing statistics section: " + metric);
