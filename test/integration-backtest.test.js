@@ -55,7 +55,7 @@ test("walk-forward backtest produces separate trade ledger and refuses missing 9
   const make=(n,step)=>Array.from({length:n},(_,i)=>({timestamp:start+i*step,open:100.1,high:101,low:100.2,close:100.8,volume:100,closed:true}));
   const timeframes={"1d":make(32,day),"4h":make(192,4*hour),"1h":make(768,hour),"15m":make(32*96,15*60*1000)};
   let emitted=false; const fundingRates=[];
-  const report=runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[30],initialEquity:10000,maxHoldBars:5,fundingRates,evaluate:({timeframes:tf})=>{
+  const report=runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[30],maxHoldBars:5,fundingRates,evaluate:({timeframes:tf})=>{
     if(emitted)return [];
     emitted=true;
     const last=tf["15m"].at(-1); fundingRates.push({fundingTime:last.timestamp+30*60*1000,fundingRate:0.0001});
@@ -66,8 +66,11 @@ test("walk-forward backtest produces separate trade ledger and refuses missing 9
   assert.equal(report.tradesByPeriod[30][0].exitReason,"DATA_END");
   assert.ok(report.tradesByPeriod[30][0].fundingR>0);
   assert.equal(report.tradesByPeriod[30][0].fundingSettlements,1);
-  assert.equal(report.assumptions.compounding,"CURRENT_EQUITY");
-  assert.throws(()=>runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[90],initialEquity:10000,evaluate:()=>[]}),/INSUFFICIENT_PERIOD_HISTORY_90D/);
+  assert.equal(report.assumptions.compounding,"NORMALIZED_EQUITY_INDEX_ONLY");
+  assert.equal(report.assumptions.usdtBalanceUsed,false);
+  assert.equal(report.periods[0].startingEquityIndex,1);
+  assert.equal(report.periods[0].initialEquity,undefined);
+  assert.throws(()=>runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[90],evaluate:()=>[]}),/INSUFFICIENT_PERIOD_HISTORY_90D/);
 });
 test("legacy compatibility adapter only publishes candidate snapshots and guards close action",async()=>{
   let saved;
@@ -113,7 +116,7 @@ test("walk-forward backtest uses the requested 1h Swing entry candles", () => {
   const make = (n, step) => Array.from({ length: n }, (_, i) => ({ timestamp: start + i * step, open: 100.1, high: 101, low: 100.2, close: 100.8, volume: 100, closed: true }));
   const timeframes = { "1d": make(32, day), "4h": make(192, 4 * hour), "1h": make(32 * 24, hour), "15m": make(32 * 96, 15 * 60 * 1000) };
   let emitted = false;
-  const report = runHistoricalBacktest({ engine: "swing", symbol: "BTC-USDT", timeframes, entryTimeframe: "1h", periodDays: [30], initialEquity: 10000, maxHoldBars: 5, evaluate: ({ timeframes: tf, entryTimeframe }) => {
+  const report = runHistoricalBacktest({ engine: "swing", symbol: "BTC-USDT", timeframes, entryTimeframe: "1h", periodDays: [30], maxHoldBars: 5, evaluate: ({ timeframes: tf, entryTimeframe }) => {
     assert.equal(entryTimeframe, "1h");
     if (emitted) return [];
     emitted = true;
