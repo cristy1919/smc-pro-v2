@@ -1,22 +1,23 @@
-name: BingX Swing 50-pair 90-day backtest
+name: BingX all-strategy matrix 50-pair 90-day backtest
 on:
   workflow_dispatch:
   push:
     paths:
       - .github/workflows/swing-backtest.yml
-      - scripts/run-bingx-swing-50x90-backtest.js
+      - scripts/run-bingx-strategy-matrix-backtest.js
       - src/multi-timeframe-backtest.js
       - src/backtest-universe.js
       - src/bingx-market-data.js
-      - test/bingx-market-data-retry.test.js
-      - test/backtest-universe.test.js
+      - src/setup-evaluator.js
+      - src/entry-confirmation.js
+      - test/**
 concurrency:
-  group: bingx-swing-50x90-walk-forward
-  cancel-in-progress: true
+  group: bingx-all-strategy-matrix-50x90
+  cancel-in-progress: false
 jobs:
-  swing-backtest:
+  strategy-matrix-backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
     permissions:
       contents: read
     steps:
@@ -24,22 +25,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Validate Swing backtest script syntax
-        run: node --check scripts/run-bingx-swing-50x90-backtest.js
+      - name: Validate strategy matrix script syntax
+        run: node --check scripts/run-bingx-strategy-matrix-backtest.js
       - name: Run repository tests
         run: npm test
-      - name: Run sequential 3x30-day Swing walk-forward backtest
+      - name: Run independent Scalp and Swing strategy matrix
         env:
           WINDOW_DAYS: "90"
           TARGET_SYMBOLS: "50"
           FEE_RATE: "0.0005"
           SLIPPAGE_RATE: "0.0002"
-        run: node scripts/run-bingx-swing-50x90-backtest.js
-      - name: Upload detailed Swing report
+        run: node scripts/run-bingx-strategy-matrix-backtest.js
+      - name: Upload full technical and trade-level report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bingx-swing-50-pairs-90-days-walk-forward
-          path: swing-50-pairs-90d-walk-forward-report.json
+          name: bingx-all-strategy-matrix-50-pairs-90-days
+          path: bingx-strategy-matrix-50-pairs-90d-report.json
           if-no-files-found: warn
           retention-days: 14
