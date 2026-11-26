@@ -111,7 +111,7 @@ function learnRules(completedTrades, priorRules, learnedAfterSegment) {
       const rule = {
         id: "BLOCK_SETUP_DIRECTION:" + row.key,
         type: "SETUP_DIRECTION",
-        setupId, direction,
+        timeframe, setupId, direction,
         learnedAfterSegment,
         sampleSize: rows.length, profitFactor: row.profitFactor, expectancyR: row.expectancyR,
         reason: "Önceki dönemde en az 5 işlem, PF < 0.35 ve negatif beklenti"
@@ -127,7 +127,7 @@ function learnRules(completedTrades, priorRules, learnedAfterSegment) {
       const rule = {
         id: "BLOCK_SETUP_DIRECTION_HTF:" + row.key,
         type: "SETUP_DIRECTION_HTF",
-        setupId, direction, htfBias,
+        timeframe, setupId, direction, htfBias,
         learnedAfterSegment,
         sampleSize: rows.length, profitFactor: row.profitFactor, expectancyR: row.expectancyR,
         reason: "Önceki dönemde aynı HTF bağlamında en az 3 işlem, PF < 0.50 ve negatif beklenti"
@@ -140,6 +140,7 @@ function learnRules(completedTrades, priorRules, learnedAfterSegment) {
 function candidateAllowed(candidate, rules) {
   const htfBias = (candidate.evidence || []).find(x => x.startsWith("HTF_")) || "HTF_UNKNOWN";
   return !rules.some(rule =>
+    rule.timeframe === candidate.timeframe &&
     rule.setupId === candidate.setupId &&
     rule.direction === candidate.direction &&
     (rule.type === "SETUP_DIRECTION" ||
