@@ -8,7 +8,7 @@ on:
       - src/multi-timeframe-backtest.js
 concurrency:
   group: bingx-swing-50x90-backtest
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   swing-backtest:
     runs-on: ubuntu-latest
