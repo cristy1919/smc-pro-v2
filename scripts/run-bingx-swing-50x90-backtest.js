@@ -3,6 +3,7 @@ import { BingXPublicKlineProvider, fetchEngineDataset, INTERVAL_MS } from "../sr
 import { evaluateSwing } from "../src/setup-evaluator.js";
 import { runHistoricalBacktest } from "../src/multi-timeframe-backtest.js";
 import { RISK_CONFIG } from "../src/config.js";
+import { selectCryptoPerpetualUniverse } from "../src/backtest-universe.js";
 
 const BASE_URL = "https://open-api.bingx.com";
 const DAY = 86400000;
@@ -26,23 +27,7 @@ async function selectTopSymbols() {
     publicData("/openApi/swap/v2/quote/contracts"),
     publicData("/openApi/swap/v2/quote/ticker")
   ]);
-  if (!Array.isArray(contracts) || !Array.isArray(tickers)) throw new Error("INVALID_BINGX_UNIVERSE_RESPONSE");
-  const active = new Set(contracts
-    .filter(c => c && c.status === 1 && String(c.apiStateOpen).toLowerCase() === "true")
-    .map(c => String(c.symbol || "").toUpperCase())
-    .filter(s => /^[A-Z0-9]+-USDT$/.test(s)));
-  return tickers.filter(t => active.has(String(t.symbol || "").toUpperCase()))
-    .map(t => {
-      const bid = Number(t.bidPrice), ask = Number(t.askPrice), quoteVolume = Number(t.quoteVolume);
-      const mid = (bid + ask) / 2;
-      return { symbol: String(t.symbol).toUpperCase(), quoteVolume,
-        spreadPct: mid > 0 ? ((ask - bid) / mid) * 100 : Infinity,
-        lastPrice: Number(t.lastPrice) };
-    })
-    .filter(t => Number.isFinite(t.quoteVolume) && t.quoteVolume > 0 &&
-      Number.isFinite(t.lastPrice) && t.lastPrice > 0 &&
-      Number.isFinite(t.spreadPct) && t.spreadPct >= 0 && t.spreadPct <= 0.5)
-    .sort((a, b) => b.quoteVolume - a.quoteVolume);
+  return selectCryptoPerpetualUniverse(contracts, tickers, TARGET_SYMBOLS);
 }
 
 function pf(trades) {
@@ -239,9 +224,9 @@ const output = {
     engine: "SWING_ONLY_WALK_FORWARD_LEARNING",
     requestedPairs: TARGET_SYMBOLS, completedPairs: datasets.size,
     dataWindowDays: WINDOW_DAYS, segments: 3, segmentDays: SEGMENT_DAYS,
-    symbolSelection: "Top 50 by 24h quoteVolume among active/open USDT perpetuals with observed bid/ask spread <= 0.5%",
+    symbolSelection: "BTC-USDT mandatory plus top 49 crypto-asset USDT perpetuals by 24h quoteVolume; excludes TradFi, indices, stocks, commodities, forex, gold and synthetic reference symbols; active/open and observed spread <= 0.5%.",
     timeframes: { bias: "1d", structuralZones: "4h", confirmation: "1h", entryComparisons: ["15m", "1h"] },
-    costs: { feeRatePerSide: FEE_RATE, slippageRatePerSide: SLIPPAGE_RATE },
+    costs: { feeRatePerSide: FEE_RATE, slippageRatePerSide: SLIPPAGE_RATE, maxCostToRisk: 0.20, minimumStopDistancePct: 0.007 },
     riskUnitFraction: RISK_CONFIG.riskUnitFraction,
     learningPolicy: "Strict chronological walk-forward: segment 1 diagnoses; its learned filters apply to segment 2; cumulative segment 1+2 learning applies to segment 3. No same-segment learning or future leakage.",
     learningThresholds: {
@@ -253,7 +238,11 @@ const output = {
       "Each 30-day segment is isolated; open trades are force-closed at the segment boundary",
       "The 15m and 1h entry comparisons are separate simulations and must not be added as if they were one portfolio",
       "No historical leverage/liquidation, depth, spread evolution or market-impact simulation",
-      "No partial TP1 close or break-even management",
+      "50% partial close at +1R; remaining 50% stop moves to breakeven; final target +3.5R",
+      "Trades rejected when stop distance <0.70% or estimated round-trip fee/slippage exceeds 20% of initial risk",
+      "Historical spread/depth/market impact cannot be reconstructed from OHLCV; current spread is used only for universe screening",
+      "Historical leverage and liquidation are not simulated because historical maintenance-margin tiers are unavailable",
+      "30-day segment boundary force-closes open positions; boundary exits are explicitly tagged",
       "Stop-first assumption if stop and target are touched in the same candle",
       "Funding applied only from returned historical settlement records",
       "Normalized R and equity metrics are not actual VST or USDT returns"
