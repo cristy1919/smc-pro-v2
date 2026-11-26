@@ -59,9 +59,12 @@ export class BingXPublicKlineProvider {
     if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) throw new RangeError("INVALID_TIME_RANGE");
     if (!Number.isInteger(limit) || limit < 1 || limit > 30000) throw new RangeError("KLINE_LIMIT_MUST_BE_1_TO_30000");
     const rows = [];
-    let cursor = startTime;
-    while (cursor < endTime) {
-      const page = await this.#request({ symbol, interval: timeframe, startTime: cursor, endTime, limit: Math.min(1440, limit - rows.length) });
+    let cursorEnd = endTime;
+    while (cursorEnd > startTime && rows.length < limit) {
+      const pageLimit = Math.min(1440, limit - rows.length);
+      // BingX returns klines newest-first. Page backwards from the oldest candle
+      // in each response; advancing from the newest candle silently truncates history.
+      const page = await this.#request({ symbol, interval: timeframe, startTime, endTime: cursorEnd, limit: pageLimit });
       if (!page.length) break;
       const normalized = page.map(row => ({
         timestamp: Number(row.time), open: Number(row.open), high: Number(row.high),
@@ -69,9 +72,9 @@ export class BingXPublicKlineProvider {
         closed: Number(row.time) + duration <= this.now()
       })).filter(c => Number.isFinite(c.timestamp) && c.timestamp >= startTime && c.timestamp < endTime);
       rows.push(...normalized);
-      const maxTime = Math.max(...normalized.map(c => c.timestamp));
-      if (!Number.isFinite(maxTime) || maxTime < cursor || page.length < 2) break;
-      cursor = maxTime + duration;
+      const oldestTime = Math.min(...normalized.map(c => c.timestamp));
+      if (!Number.isFinite(oldestTime) || oldestTime <= startTime || page.length < pageLimit) break;
+      cursorEnd = oldestTime - 1;
     }
     const deduped = [...new Map(rows.map(c => [c.timestamp,c])).values()].sort((a,b)=>a.timestamp-b.timestamp);
     const result = includeForming ? deduped : deduped.filter(c => c.closed);
