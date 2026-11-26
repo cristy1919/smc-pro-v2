@@ -5,7 +5,8 @@ export function evaluateEntryEligibility(candidate,{
  currentEquity,openPositions=[],riskMultiple=1,portfolioRiskCheck,marketLiquidityCheck,liquidationCheck,highVolume=false,extraConfirmations=[]
 }={}){
  const reasons=[];
- if(!candidate||!["scalp","swing"].includes(candidate.engine))reasons.push("INVALID_ENGINE");
+ if(!candidate||candidate.engine!=="swing")reasons.push("SCALP_ENGINE_REMOVED");
+ if(!["4h","1d"].includes(String(candidate?.setupTimeframe??"").toLowerCase()))reasons.push("FORBIDDEN_SETUP_TIMEFRAME");
  if(candidate?.state!=="QUALIFIED"||candidate?.score<80)reasons.push("SCORE_BELOW_QUALIFIED");
  if(candidate?.entryConfirmation?.status!=="CONFIRMED")reasons.push("ENTRY_CONFIRMATION_PENDING");
  if(!Number.isFinite(currentEquity)||currentEquity<=0)reasons.push("VERIFIED_VST_EQUITY_UNAVAILABLE");

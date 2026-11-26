@@ -5,7 +5,8 @@ export class PaperExecutionAdapter {
   if(!this.account||typeof this.account.getBalance!=="function")throw new Error("VST_CURRENT_EQUITY_REQUIRED");
   const balance=await this.account.getBalance();
   if(balance.source!=="BINGX_VST"||balance.asset!=="USDT"||!Number.isFinite(balance.equity)||balance.equity<=0)throw new Error("UNVERIFIED_VST_EQUITY");
-  if(candidate.engine!=="scalp"&&candidate.engine!=="swing")throw new Error("INVALID_ENGINE");
+  if(candidate.engine!=="swing")throw new Error("SCALP_ENGINE_REMOVED");
+  if(!["4h","1d"].includes(String(candidate.setupTimeframe??"").toLowerCase()))throw new Error("FORBIDDEN_SETUP_TIMEFRAME");
   if(candidate.status!=="QUALIFIED"||candidate.entryEligible!==true)throw new Error("CANDIDATE_NOT_ENTRY_READY");
   if(candidate.entryConfirmation?.status!=="CONFIRMED")throw new Error("ENTRY_CONFIRMATION_REQUIRED");
   const existing=await this.store.listOpenPositions();

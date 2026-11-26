@@ -1,16 +1,6 @@
 name: BingX all-strategy matrix 50-pair 90-day backtest
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/swing-backtest.yml
-      - scripts/run-bingx-strategy-matrix-backtest.js
-      - src/multi-timeframe-backtest.js
-      - src/backtest-universe.js
-      - src/bingx-market-data.js
-      - src/setup-evaluator.js
-      - src/entry-confirmation.js
-      - test/**
 concurrency:
   group: bingx-all-strategy-matrix-50x90
   cancel-in-progress: false

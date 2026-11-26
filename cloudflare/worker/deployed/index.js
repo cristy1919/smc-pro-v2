@@ -548,12 +548,6 @@ __name(summarizeClosedTradeAnalytics, "summarizeClosedTradeAnalytics");
 
 // src/strategy-allowlist.ts
 var ACTIVE_SWING_MODEL_IDS = [
-  "S01_SWEEP_MSS_FVG",
-  "S02_BREAKER_RETEST",
-  "S03_BOS_DISPLACEMENT",
-  "S04_RANGE_DEVIATION",
-  "S05_FAILED_BREAKOUT",
-  "S06_OB_REACTION",
   "W01_HTF_OB_REVERSAL",
   "W02_SUPPLY_DEMAND_REVERSAL",
   "W03_SWEEP_CHOCH",
@@ -570,7 +564,7 @@ function isActiveSwingModelId(value) {
 }
 __name(isActiveSwingModelId, "isActiveSwingModelId");
 function filterActiveSwingSetups(setups) {
-  return Array.isArray(setups) ? setups.filter((x) => isActiveSwingModelId(x?.model)) : [];
+  return Array.isArray(setups) ? setups.filter((x) => isActiveSwingModelId(x?.model) && x?.tradeStyle === "SWING" && ["4h", "1d"].includes(String(x?.setupTimeframe ?? "").toLowerCase())) : [];
 }
 __name(filterActiveSwingSetups, "filterActiveSwingSetups");
 function filterActiveSwingDiagnostics(diagnostics) {
@@ -580,7 +574,7 @@ function filterActiveSwingDiagnostics(diagnostics) {
     const timeframeDiagnostics = {}, rejectionSummary = { ...(d.rejectionSummary ?? {}) };
     if (!Object.keys(rejectionSummary).length) for (const value of Object.values(td)) for (const [reason, count] of Object.entries(value?.rejections ?? {})) rejectionSummary[reason] = (rejectionSummary[reason] ?? 0) + Math.max(0, Number(count) || 0);
     for (const [key, value] of Object.entries(td)) { if (!isActiveSwingModelId(key)) continue; const count = Math.max(0, Number(value?.setups) || 0); if (count > 0) timeframeDiagnostics[key] = { setups: count }; }
-    const setupDetails = Array.isArray(d.setupDetails) ? d.setupDetails.filter((item) => isActiveSwingModelId(item?.model)).map((item) => ({
+    const setupDetails = Array.isArray(d.setupDetails) ? d.setupDetails.filter((item) => isActiveSwingModelId(item?.model) && ["4h", "1d"].includes(String(item?.setupTimeframe ?? "").toLowerCase())).map((item) => ({
       model: item.model, tradeStyle: item.tradeStyle, entryTimeframe: item.entryTimeframe, setupTimeframe: item.setupTimeframe, side: item.side,
       score: item.score, status: item.status, reason: String(item.reason ?? "").slice(0, 200), entry: item.entry, stopLoss: item.stopLoss, takeProfit: item.takeProfit,
       tp1: item.tp1, tp2: item.tp2, tp3: item.tp3, confidence: item.confidence, confidenceStatus: item.confidenceStatus, confidenceSampleSize: item.confidenceSampleSize, riskReward: item.riskReward
@@ -607,29 +601,13 @@ var SCORE_BANDS = Object.freeze([
   { min: 84, max: 100, label: "HIGH_QUALITY" }
 ]);
 var ENGINE_CONFIG = Object.freeze({
-  SCALP: Object.freeze({
-    id: "SCALP",
-    directionTimeframe: "1h",
-    zoneTimeframe: "15m",
-    setupTimeframe: "5m",
-    entryTimeframe: "5m",
-    scoreWeights: Object.freeze({ htf: 15, liquidity: 20, marketStructure: 20, zone: 15, entryConfirmation: 20, volume: 10 }),
-    setups: Object.freeze([
-      "S01_SWEEP_MSS_FVG",
-      "S02_BREAKER_RETEST",
-      "S03_BOS_DISPLACEMENT",
-      "S04_RANGE_DEVIATION",
-      "S05_FAILED_BREAKOUT",
-      "S06_OB_REACTION"
-    ])
-  }),
   SWING: Object.freeze({
     id: "SWING",
     directionTimeframe: "1d",
     zoneTimeframe: "4h",
-    setupTimeframe: "1h",
-    entryTimeframe: "15m",
-    scoreWeights: Object.freeze({ htf: 20, liquidity: 15, marketStructure: 20, zone: 20, entryConfirmation: 15, volume: 10 }),
+    setupTimeframe: "4h",
+    entryTimeframe: "4h",
+    scoreWeights: Object.freeze({ htf: 15, btcWeekly: 10, btcDaily: 10, dominance: 15, liquidity: 10, marketStructure: 15, zone: 10, entryConfirmation: 5, volume: 10 }),
     setups: Object.freeze([
       "W01_HTF_OB_REVERSAL",
       "W02_SUPPLY_DEMAND_REVERSAL",
@@ -677,6 +655,10 @@ function calibrateHistoricalConfidence(candidate, history, asOf = Date.now(), mi
     if (t.status !== "CLOSED" || !Number.isFinite(t.closedAt) || Number(t.closedAt) >= asOf || t.tradeStyle !== candidate.engine || t.model !== candidate.setupId || t.symbol !== candidate.symbol || t.side !== candidate.side) return false;
     const audit = t.audit ?? {};
     if (candidate.marketRegime === "UNAVAILABLE" || String(audit.marketRegime ?? "UNAVAILABLE") !== candidate.marketRegime || Boolean(audit.htfAligned) !== candidate.htfAligned) return false;
+    if (candidate.setupTimeframe && String(t.setupTimeframe ?? audit.setupTimeframe ?? "") !== candidate.setupTimeframe) return false;
+    if (candidate.btcWeeklyBias && String(audit.btcWeeklyBias ?? "UNAVAILABLE") !== candidate.btcWeeklyBias) return false;
+    if (candidate.btcDailyBias && String(audit.btcDailyBias ?? "UNAVAILABLE") !== candidate.btcDailyBias) return false;
+    if (candidate.dominanceRegime && String(audit.dominanceRegime ?? "UNAVAILABLE") !== candidate.dominanceRegime) return false;
     const r = Number.isFinite(t.realizedR) ? Number(t.realizedR) : Number(t.initialRiskUsdt ?? t.riskUsdt) > 0 && Number.isFinite(t.pnlUsdt) ? Number(t.pnlUsdt) / Number(t.initialRiskUsdt ?? t.riskUsdt) : NaN;
     return Number.isFinite(r);
   }).map((t) => Number.isFinite(t.realizedR) ? Number(t.realizedR) : Number(t.pnlUsdt) / Number(t.initialRiskUsdt ?? t.riskUsdt));
@@ -738,7 +720,23 @@ function zones(rows, tf) {
   if (equalHigh) out.push(equalHigh);
   if (equalLow) out.push(equalLow);
   const r = rows.slice(-40, -1), hi = Math.max(...r.map((x) => x.high)), lo = Math.min(...r.map((x) => x.low)), cl = last(rows).close;
-  if (r.length >= 20 && (hi - lo) / cl <= 0.12) out.push({ kind: "RANGE", side: cl < (hi + lo) / 2 ? "LONG" : "SHORT", bottom: lo, top: hi, formedAt: last(r).time, sourceTimeframe: tf });
+  if (r.length >= 20 && cl > 0) {
+    const path = r.slice(1).reduce((sum, c, i) => sum + Math.abs(c.close - r[i].close), 0);
+    const efficiency = path > 0 ? Math.abs(r.at(-1).close - r[0].close) / path : 0;
+    const overlaps = r.slice(1).map((c, i) => {
+      const p = r[i], overlap = Math.max(0, Math.min(c.high, p.high) - Math.max(c.low, p.low));
+      return overlap / Math.max(1e-12, Math.min(c.high - c.low, p.high - p.low));
+    });
+    const overlapRatio = overlaps.reduce((sum, value) => sum + value, 0) / Math.max(1, overlaps.length);
+    const upCloses = r.slice(1).filter((c, i) => c.close > r[i].close).length;
+    const downCloses = r.slice(1).filter((c, i) => c.close < r[i].close).length;
+    const directionalCloses = Math.max(upCloses, downCloses) / Math.max(1, r.length - 1);
+    const widthPct = (hi - lo) / cl;
+    const regime = widthPct <= 0.12 && efficiency <= 0.28 && overlapRatio >= 0.55 ? "RANGE" :
+      efficiency >= 0.38 && directionalCloses >= 0.62 ? "DIRECTIONAL_ORDERFLOW" : "MIXED";
+    if (regime === "RANGE") out.push({ kind: "RANGE", regime, efficiency, overlapRatio, directionalCloses, side: cl < (hi + lo) / 2 ? "LONG" : "SHORT", bottom: lo, top: hi, formedAt: last(r).time, sourceTimeframe: tf });
+    else if (regime === "DIRECTIONAL_ORDERFLOW") out.push({ kind: "ORDERFLOW_REGIME", regime, efficiency, overlapRatio, directionalCloses, side: upCloses > downCloses ? "LONG" : "SHORT", bottom: lo, top: hi, formedAt: last(r).time, sourceTimeframe: tf });
+  }
   return out.slice(-60);
 }
 __name(zones, "zones");
@@ -780,7 +778,8 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
   const sweep = side === "LONG" ? c.low < lo && c.close > lo || !!equalLow && c.low < equalLow.bottom && c.close > equalLow.top : c.high > hi && c.close < hi || !!equalHigh && c.high > equalHigh.top && c.close < equalHigh.bottom;
   const ev = [...st.events].reverse().find((x) => x.side === side && x.candleIndex >= rows.length - 4);
   const fvg = [...z].reverse().find((x) => x.kind === "FVG" && x.side === side && x.formedAt >= rows[rows.length - 8].time);
-  const breaker = [...z].reverse().find((x) => x.kind === "BREAKER" && x.side === side && (id !== "W04_BREAKER_RETEST" || x.sourceTimeframe === "4h")), ob = [...z].reverse().find((x) => (x.kind === "ORDER_BLOCK" || x.kind === "MITIGATION") && x.side === side), htfOb = [...z].reverse().find((x) => x.kind === "ORDER_BLOCK" && x.side === side && x.sourceTimeframe === "4h"), supplyDemand = [...z].reverse().find((x) => x.kind === "SUPPLY_DEMAND" && x.side === side && x.sourceTimeframe === "4h"), range = z.find((x) => x.kind === "RANGE");
+  const breaker = [...z].reverse().find((x) => x.kind === "BREAKER" && x.side === side && (id !== "W04_BREAKER_RETEST" || x.sourceTimeframe === "4h")), ob = [...z].reverse().find((x) => (x.kind === "ORDER_BLOCK" || x.kind === "MITIGATION") && x.side === side), htfOb = [...z].reverse().find((x) => x.kind === "ORDER_BLOCK" && x.side === side && x.sourceTimeframe === "4h"), supplyDemand = [...z].reverse().find((x) => x.kind === "SUPPLY_DEMAND" && x.side === side && x.sourceTimeframe === "4h"), range = z.find((x) => x.kind === "RANGE" && x.regime === "RANGE");
+  const rangeDeviation = range ? side === "LONG" ? c.low < range.bottom && c.close > range.bottom : c.high > range.top && c.close < range.top : false;
   const retest = /* @__PURE__ */ __name((x) => !!x && hit(c, x), "retest");
   switch (id) {
     case "S01_SWEEP_MSS_FVG":
@@ -795,7 +794,7 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
       return { ok: !!ev && (ev.type === "BOS" || ev.type === "MSB") && ev.displacement, zone: fvg, reason: "Close-confirmed BOS/MSB + displacement" };
     case "S04_RANGE_DEVIATION":
     case "W05_RANGE_DEVIATION":
-      return { ok: !!range && sweep, zone: range, reason: "Range deviation and reclaim", liquiditySweep: sweep };
+      return { ok: !!range && range.regime === "RANGE" && rangeDeviation && sweep, zone: range, reason: "Confirmed horizontal range deviation and close-confirmed re-entry", liquiditySweep: rangeDeviation };
     case "S05_FAILED_BREAKOUT":
       return { ok: sweep && !!ev, zone: range, reason: "Failed breakout reclaim", liquiditySweep: sweep };
     case "S06_OB_REACTION":
@@ -821,58 +820,106 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
   }
 }
 __name(evaluatePattern, "evaluatePattern");
-function makeSetup(engine, id, symbol, side, entryRows, setupRows, st, z, htfTrend, btcBias, reason, history, marketRegime, liquiditySweep) {
+function normalizeBiasSide(value) {
+  const v = String(value ?? "").toUpperCase();
+  return v === "BULLISH" || v === "LONG" || v === "UP" ? "LONG" : v === "BEARISH" || v === "SHORT" || v === "DOWN" ? "SHORT" : null;
+}
+function oppositeSide(side) { return side === "LONG" ? "SHORT" : side === "SHORT" ? "LONG" : null; }
+function dominancePointsForSide(symbol, side, dominance, weight) {
+  if (!dominance) return 0;
+  const btc = normalizeBiasSide(dominance.btcDomDirection);
+  const alt = normalizeBiasSide(dominance.altDomDirection);
+  const usdt = normalizeBiasSide(dominance.usdtDomDirection);
+  const support = [];
+  if (btc) support.push(symbol === "BTC-USDT" ? btc : oppositeSide(btc));
+  if (alt && symbol !== "BTC-USDT") support.push(alt);
+  if (usdt) support.push(oppositeSide(usdt));
+  if (!support.length) return 0;
+  return Math.round(support.filter((x) => x === side).length / support.length * weight);
+}
+function makeSetup(engine, id, symbol, side, entryRows, setupRows, st, z, htfTrend, btcBias, reason, history, marketRegime, liquiditySweep, btcWeeklyBias = "UNAVAILABLE", btcDailyBias = "UNAVAILABLE", dominanceContext = null, setupTimeframe = "4h") {
   const c = last(entryRows), w = setupRows.slice(-12), lo = Math.min(...w.map((x) => x.low)), hi = Math.max(...w.map((x) => x.high));
   const stop = side === "LONG" ? Math.min(lo, z?.bottom ?? lo) : Math.max(hi, z?.top ?? hi);
   if (!Number.isFinite(stop) || stop <= 0 || (side === "LONG" ? stop >= c.close : stop <= c.close)) return null;
-  const risk = Math.abs(c.close - stop), weights = ENGINE_CONFIG[engine].scoreWeights, ev = st.events.at(-1), htfAligned = htfTrend === side, btcSide = btcBias === "BULLISH" ? "LONG" : btcBias === "BEARISH" ? "SHORT" : null, btcOpposing = btcSide !== null && btcSide !== side, htfOpposing = htfTrend !== "NEUTRAL" && !htfAligned, countertrend = htfOpposing || btcOpposing, btcContextStatus = btcBias === "UNAVAILABLE" ? "UNAVAILABLE" : btcBias === "NEUTRAL" ? "MIXED" : btcOpposing ? "OPPOSING" : "ALIGNED", confidenceStats = calibrateHistoricalConfidence({ engine, symbol, setupId: id, side, marketRegime, htfAligned }, history, c.time);
-  const zoneQuality = z ? z.kind === "FVG" || z.kind === "BREAKER" || z.kind === "ORDER_BLOCK" || z.kind === "OTE" ? 1 : z.kind === "SUPPLY_DEMAND" ? 0.9 : 0.8 : 0, points = { htf: htfTrend === side ? btcOpposing ? Math.round(weights.htf * 0.6) : weights.htf : htfTrend === "NEUTRAL" ? Math.round(weights.htf * 0.7) : Math.round(weights.htf * 0.35), liquidity: liquiditySweep ? weights.liquidity : 0, marketStructure: ev?.side === side ? ev.displacement ? weights.marketStructure : Math.round(weights.marketStructure * 0.65) : 0, zone: Math.round(weights.zone * zoneQuality), entryConfirmation: weights.entryConfirmation, volume: volumePoints(entryRows, weights.volume) };
-  const score = Object.values(points).reduce((a, b) => a + b, 0), band = scoreBand(score), tf = engine === "SCALP" ? "5m" : "1h", etf = engine === "SCALP" ? "5m" : "15m", riskMultiplier = countertrend || !htfAligned || score < 80 ? 0.5 : 1, status = countertrend ? score >= 84 ? "READY" : score >= 70 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED" : score >= 70 ? "READY" : score >= 65 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED", tp1 = c.close + (side === "LONG" ? 1 : -1) * risk, tp2 = c.close + (side === "LONG" ? 2 : -2) * risk, tp3 = c.close + (side === "LONG" ? 3.5 : -3.5) * risk;
-  return { symbol, side, model: id, tradeStyle: engine, entryTimeframe: etf, setupTimeframe: tf, setupCandleTime: c.time, score, scoreBreakdown: points, entry: c.close, stopLoss: stop, takeProfit: tp3, tp1, tp2, tp3, riskReward: 3.5, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, reason: id + ": " + reason + "; " + band + "; BTC " + btcContextStatus, candleTime: c.time, status, riskMultiplier, btcContextStatus, confirmations: [id, "CLOSED_CANDLE_CONFIRMATION", ...z ? [z.kind] : [], ...ev ? [ev.type] : []], audit: { engine, setupId: id, scoreBand: band, riskPercent: riskMultiplier * 2, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, marketRegime, htfAligned, htfTrend, btcBias, countertrend, structureTrend: st.trend, structureEvent: ev ?? null, zone: z ?? null, closedCandleOnly: true, volume: c.volume === void 0 ? "UNAVAILABLE" : "AVAILABLE", funding: latestFundingSnapshots.has(symbol) ? "AVAILABLE" : "UNAVAILABLE", fundingRate: latestFundingSnapshots.get(symbol)?.rate ?? null, fundingNextTime: latestFundingSnapshots.get(symbol)?.nextFundingTime ?? null, openInterest: "UNAVAILABLE", btcDominance: "UNAVAILABLE", altcoinDominance: "UNAVAILABLE", usdtDominance: "UNAVAILABLE", aggressorFlow: "UNAVAILABLE" } };
+  const risk = Math.abs(c.close - stop), weights = ENGINE_CONFIG[engine].scoreWeights, ev = st.events.at(-1), htfAligned = htfTrend === side;
+  const weeklySide = normalizeBiasSide(btcWeeklyBias), dailySide = normalizeBiasSide(btcDailyBias);
+  const btcOpposing = [weeklySide, dailySide].some((value) => value !== null && value !== side);
+  const htfOpposing = htfTrend !== "NEUTRAL" && !htfAligned, countertrend = htfOpposing || btcOpposing;
+  const btcContextStatus = weeklySide === null || dailySide === null ? "PARTIAL_UNAVAILABLE" : btcOpposing ? "OPPOSING" : weeklySide === side && dailySide === side ? "ALIGNED" : "MIXED";
+  const dominanceAvailable = dominanceContext?.available === true;
+  const dominanceRegime = dominanceContext ? [dominanceContext.btcDomDirection ?? "UNAVAILABLE", dominanceContext.altDomDirection ?? "UNAVAILABLE", dominanceContext.usdtDomDirection ?? "UNAVAILABLE"].join("|") : "UNAVAILABLE";
+  const confidenceStats = calibrateHistoricalConfidence({ engine, symbol, setupId: id, side, marketRegime, htfAligned, setupTimeframe, btcWeeklyBias, btcDailyBias, dominanceRegime }, history, c.time);
+  const zoneQuality = z ? z.kind === "FVG" || z.kind === "BREAKER" || z.kind === "ORDER_BLOCK" || z.kind === "OTE" ? 1 : z.kind === "SUPPLY_DEMAND" ? 0.9 : 0.8 : 0;
+  const points = {
+    htf: htfTrend === side ? weights.htf : htfTrend === "NEUTRAL" ? Math.round(weights.htf * 0.5) : 0,
+    btcWeekly: weeklySide === side ? weights.btcWeekly : weeklySide === null ? 0 : 0,
+    btcDaily: dailySide === side ? weights.btcDaily : dailySide === null ? 0 : 0,
+    dominance: dominancePointsForSide(symbol, side, dominanceContext, weights.dominance),
+    liquidity: liquiditySweep ? weights.liquidity : 0,
+    marketStructure: ev?.side === side ? ev.displacement ? weights.marketStructure : Math.round(weights.marketStructure * 0.65) : 0,
+    zone: Math.round(weights.zone * zoneQuality),
+    entryConfirmation: weights.entryConfirmation,
+    volume: volumePoints(entryRows, weights.volume)
+  };
+  const score = Object.values(points).reduce((a, b) => a + b, 0), band = scoreBand(score);
+  const riskMultiplier = countertrend || !htfAligned || score < 80 ? 0.5 : 1;
+  const contextReady = weeklySide !== null && dailySide !== null && dominanceAvailable;
+  const status = !contextReady ? score >= 60 ? "WAIT" : "REJECTED" : countertrend ? score >= 84 ? "READY" : score >= 70 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED" : score >= 70 ? "READY" : score >= 65 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED";
+  const tp1 = c.close + (side === "LONG" ? 1 : -1) * risk, tp2 = c.close + (side === "LONG" ? 2 : -2) * risk, tp3 = c.close + (side === "LONG" ? 3.5 : -3.5) * risk;
+  return { symbol, side, model: id, tradeStyle: engine, entryTimeframe: setupTimeframe, setupTimeframe, setupCandleTime: c.time, score, scoreBreakdown: points, entry: c.close, stopLoss: stop, takeProfit: tp3, tp1, tp2, tp3, riskReward: 3.5, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, reason: id + ": " + reason + "; " + band + "; BTC W " + (btcWeeklyBias ?? "UNAVAILABLE") + " / D " + (btcDailyBias ?? "UNAVAILABLE"), candleTime: c.time, status, riskMultiplier, btcContextStatus, confirmations: [id, "CLOSED_CANDLE_CONFIRMATION", ...z ? [z.kind] : [], ...ev ? [ev.type] : []], audit: { engine, setupId: id, scoreBand: band, riskPercent: riskMultiplier * 2, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, marketRegime, htfAligned, htfTrend, btcBias, btcWeeklyBias: btcWeeklyBias ?? "UNAVAILABLE", btcDailyBias: btcDailyBias ?? "UNAVAILABLE", dominanceRegime, countertrend, structureTrend: st.trend, structureEvent: ev ?? null, zone: z ?? null, closedCandleOnly: true, volume: c.volume === void 0 ? "UNAVAILABLE" : "AVAILABLE", funding: latestFundingSnapshots.has(symbol) ? "AVAILABLE" : "UNAVAILABLE", fundingRate: latestFundingSnapshots.get(symbol)?.rate ?? null, fundingNextTime: latestFundingSnapshots.get(symbol)?.nextFundingTime ?? null, openInterest: "UNAVAILABLE", btcDominance: dominanceContext?.btcDomPct ?? "UNAVAILABLE", altcoinDominance: dominanceContext?.altDomPct ?? "UNAVAILABLE", usdtDominance: dominanceContext?.usdtDomPct ?? "UNAVAILABLE", dominanceDataStatus: dominanceAvailable ? "AVAILABLE" : "UNAVAILABLE", aggressorFlow: "UNAVAILABLE" } };
 }
 __name(makeSetup, "makeSetup");
-function requiresHtfDirectionalAlignment(id) {
-  return id === "S02_BREAKER_RETEST" || id === "S03_BOS_DISPLACEMENT" || id === "W04_BREAKER_RETEST" || id === "W08_BOS_CONTINUATION";
-}
+function requiresHtfDirectionalAlignment(id) { return false; }
 __name(requiresHtfDirectionalAlignment, "requiresHtfDirectionalAlignment");
-function evaluateEngine(engine, symbol, input, btcBias = "UNAVAILABLE", history = []) {
-  const directionTf = engine === "SCALP" ? "1h" : "1d", zoneTf = engine === "SCALP" ? "15m" : "4h", setupTf = engine === "SCALP" ? "5m" : "1h", entryTf = engine === "SCALP" ? "5m" : "15m";
-  const frames = [.../* @__PURE__ */ new Set([directionTf, zoneTf, setupTf, entryTf])], unavailable = frames.filter((tf) => !valid(input[tf]) || input[tf].length < (tf === "1d" ? 60 : 20));
+function evaluateEngine(engine, symbol, input, btcBias = "UNAVAILABLE", history = [], setupTfOverride = "4h", btcWeeklyBias = "UNAVAILABLE", btcDailyBias = "UNAVAILABLE", dominanceContext = null) {
+  if (engine !== "SWING" || !["4h", "1d"].includes(setupTfOverride)) return { engine, symbol, setups: [], diagnostics: [], structure: {}, zones: [], unavailable: ["SCALP_ENGINE_REMOVED_OR_FORBIDDEN_TIMEFRAME"] };
+  const directionTf = "1d", zoneTf = "4h", setupTf = setupTfOverride, entryTf = setupTf;
+  const frames = [...new Set([directionTf, zoneTf, setupTf])], unavailable = frames.filter((tf) => !valid(input[tf]) || input[tf].length < (tf === "1d" ? 60 : 20));
   const structure = {}, allZones = [];
   for (const tf of frames) {
     const rows = input[tf];
-    if (valid(rows)) {
-      structure[tf] = analyzeMarketStructure(rows);
-      allZones.push(...zones(rows, tf));
-    }
+    if (valid(rows)) { structure[tf] = analyzeMarketStructure(rows); allZones.push(...zones(rows, tf)); }
   }
   const setups = [], diagnostics = [];
   if (unavailable.length) return { engine, symbol, setups, diagnostics, structure, zones: allZones, unavailable };
   const direction = structure[directionTf].trend, setupRows = input[setupTf], entryRows = input[entryTf], z = allZones.filter((x) => x.sourceTimeframe === zoneTf || x.sourceTimeframe === setupTf), ids = ENGINE_CONFIG[engine].setups;
+  const recentVolume = last(entryRows)?.volume, baseVolume = median(entryRows.slice(-21, -1).map((x) => Number(x.volume)));
+  const relativeVolume = Number.isFinite(recentVolume) && baseVolume > 0 ? recentVolume / baseVolume : NaN;
+  if (!Number.isFinite(relativeVolume) || relativeVolume < 0.8) return { engine, symbol, setups, diagnostics: [{ reason: "LOW_OR_UNAVAILABLE_RELATIVE_VOLUME" }], structure, zones: allZones, unavailable: [] };
   for (const side of ["LONG", "SHORT"]) for (const id of ids) {
-    const sig = evaluatePattern(id, side, setupRows, structure[setupTf], z, engine === "SWING" ? structure[zoneTf] : void 0, engine === "SWING" ? input[zoneTf] : void 0, engine === "SWING" ? input["1d"] : void 0);
+    const sig = evaluatePattern(id, side, setupRows, structure[setupTf], z, structure[zoneTf], input[zoneTf], input["1d"]);
     if (!sig.ok) continue;
-    if (requiresHtfDirectionalAlignment(id) && direction !== side) {
-      diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: direction === "NEUTRAL" ? "HTF_DIRECTION_UNCLEAR" : "HTF_DIRECTION_OPPOSING" });
-      continue;
+    const weeklySide = normalizeBiasSide(btcWeeklyBias), dailySide = normalizeBiasSide(btcDailyBias);
+    const btcOpposing = [weeklySide, dailySide].some((value) => value !== null && value !== side);
+    const htfOpposing = direction !== "NEUTRAL" && direction !== side;
+    const countertrend = btcOpposing || htfOpposing;
+    if (countertrend) {
+      const shift = [...structure[setupTf].events].reverse().find((event) => event.side === side && (event.type === "CHoCH" || event.type === "MSS") && event.displacement && event.candleIndex >= setupRows.length - 4);
+      const zoneKind = sig.zone?.kind;
+      const structuralZone = ["FVG", "BREAKER", "ORDER_BLOCK", "MITIGATION"].includes(zoneKind);
+      if (sig.liquiditySweep !== true || !shift || !structuralZone || !isEntryConfirmed(last(entryRows), side, sig.zone, true)) {
+        diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: "COUNTERTREND_EXTRA_FILTERS_NOT_CONFIRMED" });
+        continue;
+      }
     }
-    const retestRequired = (/* @__PURE__ */ new Set(["S01_SWEEP_MSS_FVG", "S02_BREAKER_RETEST", "S04_RANGE_DEVIATION", "S06_OB_REACTION", "W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W07_OTE"])).has(id);
+    const retestRequired = new Set(["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W07_OTE"]).has(id);
     if (!isEntryConfirmed(last(entryRows), side, sig.zone, retestRequired)) {
       diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: retestRequired ? "ENTRY_RETEST_NOT_CONFIRMED" : "ENTRY_CLOSE_NOT_CONFIRMED" });
       continue;
     }
     const observedRegime = classifyMarketRegime(structure[directionTf], input[directionTf], allZones.filter((x) => x.sourceTimeframe === directionTf));
-    const candidate = makeSetup(engine, id, symbol, side, entryRows, setupRows, structure[setupTf], sig.zone, direction, btcBias, sig.reason, history, observedRegime, sig.liquiditySweep === true);
-    if (!candidate) {
-      diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: "INVALID_STRUCTURAL_STOP" });
-      continue;
-    }
+    const candidate = makeSetup(engine, id, symbol, side, entryRows, setupRows, structure[setupTf], sig.zone, direction, btcBias, sig.reason, history, observedRegime, sig.liquiditySweep === true, btcWeeklyBias, btcDailyBias, dominanceContext, setupTf);
+    if (!candidate) { diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: "INVALID_STRUCTURAL_STOP" }); continue; }
+    candidate.setupTimeframe = setupTf;
+    candidate.entryTimeframe = setupTf;
+    candidate.audit.setupTimeframe = setupTf;
     setups.push(candidate);
     diagnostics.push({ setupId: id, side, score: candidate.score, band: scoreBand(candidate.score), reason: sig.reason });
   }
   return { engine, symbol, setups, diagnostics, structure, zones: allZones, unavailable };
 }
 __name(evaluateEngine, "evaluateEngine");
+
 
 // src/bingx-demo.ts
 var MIN_LEVERAGE = 20;
@@ -3259,7 +3306,7 @@ var DEFAULT_STATE = {
   lastScanAt: null,
   lastScannedSymbol: null,
   runnerEnabled: true,
-  paperLedger: { balance: 1e3, equity: 1e3, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: true, cursor: 0, dailyPnl: 0, dayKey: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), maxOpenPositions: 20 }
+  paperLedger: { balance: 1e3, equity: 1e3, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: true, cursor: 0, dailyPnl: 0, dayKey: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), maxOpenPositions: 10 }
 };
 var SQL_CANDLE_INSERT_CHUNK = 10;
 var SQL_HISTORY_TASK_INSERT_CHUNK = 15;
@@ -4334,10 +4381,10 @@ var EngineState = class {
         await this.saveEngineState(engine);
         await this.writePaperState(positionLimitMigrationKey, "true");
       }
-      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 20) ledger.maxOpenPositions = 20;
+      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 10) ledger.maxOpenPositions = 10;
       const positionLimitV22Key = "paper-position-limit-v22-20";
       if (await this.readPaperState(positionLimitV22Key) !== "true") {
-        ledger.maxOpenPositions = 20; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
+        ledger.maxOpenPositions = 10; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
         await this.saveEngineState(engine); await this.writePaperState(positionLimitV22Key, "true");
       }
       const manualPause = await this.readPaperState("paper-runner-explicitly-paused") === "true";
@@ -4419,7 +4466,7 @@ var EngineState = class {
             await this.writePaperState("bingx-vst-legacy-ledger-v1", JSON.stringify(archive));
           }
           const fresh = structuredClone(DEFAULT_STATE.paperLedger);
-          fresh.balance = startingBalance; fresh.equity = startingBalance; fresh.positions = []; fresh.closedTrades = []; fresh.setups = []; fresh.scannedSymbols = []; fresh.scanDiagnostics = []; fresh.lastScanAt = null; fresh.runnerEnabled = true; fresh.cursor = 0; fresh.dailyPnl = 0; fresh.dayKey = new Date().toISOString().slice(0, 10); fresh.maxOpenPositions = 20; fresh.capitalAdjustments = [{ id: resetId, at: new Date().toISOString(), targetUsdt: startingBalance, balanceBefore: Number(old?.balance) || 0, amountUsdt: startingBalance - (Number(old?.balance) || 0), balanceAfter: startingBalance, status: "NEW_INTERNAL_PAPER_ACCOUNT" }];
+          fresh.balance = startingBalance; fresh.equity = startingBalance; fresh.positions = []; fresh.closedTrades = []; fresh.setups = []; fresh.scannedSymbols = []; fresh.scanDiagnostics = []; fresh.lastScanAt = null; fresh.runnerEnabled = true; fresh.cursor = 0; fresh.dailyPnl = 0; fresh.dayKey = new Date().toISOString().slice(0, 10); fresh.maxOpenPositions = 10; fresh.capitalAdjustments = [{ id: resetId, at: new Date().toISOString(), targetUsdt: startingBalance, balanceBefore: Number(old?.balance) || 0, amountUsdt: startingBalance - (Number(old?.balance) || 0), balanceAfter: startingBalance, status: "NEW_INTERNAL_PAPER_ACCOUNT" }];
           engine.paperLedger = fresh; engine.paperBalanceUsdt = startingBalance; engine.positions = []; engine.closedTrades = []; engine.lastScanAt = null; engine.lastScannedSymbol = null; engine.runnerEnabled = true; engine.internalPaperAccount = { resetId, initializedAt: new Date().toISOString(), initialBalanceUsdt: startingBalance, currency: "USDT", source: "INTERNAL_PAPER_ONLY", legacyLedgerArchived: !!old };
           await this.writePaperState("internal-paper-entry-queue-v1", "[]");
         }
@@ -4441,7 +4488,7 @@ var EngineState = class {
         return Response.json({ ok: false, error: "Invalid JSON body." }, { status: 400 });
       }
       const requested = Number(body.maxOpenPositions);
-      if (!Number.isInteger(requested) || requested < 0 || requested > 20) return Response.json({ ok: false, error: "maxOpenPositions must be an integer from 0 to 20." }, { status: 400 });
+      if (!Number.isInteger(requested) || requested < 0 || requested > 10) return Response.json({ ok: false, error: "maxOpenPositions must be an integer from 0 to 10." }, { status: 400 });
       const engine = await this.readEngineState();
       const ledger = engine.paperLedger ?? structuredClone(DEFAULT_STATE.paperLedger);
       ledger.maxOpenPositions = requested;
@@ -4711,7 +4758,7 @@ var EngineState = class {
               pendingReconciledPosition = true;
               continue;
             }
-            const retiredStrategyPending = !ACTIVE_VST_STRATEGY_MODELS.has(pending.setup.model);
+            const retiredStrategyPending = !ACTIVE_VST_STRATEGY_MODELS.has(pending.setup.model) || !["4h", "1d"].includes(String(pending.setup.setupTimeframe ?? "").toLowerCase());
             if (isBingXDemoPendingEntryAbsentFromSnapshot(pending, demoSnapshot)) {
               console.info("BingX VST pending record cleared after complete exchange snapshot confirmed no open order or position", pending.setup.symbol, pending.orderId);
               continue;
@@ -4807,10 +4854,10 @@ var EngineState = class {
         await this.saveEngineState(engine);
         await this.writePaperState(positionLimitMigrationKey, "true");
       }
-      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 20) ledger.maxOpenPositions = 20;
+      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 10) ledger.maxOpenPositions = 10;
       const positionLimitV22Key = "paper-position-limit-v22-20";
       if (await this.readPaperState(positionLimitV22Key) !== "true") {
-        ledger.maxOpenPositions = 20; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
+        ledger.maxOpenPositions = 10; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
         await this.saveEngineState(engine); await this.writePaperState(positionLimitV22Key, "true");
       }
       const positionMarginMigrationKey = "paper-position-margin-metadata-v1";
@@ -4953,6 +5000,26 @@ var EngineState = class {
         scanRotationGenerationAtStart = ledger.scanRotation.generation;
         strategyResetState.strategyResetV7 = true;
       }
+      if (strategyResetState.strategyResetV8 !== true) {
+        ledger.setups = [];
+        ledger.scanDiagnostics = [];
+        ledger.scannedSymbols = [];
+        ledger.modelTelemetry = void 0;
+        ledger.activitySnapshots = {};
+        ledger.activityRanking = void 0;
+        ledger.activityRankingBySymbol = {};
+        ledger.scanTelemetry = void 0;
+        ledger.scanUniverseSize = 0;
+        ledger.scanBatchSize = 0;
+        ledger.scanInvocationBatchSize = 0;
+        ledger.scanLogicalBatchRemaining = 0;
+        ledger.lastScanAt = null;
+        ledger.maxOpenPositions = 10;
+        ledger.cursor = 0;
+        ledger.scanRotation = resetScanRotationProgress(ledger.scanRotation, (/* @__PURE__ */ new Date()).toISOString());
+        scanRotationGenerationAtStart = ledger.scanRotation.generation;
+        strategyResetState.strategyResetV8 = true;
+      }
       if (ledger.sequentialBatchScanV1 !== true) {
         ledger.cursor = 0;
         ledger.scanRotation = resetScanRotationProgress(ledger.scanRotation, (/* @__PURE__ */ new Date()).toISOString());
@@ -5013,27 +5080,35 @@ var EngineState = class {
       const structuralCandlesBySymbol = /* @__PURE__ */ new Map();
       for (const symbol of batchSymbols) {
         const rows = {};
-        const specs = [["5m", 1e3, 3e5], ["15m", 600, 9e5], ["1h", 300, 36e5], ["4h", 180, 144e5], ["1d", 180, 864e5]];
+        const specs = [["15m", 600, 9e5], ["1h", 300, 36e5], ["4h", 180, 144e5], ["1d", 180, 864e5], ...(symbol === "BTC-USDT" ? [["1w", 100, 6048e5]] : [])];
         for (const [interval, limit, duration] of specs) {
           try {
             const candles = await fetchMarketCandles(symbol, interval, limit, duration);
-            const minimum = interval === "5m" ? 251 : interval === "15m" ? 200 : interval === "1h" ? 100 : 60;
+            const minimum = interval === "15m" ? 200 : interval === "1h" ? 100 : interval === "1w" ? 20 : 60;
             if (candles.length >= minimum) rows[interval] = candles;
           } catch (error) {
-            if (!scanErrors.some((x) => x.symbol === symbol && x.timeframe === interval)) scanErrors.push({ symbol, timeframe: interval, engine: interval === "5m" || interval === "15m" || interval === "1h" ? "SCALP+SWING" : "SWING", error: String(error).slice(0, 180) });
+            if (!scanErrors.some((x) => x.symbol === symbol && x.timeframe === interval)) scanErrors.push({ symbol, timeframe: interval, engine: interval === "15m" || interval === "1h" ? "POSITION_MANAGEMENT" : "SWING", error: String(error).slice(0, 180) });
           }
         }
         if (rows["1h"]) rows["2h"] = aggregateClosedCandles(rows["1h"], 72e5, 36e5);
         structuralCandlesBySymbol.set(symbol, rows);
         const missingByEngine = {
-          SCALP: ["5m", "15m", "1h"].filter((tf) => !rows[tf]),
-          SWING: ["15m", "1h", "4h", "1d"].filter((tf) => !rows[tf])
+          SWING: ["4h", "1d"].filter((tf) => !rows[tf])
         };
         for (const [engineName, missing] of Object.entries(missingByEngine)) {
           if (missing.length && !scanErrors.some((x) => x.symbol === symbol && x.engine === engineName && x.error.startsWith("INSUFFICIENT_OR_STALE_CANDLES:"))) {
             scanErrors.push({ symbol, engine: engineName, timeframes: missing, error: "INSUFFICIENT_OR_STALE_CANDLES:" + missing.join(",") });
           }
         }
+      }
+      if (!structuralCandlesBySymbol.has("BTC-USDT") || !valid(structuralCandlesBySymbol.get("BTC-USDT")?.["1w"])) {
+        const btcRows = structuralCandlesBySymbol.get("BTC-USDT") ?? {};
+        for (const [interval, limit, duration] of [["4h", 180, 144e5], ["1d", 180, 864e5], ["1w", 100, 6048e5]]) {
+          if (valid(btcRows[interval])) continue;
+          try { const candles = await fetchMarketCandles("BTC-USDT", interval, limit, duration); if (candles.length >= (interval === "1w" ? 20 : 60)) btcRows[interval] = candles; }
+          catch (btcContextError) { console.warn("BTC context candles unavailable", interval, String(btcContextError).slice(0, 120)); }
+        }
+        structuralCandlesBySymbol.set("BTC-USDT", btcRows);
       }
       const biasMeasuredAt = Date.now();
       const structuralBiasBySymbol = ledger.structuralBiasBySymbol ?? (ledger.structuralBiasBySymbol = {});
@@ -5045,6 +5120,13 @@ var EngineState = class {
       }
       const btcBiasState = structuralBiasBySymbol["BTC-USDT"];
       const btcBias = btcBiasState && biasMeasuredAt - btcBiasState.updatedAt <= 36 * 60 * 60 * 1e3 ? btcBiasState.activeBias : "NEUTRAL";
+      const btcContextCandles = structuralCandlesBySymbol.get("BTC-USDT") ?? {};
+      const toBtcBias = (trend) => trend === "LONG" ? "BULLISH" : trend === "SHORT" ? "BEARISH" : "NEUTRAL";
+      const btcWeeklyBias = valid(btcContextCandles["1w"]) ? toBtcBias(analyzeMarketStructure(btcContextCandles["1w"]).trend) : "UNAVAILABLE";
+      const btcDailyBias = valid(btcContextCandles["1d"]) ? toBtcBias(analyzeMarketStructure(btcContextCandles["1d"]).trend) : "UNAVAILABLE";
+      let dominanceContext;
+      try { dominanceContext = deriveDominanceDirections(await fetchGlobalDominanceSnapshot(this.env)); }
+      catch (dominanceError) { dominanceContext = deriveDominanceDirections(null); console.warn("Dominance scoring data unavailable", String(dominanceError).slice(0, 140)); }
       const altcoinBreadthBias = summarizeAltcoinBreadthBias(structuralBiasBySymbol, universeSymbols, biasMeasuredAt);
       ledger.structuralMarketBiasSnapshot = { ...altcoinBreadthBias, btcBias, measuredAt: biasMeasuredAt };
       const activitySnapshots = ledger.activitySnapshots ?? (ledger.activitySnapshots = {});
@@ -5192,7 +5274,13 @@ var EngineState = class {
       const diagnostics = [];
       for (const symbol of batchSymbols) {
         const rows = structuralCandlesBySymbol.get(symbol);
-        const input = { "5m": rows?.["5m"], "15m": rows?.["15m"], "1h": rows?.["1h"], "4h": rows?.["4h"], "1d": rows?.["1d"] };
+        const activity = activityBySymbol[symbol];
+        const quoteVolume24h = Number(activity?.quoteVolume24h), average30dQuoteVolume = Number(activity?.average30dQuoteVolume), spreadPct = Number(activity?.spreadPct);
+        if (!activity || !Number.isFinite(quoteVolume24h) || quoteVolume24h < 5e6 || !Number.isFinite(average30dQuoteVolume) || average30dQuoteVolume < 1e6 || !Number.isFinite(spreadPct) || spreadPct > 0.15) {
+          diagnostics.push({ symbol, scannedAt: (/* @__PURE__ */ new Date()).toISOString(), status: "rejected-low-liquidity-or-unavailable-market-quality", setups: 0, missingCandleFrames: [], timeframeDiagnostics: {}, rejectionSummary: { LOW_OR_UNAVAILABLE_LIQUIDITY: 1 }, setupDetails: [], engineAvailability: { swing: { available: false, unavailable: ["LOW_OR_UNAVAILABLE_LIQUIDITY"] } } });
+          continue;
+        }
+        const input = { "4h": rows?.["4h"], "1d": rows?.["1d"] };
         const engineBtcBias = btcBiasState && biasMeasuredAt - btcBiasState.updatedAt <= 36 * 60 * 60 * 1e3 ? btcBiasState.activeBias : "UNAVAILABLE";
         let historyEvidence = [...ledger.closedTrades ?? []];
         try {
@@ -5200,33 +5288,35 @@ var EngineState = class {
           const stored = raw ? JSON.parse(raw) : [];
           if (Array.isArray(stored)) historyEvidence.push(...stored.filter((trade) => trade && trade.status === "CLOSED" && trade.model !== "BINGX VST"));
         } catch (error) {
-          console.warn("Historical Scalp/Swing confidence data unavailable", String(error).slice(0, 140));
+          console.warn("Historical Swing confidence data unavailable", String(error).slice(0, 140));
         }
-        const scalp = evaluateEngine("SCALP", symbol, input, engineBtcBias, historyEvidence);
-        const swing = evaluateEngine("SWING", symbol, input, engineBtcBias, historyEvidence);
-        const candidates = [...scalp.setups, ...swing.setups];
+        const swing4h = evaluateEngine("SWING", symbol, input, engineBtcBias, historyEvidence, "4h", btcWeeklyBias, btcDailyBias, dominanceContext);
+        const swing1d = evaluateEngine("SWING", symbol, input, engineBtcBias, historyEvidence, "1d", btcWeeklyBias, btcDailyBias, dominanceContext);
+        const swing = { setups: [...swing4h.setups, ...swing1d.setups], unavailable: [...new Set([...swing4h.unavailable, ...swing1d.unavailable])] };
+        const candidates = swing.setups;
         generatedSetups.push(...candidates);
-        const missingCandleFrames = [.../* @__PURE__ */ new Set([...scalp.unavailable, ...swing.unavailable])];
+        const missingCandleFrames = swing.unavailable;
         const timeframeDiagnostics = {};
         const rejectionSummary = {};
-        for (const result of [scalp, swing]) for (const setupId of result.engine === "SCALP" ? ["S01_SWEEP_MSS_FVG", "S02_BREAKER_RETEST", "S03_BOS_DISPLACEMENT", "S04_RANGE_DEVIATION", "S05_FAILED_BREAKOUT", "S06_OB_REACTION"] : ["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W06_CRT", "W07_OTE", "W08_BOS_CONTINUATION"]) for (const side of ["LONG", "SHORT"]) {
+        const setupIds = ["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W06_CRT", "W07_OTE", "W08_BOS_CONTINUATION"];
+        for (const result of [swing4h, swing1d]) for (const setupId of setupIds) for (const side of ["LONG", "SHORT"]) {
           const key = setupId + ":" + side, hasSetup = candidates.some((setup) => setup.model === setupId && setup.side === side);
-          if (hasSetup) timeframeDiagnostics[key] = { setups: 1 };
+          if (hasSetup) timeframeDiagnostics[key] = { setups: (timeframeDiagnostics[key]?.setups ?? 0) + 1 };
           else { const reason = result.unavailable.length ? "INSUFFICIENT_CANDLE_HISTORY" : "STRUCTURAL_PATTERN_NOT_CONFIRMED"; rejectionSummary[reason] = (rejectionSummary[reason] ?? 0) + 1; }
         }
         diagnostics.push({
           symbol,
           scannedAt: (/* @__PURE__ */ new Date()).toISOString(),
-          status: scalp.unavailable.length && swing.unavailable.length ? "insufficient-candle-history" : candidates.length ? "setup-candidate" : missingCandleFrames.length ? "partial-candle-history" : "fresh-no-setup",
+          status: swing4h.unavailable.length && swing1d.unavailable.length ? "insufficient-candle-history" : candidates.length ? "setup-candidate" : missingCandleFrames.length ? "partial-candle-history" : "fresh-no-setup",
           setups: candidates.length,
           timeframeDiagnostics,
           rejectionSummary,
           setupDetails: candidates.map((setup) => ({ model: setup.model, tradeStyle: setup.tradeStyle, entryTimeframe: setup.entryTimeframe, setupTimeframe: setup.setupTimeframe, side: setup.side, score: setup.score, status: setup.status, reason: setup.reason, candleTime: setup.candleTime, entry: setup.entry, stopLoss: setup.stopLoss, takeProfit: setup.takeProfit, tp1: setup.tp1, tp2: setup.tp2, tp3: setup.tp3, confidence: setup.confidence, confidenceStatus: setup.confidenceStatus, confidenceSampleSize: setup.confidenceSampleSize, riskReward: setup.riskReward })),
           missingCandleFrames,
           engineAvailability: {
-            scalp: { available: scalp.unavailable.length === 0, unavailable: scalp.unavailable },
-            swing: { available: swing.unavailable.length === 0, unavailable: swing.unavailable }
-          },
+            swing: { available: swing.unavailable.length === 0, unavailable: swing.unavailable },
+            setupTimeframes: { "4h": { available: swing4h.unavailable.length === 0, unavailable: swing4h.unavailable }, "1d": { available: swing1d.unavailable.length === 0, unavailable: swing1d.unavailable } }
+          }
         });
       }
       ledger.activitySnapshots = activitySnapshots;
@@ -5263,7 +5353,7 @@ var EngineState = class {
       if (!demoConfigured) for (const position of ledger.positions.filter((p) => p.status === "OPEN")) activeEngineKeys.add(engineKey(position));
       const executedKeySet = new Set(demoExecutedKeys);
       if (!demoConfigured) for (const trade of ledger.closedTrades ?? []) if (trade.id || trade.positionId) executedKeySet.add(String(trade.positionId ?? trade.id));
-      const maximumOpen = Math.min(20, Math.max(0, Number(ledger.maxOpenPositions ?? 20)));
+      const maximumOpen = Math.min(10, Math.max(0, Number(ledger.maxOpenPositions ?? 10)));
       const queueNow = Date.now();
       const previousEntryQueueRaw = await this.readPaperState(demoConfigured ? "bingx-vst-entry-queue-v1" : "internal-paper-entry-queue-v1");
       let previousEntryQueue = [];
@@ -5276,7 +5366,7 @@ var EngineState = class {
       const activeDirectionalModels = ACTIVE_VST_STRATEGY_MODELS;
       const queueByEngineKey = /* @__PURE__ */ new Map();
       for (const item of previousEntryQueue) {
-        if (!item?.setup || !item.setupKey || !activeDirectionalModels.has(item.setup.model) || setupIsExpired(item.setup, queueNow)) continue;
+        if (!item?.setup || !item.setupKey || !activeDirectionalModels.has(item.setup.model) || !["4h", "1d"].includes(String(item.setup.setupTimeframe ?? "").toLowerCase()) || setupIsExpired(item.setup, queueNow)) continue;
         const key = engineKey(item.setup);
         const instanceKey = item.setupInstanceKey ?? setupInstanceKey(item.setup);
         if (executedKeySet.has(item.setupKey) || executedSetupInstances.has(instanceKey) || activeEngineKeys.has(key)) continue;
@@ -6438,6 +6528,32 @@ async function fetchGlobalDominanceSnapshot(env) {
   };
 }
 __name(fetchGlobalDominanceSnapshot, "fetchGlobalDominanceSnapshot");
+function deriveDominanceDirections(snapshot) {
+  const history = Array.isArray(snapshot?.history) ? snapshot.history.filter((x) => x && typeof x.date === "string") : [];
+  if (history.length < 8) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: snapshot?.btc ?? null, altDomPct: snapshot?.altcoin ?? null, usdtDomPct: snapshot?.usdt ?? null, measuredAt: snapshot?.measuredAt ?? null, available: false };
+  const latestPoint = history.at(-1), latestDate = Date.parse(latestPoint.date);
+  if (!Number.isFinite(latestDate) || Date.now() - latestDate > 2 * 864e5) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: null, altDomPct: null, usdtDomPct: null, measuredAt: snapshot?.measuredAt ?? null, available: false };
+  const cutoff = latestDate - 6 * 864e5;
+  const baseline = [...history].reverse().find((x) => Date.parse(x.date) <= cutoff) ?? history[Math.max(0, history.length - 8)];
+  const trend = (key) => {
+    const current = Number(latestPoint[key]), prior = Number(baseline?.[key]);
+    if (!Number.isFinite(current) || !Number.isFinite(prior)) return "UNAVAILABLE";
+    const delta = current - prior;
+    return delta >= 0.15 ? "BULLISH" : delta <= -0.15 ? "BEARISH" : "NEUTRAL";
+  };
+  return {
+    btcDomDirection: trend("btcDomPct"),
+    altDomDirection: trend("altDomPct"),
+    usdtDomDirection: trend("usdtDomPct"),
+    btcDomPct: snapshot?.btc ?? latestPoint.btcDomPct ?? null,
+    altDomPct: snapshot?.altcoin ?? latestPoint.altDomPct ?? null,
+    usdtDomPct: snapshot?.usdt ?? latestPoint.usdtDomPct ?? null,
+    measuredAt: snapshot?.measuredAt ?? null,
+    available: true
+  };
+}
+__name(deriveDominanceDirections, "deriveDominanceDirections");
+
 async function collectDailyDominanceHistory(env) {
   const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
   try {
@@ -7067,7 +7183,7 @@ async function loadBingXDemoStatus(env) {
       activityRanking: null,
       activityRankingBySymbol: {},
       marketContextSnapshot: null,
-      maxOpenPositions: Math.min(20, Math.max(0, Number(ledger?.maxOpenPositions ?? 20))),
+      maxOpenPositions: Math.min(10, Math.max(0, Number(ledger?.maxOpenPositions ?? 10))),
       runnerEnabled: paperStatusResult.status ? paperStatusResult.status.runnerEnabled === true : engine?.runnerEnabled === true,
       automationStopped: AUTOMATION_STOP,
       manualResumeRequired: AUTOMATION_STOP,
@@ -7680,7 +7796,7 @@ var index_default = {
           code: d.code,
           stage: d.stage
         })) : [],
-        maxOpenPositions: Math.min(20, Math.max(0, Number(data.maxOpenPositions ?? 20))),
+        maxOpenPositions: Math.min(10, Math.max(0, Number(data.maxOpenPositions ?? 10))),
         error: data.demoConnected === true ? void 0 : "BingX VST demo account authentication or balance check failed."
       }, { status: status.ok ? 200 : 503, headers });
     }
@@ -7820,7 +7936,7 @@ var index_default = {
         demoTradingEnabled: isBingXDemoConfigured(env),
         liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true, livePositionManagementIntegrated: true, liveRunnerIntegrated: true, explicitActivationRequired: true,
         runtimeChecks, activation: { active: activation.active === true, activatedAt: activation.activatedAt ?? null },
-        maxOpenPositions: 20, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
+        maxOpenPositions: 10, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
         normalLeverage: { min: 20, max: 50 }, reducedRiskLeverage: { min: 20, max: 50 },
         blockers, reason: blockers.length ? "Live execution is integrated but blocked until the listed prerequisites and account checks pass." : "Live execution is configured and remains disabled until the separate activation flag and fresh user confirmation are supplied."
       }, { headers: { ...headers, "cache-control": "no-store" } });

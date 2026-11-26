@@ -7,43 +7,32 @@ import { buildDashboardSnapshot, buildLegacyDashboardPayload, createDashboardAct
 
 test("dashboard exposes the exact nine required tabs in order without duplicate Positions", () => {
   assert.deepEqual(DASHBOARD_TABS, [
-    "Market Overview","Açık İşlemler","Scalp Scanner","Swing Scanner",
+    "Market Overview","Açık İşlemler","Swing Scanner","Positions",
     "Statistics","Candidates (İşlem Adayları)","Trade History","Diagnostics","Grafik"
   ]);
 });
 
-test("dashboard separates pending setups, qualified candidates and engine scanners", () => {
-  const snapshot = buildDashboardSnapshot({
-    positions:[{id:"p1",symbol:"BTC-USDT",side:"LONG",state:"OPEN",engine:"scalp",entry:100,tp:110,sl:95}],
-    scalpCandidates:[
-      {id:"wait1",symbol:"ETH-USDT",direction:"BULLISH",engine:"scalp",setupId:"S02_BREAKER_RETEST",status:"WAIT",score:78},
-      {id:"ready1",symbol:"SOL-USDT",direction:"BEARISH",engine:"scalp",setupId:"S03_BOS_DISPLACEMENT",status:"READY",score:82}
-    ],
-    swingCandidates:[{id:"wait2",symbol:"BNB-USDT",direction:"BEARISH",engine:"swing",setupId:"W03_SWEEP_CHOCH",status:"WAIT",score:65}],
-    diagnostics:{modelChecks:[{model:"S01",setupCount:0},{model:"S02",setupCount:2}]}
-  });
+test("dashboard publishes only current 4H/1D Swing candidates and preserves open positions", () => {
+  const snapshot=buildDashboardSnapshot({positions:[{id:"p1",symbol:"BTC-USDT",side:"LONG",state:"OPEN",engine:"scalp",entry:100,tp:110,sl:95}],swingCandidates:[
+   {id:"wait1",symbol:"ETH-USDT",direction:"BULLISH",engine:"swing",setupId:"W04_BREAKER_RETEST",setupTimeframe:"4h",status:"WAIT",score:78},
+   {id:"ready1",symbol:"SOL-USDT",direction:"BEARISH",engine:"swing",setupId:"W03_SWEEP_CHOCH",setupTimeframe:"1d",status:"READY",score:82},
+   {id:"old",symbol:"BNB-USDT",direction:"BEARISH",engine:"swing",setupId:"W03_SWEEP_CHOCH",setupTimeframe:"1h",status:"READY",score:90},
+   {id:"scalp",symbol:"ADA-USDT",direction:"LONG",engine:"scalp",setupId:"S01",setupTimeframe:"5m",status:"READY",score:99}
+  ]});
   assert.equal(snapshot.openPositions.length,1);
-  assert.equal(snapshot.scanner.scalp.length,2);
-  assert.equal(snapshot.scanner.swing.length,1);
-  assert.deepEqual(snapshot.pendingSetups.map(x=>x.id),["wait1","wait2"]);
+  assert.deepEqual(snapshot.scanner.swing.map(x=>x.id),["wait1","ready1"]);
+  assert.deepEqual(snapshot.pendingSetups.map(x=>x.id),["wait1"]);
   assert.deepEqual(snapshot.candidates.map(x=>x.id),["ready1"]);
-  assert.deepEqual(snapshot.diagnostics.modelChecks.map(x=>x.model),["S02"]);
+  assert.equal(snapshot.counters.swingCandidates,2);
 });
-
-test("legacy candidate conversion uses concise Turkish setup reasons", () => {
-  const candidate=toLegacyDashboardCandidate({id:"x",symbol:"BTC-USDT",direction:"BEARISH",engine:"scalp",setupId:"S02_BREAKER_RETEST",score:80,status:"READY",entry:100,target:90,stop:105});
-  assert.equal(candidate.side,"SHORT");
-  assert.equal(candidate.status,"READY");
-  assert.match(candidate.reasonTr,/emir bloğu/i);
-  assert.doesNotMatch(candidate.reasonTr,/STRUCTURAL PATTERN|HIGH_QUALITY|UNAVAILABLE/);
+test("legacy candidate conversion uses the new Swing setup reasons", () => {
+ const candidate=toLegacyDashboardCandidate({id:"x",symbol:"BTC-USDT",direction:"BEARISH",engine:"swing",setupId:"W04_BREAKER_RETEST",setupTimeframe:"4h",score:80,status:"READY",entry:100,target:90,stop:105});
+ assert.equal(candidate.side,"SHORT");assert.equal(candidate.status,"READY");assert.match(candidate.reasonTr,/breaker/i);
 });
-
-test("legacy dashboard payload export remains backwards compatible", () => {
-  const payload=buildLegacyDashboardPayload({scalpCandidates:[{id:"s",symbol:"BTC-USDT",direction:"BULLISH",engine:"scalp",setupId:"S01_SWEEP_MSS_FVG"}]});
-  assert.equal(payload.health.scalpCandidateCount,1);
-  assert.equal(payload.health.setups[0].side,"LONG");
+test("legacy dashboard payload no longer publishes Scalp candidates", () => {
+ const payload=buildLegacyDashboardPayload({swingCandidates:[{id:"w",symbol:"BTC-USDT",direction:"BULLISH",engine:"swing",setupId:"W01_HTF_OB_REVERSAL",setupTimeframe:"1d"}]});
+ assert.equal(payload.health.scalpCandidateCount,0);assert.equal(payload.health.swingCandidateCount,1);
 });
-
 test("position close action validates percentage and forwards user selection", async () => {
   let received;
   const actions=createDashboardActions({closePosition:async x=>(received=x,{ok:true}),openChart:()=>true});

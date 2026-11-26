@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluateEntryEligibility } from "../src/risk-controller.js";
-const candidate={id:"c1",engine:"scalp",symbol:"BTC-USDT",direction:"BULLISH",state:"QUALIFIED",score:85,entry:100,stop:99,stopLoss:99,target:103.5,takeProfit:103.5,entryConfirmation:{status:"CONFIRMED"},hardFilters:{validStop:true,minimumRR:true,direction:true,candle:true}};
+const candidate={id:"c1",engine:"swing",setupTimeframe:"4h",symbol:"BTC-USDT",direction:"BULLISH",state:"QUALIFIED",score:85,entry:100,stop:99,stopLoss:99,target:103.5,takeProfit:103.5,entryConfirmation:{status:"CONFIRMED"},hardFilters:{validStop:true,minimumRR:true,direction:true,candle:true}};
 const deps={currentEquity:75000,openPositions:[],portfolioRiskCheck:()=>true,marketLiquidityCheck:()=>true,liquidationCheck:{available:true,distancePct:10,maxSafeLeverage:40}};
 test("global risk gate approves only after retest, liquidity, portfolio and liquidation checks",()=>{
  const r=evaluateEntryEligibility(candidate,deps);
@@ -11,11 +11,11 @@ test("global risk gate fails closed when liquidity or liquidation data is unavai
  const r=evaluateEntryEligibility(candidate,{...deps,marketLiquidityCheck:undefined,liquidationCheck:null});
  assert.equal(r.eligible,false);assert.ok(r.reasons.includes("MARKET_LIQUIDITY_UNAVAILABLE"));assert.ok(r.reasons.includes("LIQUIDATION_DISTANCE_UNAVAILABLE"));
 });
-test("global risk gate prevents same-engine duplicates but allows independent engine position",()=>{
- const open=[{engine:"swing",symbol:"BTC-USDT",status:"OPEN"}];
- const r=evaluateEntryEligibility(candidate,{...deps,openPositions:open});
+test("global risk gate prevents duplicate Swing symbol positions",()=>{
+ const r=evaluateEntryEligibility(candidate,deps);
  assert.equal(r.eligible,true);
- const duplicate=evaluateEntryEligibility(candidate,{...deps,openPositions:[{engine:"scalp",symbol:"BTC-USDT",status:"OPEN"}]});
+ const duplicate=evaluateEntryEligibility(candidate,{...deps,openPositions:[{engine:"swing",symbol:"BTC-USDT",status:"OPEN"}]});
+ assert.equal(duplicate.eligible,false);
  assert.ok(duplicate.reasons.includes("DUPLICATE_ENGINE_SYMBOL_POSITION"));
 });
 test("global risk gate enforces ten open positions and reduced-risk sizing",()=>{

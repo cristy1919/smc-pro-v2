@@ -26,12 +26,12 @@ export async function runLiveSetupQueue({ env, setups = [], client, store, adapt
       const status = String(setup?.status ?? "").toUpperCase();
       const confirmed = setup?.entryConfirmed === true ||
         (Array.isArray(setup?.confirmations) && setup.confirmations.includes("CLOSED_CANDLE_CONFIRMATION"));
-      if (!["scalp", "swing"].includes(engine) || !["LONG", "SHORT"].includes(side) ||
+      if (engine !== "swing" || !["4h", "1d"].includes(String(setup?.setupTimeframe ?? "").toLowerCase()) || !["LONG", "SHORT"].includes(side) ||
           status !== "READY" || !confirmed) continue;
 
       const symbol = String(setup.symbol ?? "");
       const candleTime = Number(setup.setupCandleTime ?? setup.candleTime);
-      const intervalMs = engine === "scalp" ? 5 * 60 * 1000 : 60 * 60 * 1000;
+      const intervalMs = String(setup.setupTimeframe).toLowerCase() === "1d" ? 86400000 : 14400000;
       if (!positive(candleTime) || candleTime > clock() + 60000 || clock() - candleTime > intervalMs * 2) {
         results.push({ setupId: scannerSetupIdentity(setup), action: "WAIT_STALE_SETUP" });
         continue;
@@ -55,8 +55,8 @@ export async function runLiveSetupQueue({ env, setups = [], client, store, adapt
       const stopLoss = Number(setup.stopLoss);
       const takeProfit = Number(setup.takeProfit ?? setup.tp3 ?? setup.tp2 ?? setup.tp1);
       const unitRiskFraction = (Math.abs(markPrice - stopLoss) + markPrice * 0.0007 + stopLoss * 0.0007) / markPrice;
-      const minLeverage = riskMultiple === 0.5 ? 5 : 20;
-      const maxLeverage = riskMultiple === 0.5 ? 10 : 50;
+      const minLeverage = 20;
+      const maxLeverage = 50;
       if (!positive(unitRiskFraction) || unitRiskFraction > 1 / minLeverage * 0.8) {
         results.push({ setupId: scannerSetupIdentity(setup), action: "REJECT_LIQUIDATION_BUFFER" });
         continue;

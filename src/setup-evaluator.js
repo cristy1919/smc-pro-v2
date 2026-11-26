@@ -1,179 +1,111 @@
 import { detectPivots, classifyStructure, detectStructureEvents } from "./market-structure.js";
 import { detectFairValueGaps, detectLiquidityPools, detectLiquiditySweeps } from "./zones.js";
-import { detectOrderBlocks, detectBreakers, detectSupplyDemand, detectRollingRanges, detectRangeDeviations, detectOTE as detectOTEZones, detectCRT, detectMitigations } from "./advanced-zones.js";
+import { detectOrderBlocks, detectBreakers, detectSupplyDemand, detectRollingRanges, detectRangeDeviations, detectOTE, detectCRT, detectMitigations } from "./advanced-zones.js";
 import { validateCandles } from "./market-data.js";
+import { scoreSetup } from "./scoring.js";
+import { MIN_QUOTE_VOLUME_24H_USDT, MIN_RELATIVE_VOLUME, MAX_SPREAD_PCT } from "./config.js";
 
-const WEIGHTS = {
-  scalp: { htf: 15, liquidity: 20, structure: 20, zone: 15, entry: 20, volume: 10 },
-  swing: { htf: 20, liquidity: 15, structure: 20, zone: 20, entry: 15, volume: 10 }
-};
-const SETUP_IDS = {
-  scalp: { sweep: "S01_SWEEP_MSS_FVG", breaker: "S02_BREAKER_RETEST", bos: "S03_BOS_DISPLACEMENT", range: "S04_RANGE_DEVIATION", failed: "S05_FAILED_BREAKOUT", ob: "S06_OB_REACTION" },
-  swing: { ob: "W01_HTF_OB_REVERSAL", supply: "W02_SUPPLY_DEMAND_REVERSAL", sweep: "W03_SWEEP_CHOCH", breaker: "W04_BREAKER_RETEST", range: "W05_RANGE_DEVIATION", crt: "W06_CRT", ote: "W07_OTE", bos: "W08_BOS_CONTINUATION" }
-};
-
-function latest(list, predicate = () => true) {
-  return [...list].filter(predicate).sort((a, b) => b.index - a.index)[0] ?? null;
-}
-function directionOf(event) { return event?.direction ?? "NEUTRAL"; }
-function candleDirection(c) { return c.close > c.open ? "BULLISH" : c.close < c.open ? "BEARISH" : "NEUTRAL"; }
-function recentExtreme(candles, direction, lookback = 12) {
-  const rows = candles.slice(-lookback);
-  return direction === "BULLISH" ? Math.min(...rows.map(x => x.low)) : Math.max(...rows.map(x => x.high));
+const SETUP_IDS = { ob:"W01_HTF_OB_REVERSAL", supply:"W02_SUPPLY_DEMAND_REVERSAL", sweep:"W03_SWEEP_CHOCH", breaker:"W04_BREAKER_RETEST", range:"W05_RANGE_DEVIATION", crt:"W06_CRT", ote:"W07_OTE", bos:"W08_BOS_CONTINUATION" };
+const latest = (rows, predicate = () => true) => [...rows].filter(predicate).sort((a,b)=>b.index-a.index)[0] ?? null;
+const dir = x => x?.direction ?? "NEUTRAL";
+const candleDir = c => c.close > c.open ? "BULLISH" : c.close < c.open ? "BEARISH" : "NEUTRAL";
+const opposite = d => d === "BULLISH" ? "BEARISH" : d === "BEARISH" ? "BULLISH" : "NEUTRAL";
+function recentExtreme(candles, direction, lookback=12) {
+ const rows=candles.slice(-lookback);
+ return direction==="BULLISH"?Math.min(...rows.map(x=>x.low)):Math.max(...rows.map(x=>x.high));
 }
 function candleQuality(c) {
-  const range = c.high - c.low;
-  if (range <= 0) return 0;
-  const body = Math.abs(c.close - c.open) / range;
-  const closePos = (c.close - c.low) / range;
-  return Math.round(Math.min(100, body * 65 + (c.close > c.open ? closePos : 1 - closePos) * 35));
+ const range=c.high-c.low;if(range<=0)return 0;
+ const body=Math.abs(c.close-c.open)/range,loc=(c.close-c.low)/range;
+ return Math.round(Math.min(100,body*65+(c.close>c.open?loc:1-loc)*35));
 }
 function structure(candles) {
-  const pivots = classifyStructure(detectPivots(candles));
-  const events = detectStructureEvents(candles, pivots);
-  return { pivots, events, lastEvent: events.at(-1) ?? null };
+ const pivots=classifyStructure(detectPivots(candles)),events=detectStructureEvents(candles,pivots);
+ return {pivots,events,lastEvent:events.at(-1)??null};
 }
 function features(candles) {
-  const s = structure(candles);
-  const pools = detectLiquidityPools(s.pivots);
-  const sweeps = detectLiquiditySweeps(candles, pools);
-  const fvgs = detectFairValueGaps(candles).map(z => {
-    const direction = z.type.startsWith("BULLISH") ? "BULLISH" : "BEARISH";
-    let mitigatedAt = null, filledAt = null;
-    for (let i = z.formedAt + 1; i < candles.length; i++) {
-      const candle = candles[i];
-      const touched = direction === "BULLISH" ? candle.low <= z.high : candle.high >= z.low;
-      if (!touched) continue;
-      mitigatedAt ??= i;
-      const filled = direction === "BULLISH" ? candle.low <= z.low : candle.high >= z.high;
-      if (filled) { filledAt = i; break; }
-    }
-    return { ...z, direction, mitigatedAt, filledAt, status: filledAt !== null ? "FILLED" : mitigatedAt !== null ? "MITIGATED" : "ACTIVE" };
-  });
-  const rawObs = detectOrderBlocks(candles, { pivots: s.pivots, events: s.events });
-  const obs = detectMitigations(candles, rawObs);
-  const breakers = detectBreakers(candles, rawObs);
-  const supplyDemand = detectSupplyDemand(candles, { pivots: s.pivots });
-  const ranges = detectRollingRanges(candles);
-  const deviations = detectRangeDeviations(candles, ranges);
-  const otes = detectOTEZones(candles, s.pivots);
-  const crt = detectCRT(candles);
-  return { ...s, pools, sweeps, fvgs, obs, breakers, supplyDemand, ranges, deviations, otes, crt };
+ const s=structure(candles),pools=detectLiquidityPools(s.pivots),sweeps=detectLiquiditySweeps(candles,pools);
+ const fvgs=detectFairValueGaps(candles).map(z=>{
+  const bullish=z.type==="BULLISH_FVG";let mitigatedAt=null,filledAt=null;
+  for(let i=z.formedAt+1;i<candles.length;i++){const c=candles[i],touched=bullish?c.low<=z.high:c.high>=z.low;if(!touched)continue;mitigatedAt??=i;const filled=bullish?c.low<=z.low:c.high>=z.high;if(filled){filledAt=i;break;}}
+  return {...z,direction:bullish?"BULLISH":"BEARISH",mitigatedAt,filledAt,status:filledAt!==null?"FILLED":mitigatedAt!==null?"MITIGATED":"ACTIVE"};
+ });
+ const obs=detectMitigations(candles,detectOrderBlocks(candles,{pivots:s.pivots,events:s.events}));
+ const breakers=detectBreakers(candles,detectOrderBlocks(candles,{pivots:s.pivots,events:s.events}));
+ const supplyDemand=detectSupplyDemand(candles,{pivots:s.pivots}),ranges=detectRollingRanges(candles),deviations=detectRangeDeviations(candles,ranges),otes=detectOTE(candles,s.pivots),crt=detectCRT(candles);
+ return {...s,pools,sweeps,fvgs,obs,breakers,supplyDemand,ranges,deviations,otes,crt};
 }
-function zoneAtPrice(zones, price, direction) {
-  return zones.find(z => (z.direction ?? (String(z.type).startsWith("BULLISH") ? "BULLISH" : String(z.type).startsWith("BEARISH") ? "BEARISH" : null)) === direction && price >= z.low && price <= z.high) ?? null;
+function inZone(zones,price,direction) {
+ return zones.find(z=>z.direction===direction&&(z.confirmedAt==null||Number.isFinite(z.confirmedAt))&&price>=z.low&&price<=z.high)??null;
 }
-function makeCandidate({ engine, symbol, direction, setupId, entryCandles, entryTimeframe, htf, middle, entryFeatures, evidence, zone, volumeData }) {
-  const last = entryCandles.at(-1);
-  const entry = last.close;
-  const stop = recentExtreme(entryCandles.slice(0, -1), direction, 12);
-  const risk = Math.abs(entry - stop);
-  if (!Number.isFinite(entry) || !Number.isFinite(stop) || risk <= 0 ||
-      (direction === "BULLISH" && stop >= entry) || (direction === "BEARISH" && stop <= entry)) return null;
-  const target = direction === "BULLISH" ? entry + risk * 3.5 : entry - risk * 3.5;
-  const rr = Math.abs(target - entry) / risk;
-  const htfDirection = directionOf(htf.lastEvent);
-  const midDirection = directionOf(middle.lastEvent);
-  const htfScore = htfDirection === direction ? 100 : htfDirection === "NEUTRAL" ? 50 : 20;
-  const liquidityScore = evidence.some(x => /SWEEP|RANGE|CRT/.test(x)) ? 100 : 35;
-  const structureScore = entryFeatures.lastEvent?.direction === direction ? (entryFeatures.lastEvent.displacement ? 100 : 75) : midDirection === direction ? 65 : 35;
-  const zoneScore = zone ? 100 : 45;
-  const entryScore = candleDirection(last) === direction ? candleQuality(last) : 20;
-  const volumeAvailable = Number.isFinite(volumeData?.relativeVolume) && volumeData.relativeVolume >= 0;
-  const volumeScore = volumeAvailable ? Math.max(0, Math.min(100, 50 + (volumeData.relativeVolume - 1) * 35)) : null;
-  const weights = WEIGHTS[engine];
-  const factors = { htf: htfScore, liquidity: liquidityScore, structure: structureScore, zone: zoneScore, entry: entryScore, volume: volumeScore };
-  const availableWeight = Object.entries(weights).reduce((sum, [key, weight]) => sum + (factors[key] === null ? 0 : weight), 0);
-  const score = Math.round(Object.entries(weights).reduce((sum, [key, weight]) => sum + (factors[key] === null ? 0 : factors[key] * weight), 0) / availableWeight);
-  const hardFilters = { validStop: risk > 0, minimumRR: rr >= 1, direction: direction !== "NEUTRAL", candle: last.closed === true };
-  const rejected = Object.values(hardFilters).some(x => !x);
-  const band = rejected ? "REJECTED" : score < 60 ? "RED" : score < 70 ? "WAIT" : score < 80 ? "WATCH" : score < 90 ? "QUALIFIED" : "HIGH_QUALITY";
-  const reasons = [
-    setupId, `HTF_${htfDirection}`, `STRUCTURE_${midDirection}`,
-    ...evidence, zone ? `ZONE_${zone.type}` : "ZONE_NOT_CONFIRMED",
-    volumeAvailable ? "RELATIVE_VOLUME_AVAILABLE" : "RELATIVE_VOLUME_UNAVAILABLE"
-  ];
-  return {
-    id: [engine, symbol, setupId, last.timestamp].join(":"),
-    engine, symbol, direction, setupId, state: rejected ? "REJECTED" : score >= 80 ? "QUALIFIED" : "WATCH",
-    timeframe: entryTimeframe,
-    entry, stop, target, stopLoss: stop, takeProfit: target, zoneBounds: zone ? { low: zone.low, high: zone.high, type: zone.type } : null, rewardRisk: Number(rr.toFixed(2)), score, band,
-    entryConfirmation: { status: "PENDING", maxWaitBars: 6, method: zone ? "ZONE_RETEST_CLOSE" : "CLOSE_CONFIRMATION" },
-    confidence: "INSUFFICIENT_DATA", factors, factorCoveragePct: Math.round(availableWeight),
-    hardFilters, evidence: reasons, createdAt: last.timestamp,
-    dataStatus: { relativeVolume: volumeAvailable ? "AVAILABLE" : "UNAVAILABLE" }
-  };
+function contextDirection(x) {
+ const v=String(x?.direction??x?.bias??x??"").toUpperCase();
+ return ["BULLISH","LONG","UP"].includes(v)?"BULLISH":["BEARISH","SHORT","DOWN"].includes(v)?"BEARISH":"NEUTRAL";
 }
-function validateInput(input, engine) {
-  if (!input || typeof input.symbol !== "string" || !input.symbol.trim()) throw new TypeError("symbol is required");
-  const required = engine === "scalp" ? ["1h", "15m", "5m"] : ["1d", "4h", "1h", "15m"];
-  for (const tf of required) {
-    if (!Array.isArray(input.timeframes?.[tf])) throw new Error("MISSING_TIMEFRAME_" + tf);
-    validateCandles(input.timeframes[tf]);
-    if (input.timeframes[tf].length < 25) throw new Error(`INSUFFICIENT_CANDLES_${tf}`);
-  }
-  return required.map(tf => input.timeframes[tf]);
+function btcContextScore(direction, context) {
+ const weekly=contextDirection(context?.btc?.weekly),daily=contextDirection(context?.btc?.daily);
+ const known=[weekly,daily].filter(x=>x!=="NEUTRAL");
+ if(!known.length)return {score:null,weekly,daily,aligned:false,opposed:false};
+ const aligned=known.filter(x=>x===direction).length,opposed=known.some(x=>x!==direction);
+ return {score:Math.round(aligned/known.length*100),weekly,daily,aligned:known.length===2&&aligned===2,opposed};
 }
-function evaluate(input, engine) {
-  const validated = validateInput(input, engine);
-  const [higherCandles, middleCandles] = validated;
-  const entryTimeframe = engine === "scalp" ? "5m" : (input.entryTimeframe ?? "15m");
-  if (engine === "swing" && !["15m", "1h"].includes(entryTimeframe)) throw new Error("UNSUPPORTED_SWING_ENTRY_TIMEFRAME");
-  const confirmationCandles = engine === "swing" && entryTimeframe === "15m" ? validated[2] : null;
-  const entryCandles = input.timeframes[entryTimeframe];
-  validateCandles(entryCandles);
-  if (entryCandles.length < 25) throw new Error("INSUFFICIENT_ENTRY_TIMEFRAME_" + entryTimeframe);
-  const htf = features(higherCandles), middle = features(middleCandles), entryF = features(entryCandles);
-  const confirmationF = confirmationCandles ? features(confirmationCandles) : null;
-  const price = entryCandles.at(-1).close;
-  const recentSweep = latest(entryF.sweeps, x => x.index >= entryCandles.length - 4);
-  const recentDeviation = latest(entryF.deviations, x => x.index >= entryCandles.length - 3);
-  const recentCrt = latest(entryF.crt, x => x.index === entryCandles.length - 1);
-  const triggerEvent = latest(entryF.events, x => x.index >= entryCandles.length - 4);
-  const direction = recentSweep?.direction ?? recentDeviation?.direction ?? recentCrt?.direction ?? triggerEvent?.direction ?? candleDirection(entryCandles.at(-1));
-  if (direction === "NEUTRAL") return [];
-  if (engine === "swing") {
-    const confirmationEvent = confirmationF ? latest(confirmationF.events, x => x.index >= confirmationCandles.length - 4) : null;
-    if (confirmationF && (!confirmationEvent || confirmationEvent.direction !== direction)) return [];
-  }
-  const candidates = [];
-  const sweep = recentSweep?.direction === direction ? recentSweep : null;
-  const displacementEvent = latest(entryF.events, x => x.direction === direction && x.displacement && x.index >= entryCandles.length - 4);
-  const fvg = zoneAtPrice(entryF.fvgs.filter(x => x.status !== "FILLED"), price, direction);
-  const breaker = entryF.breakers.find(x => x.direction === direction && price >= x.low && price <= x.high);
-  const ob = entryF.obs.find(x => x.direction === direction && x.status !== "INVALIDATED" && price >= x.low && price <= x.high);
-  const deviation = recentDeviation?.direction === direction ? recentDeviation : null;
-  const crt = recentCrt?.direction === direction ? recentCrt : null;
-  const midOb = middle.obs.find(x => x.direction === direction && x.status === "ACTIVE" && price >= x.low && price <= x.high);
-  const midSupplyDemand = middle.supplyDemand.find(x => (direction === "BULLISH" ? x.type === "DEMAND" : x.type === "SUPPLY") && price >= x.low && price <= x.high);
-  const ote = middle.otes.find(x => x.direction === direction && price >= x.low && price <= x.high);
-  const inOte = Boolean(ote);
-  const add = (key, evidence, zone = null) => {
-    const item = makeCandidate({ engine, symbol: input.symbol, direction, setupId: SETUP_IDS[engine][key], entryCandles, entryTimeframe, htf, middle, entryFeatures: entryF, evidence, zone, volumeData: input.volumeData });
-    if (item) candidates.push(item);
-  };
-  if (sweep && displacementEvent && triggerEvent?.direction === direction && triggerEvent?.type === "CHoCH" && triggerEvent?.mss === true && fvg) add("sweep", ["LIQUIDITY_SWEEP", "DISPLACEMENT_MSS", "FVG_RETEST"], fvg);
-  if (breaker) add("breaker", ["BREAKER_RETEST"], breaker);
-  if (displacementEvent && triggerEvent?.direction === direction && triggerEvent?.type === "BOS" && triggerEvent?.displacement === true) add("bos", ["BOS_CLOSE", "DISPLACEMENT"]);
-  if (deviation) {
-    const candleRange = entryCandles.at(-1).high - entryCandles.at(-1).low;
-    const rangeZone = { low: deviation.level - candleRange * 0.25, high: deviation.level + candleRange * 0.25, type: "RANGE_REENTRY" };
-    add("range", ["RANGE_DEVIATION_REENTRY"], rangeZone);
-  }
-  if (engine === "scalp") {
-    if (sweep && triggerEvent?.direction === direction && triggerEvent.type === "CHoCH" && triggerEvent.mss === true) add("failed", ["FAILED_BREAKOUT", "SWEEP", "CHOCH"]);
-    if (ob) add("ob", ["OB_REACTION"], ob);
-  } else {
-    if (midOb) add("ob", ["HTF_OB_REVERSAL"], midOb);
-    if (midSupplyDemand) add("supply", ["SUPPLY_DEMAND_REACTION"], midSupplyDemand);
-    if (sweep && triggerEvent?.direction === direction && triggerEvent.type === "CHoCH" && triggerEvent.mss === true) add("sweep", ["LIQUIDITY_SWEEP", "CHOCH"]);
-    if (crt) add("crt", ["CRT_SWEEP_REENTRY"]);
-    if (inOte) add("ote", ["OTE_RETRACE"], ote);
-    if (displacementEvent && triggerEvent?.direction === direction && triggerEvent.type === "BOS" && triggerEvent.displacement === true) add("bos", ["BOS_CONTINUATION", "DISPLACEMENT"]);
-  }
-  const unique = new Map();
-  for (const item of candidates) if (!unique.has(item.setupId)) unique.set(item.setupId, item);
-  return [...unique.values()].sort((a, b) => b.score - a.score);
+function dominanceScore(direction, context) {
+ const d=context?.dominance??{},btc=contextDirection(d.btc),alt=contextDirection(d.altcoin),usdt=contextDirection(d.usdt);
+ if([btc,alt,usdt].includes("NEUTRAL"))return {score:null,btc,altcoin:alt,usdt};
+ const expected=direction==="BULLISH"?{btc:"BEARISH",altcoin:"BULLISH",usdt:"BEARISH"}:{btc:"BULLISH",altcoin:"BEARISH",usdt:"BULLISH"};
+ const hits=Number(btc===expected.btc)+Number(alt===expected.altcoin)+Number(usdt===expected.usdt);
+ return {score:Math.round(hits/3*100),btc,altcoin:alt,usdt};
 }
-export function evaluateScalp(input) { return evaluate(input, "scalp"); }
-export function evaluateSwing(input) { return evaluate(input, "swing"); }
+function marketIsLiquid(input) {
+ const q=Number(input.marketQuality?.quoteVolume24h),spread=Number(input.marketQuality?.spreadPct),rv=Number(input.volumeData?.relativeVolume);
+ return Number.isFinite(q)&&q>=MIN_QUOTE_VOLUME_24H_USDT&&Number.isFinite(spread)&&spread>=0&&spread<=MAX_SPREAD_PCT&&Number.isFinite(rv)&&rv>=MIN_RELATIVE_VOLUME;
+}
+function makeCandidate({symbol,direction,setupId,candles,timeframe,daily,fourHour,features:f,evidence,zone,input,btc,dominance,countertrend}) {
+ const last=candles.at(-1),entry=last.close,stop=recentExtreme(candles.slice(0,-1),direction),risk=Math.abs(entry-stop);
+ if(!Number.isFinite(entry)||!Number.isFinite(stop)||risk<=0||(direction==="BULLISH"&&stop>=entry)||(direction==="BEARISH"&&stop<=entry))return null;
+ const target=direction==="BULLISH"?entry+risk*3.5:entry-risk*3.5,rr=Math.abs(target-entry)/risk;
+ const event=latest(f.events),midEvent=latest(fourHour.events),dailyEvent=latest(daily.events);
+ const structureScore=event?.direction===direction?(event.displacement?100:75):midEvent?.direction===direction?65:35;
+ const zoneScore=zone?100:45,entryScore=candleDir(last)===direction?candleQuality(last):20;
+ const volumeScore=Math.max(0,Math.min(100,50+(input.volumeData.relativeVolume-1)*35));
+ const liquidityScore=evidence.some(x=>/SWEEP|RANGE|CRT/.test(x))?100:35;
+ const factors={btcContext:btc.score,dominance:dominance.score,liquidity:liquidityScore,structure:structureScore,zone:zoneScore,entry:entryScore,volume:volumeScore};
+ const hardFilters={validStop:true,rrAtLeastOne:rr>=1,minimumRR:rr>=1,liquid:marketIsLiquid(input),candlesValid:last.closed===true,directionConsistent:direction!=="NEUTRAL"};
+ const scored=scoreSetup("swing",factors,hardFilters);
+ const state=Object.values(hardFilters).every(Boolean)&&scored.score>=70?"QUALIFIED":"WATCH";
+ return {id:["swing",symbol,setupId,timeframe,last.timestamp].join(":"),engine:"swing",symbol,direction,setupId,state,timeframe,setupTimeframe:timeframe,entryTimeframe:timeframe,entry,stop,target,stopLoss:stop,takeProfit:target,zoneBounds:zone?{low:zone.low,high:zone.high,type:zone.type}:null,rewardRisk:Number(rr.toFixed(2)),score:scored.score,band:scored.band,confidence:"INSUFFICIENT_DATA",factors,factorCoveragePct:scored.factorCoveragePct,hardFilters,entryConfirmation:{status:"PENDING",maxWaitBars:3,method:zone?"ZONE_RETEST_CLOSE":"CLOSED_CANDLE_CONFIRMATION"},evidence:[setupId,...evidence,"BTC_WEEKLY_"+btc.weekly,"BTC_DAILY_"+btc.daily,"BTC_DOM_"+dominance.btc,"ALT_DOM_"+dominance.altcoin,"USDT_DOM_"+dominance.usdt,...(countertrend?["COUNTERTREND_EXTRA_CONFIRMATION"]:[])],createdAt:last.timestamp,dataStatus:{btcWeekly:btc.weekly==="NEUTRAL"?"UNAVAILABLE":"AVAILABLE",btcDaily:btc.daily==="NEUTRAL"?"UNAVAILABLE":"AVAILABLE",dominance:[dominance.btc,dominance.altcoin,dominance.usdt].every(x=>x!=="NEUTRAL")?"AVAILABLE":"UNAVAILABLE",relativeVolume:"AVAILABLE",quoteVolume24h:"AVAILABLE"},marketRegime:f.ranges.at(-1)?.regime??"UNCLASSIFIED",countertrend};
+}
+export function evaluateScalp() { throw new Error("SCALP_ENGINE_REMOVED"); }
+export function evaluateSwing(input) {
+ if(!input||typeof input.symbol!=="string"||!input.symbol.trim())throw new TypeError("symbol is required");
+ const setupTimeframe=input.setupTimeframe??"4h";
+ if(!["4h","1d"].includes(setupTimeframe))throw new Error("FORBIDDEN_SETUP_TIMEFRAME_"+setupTimeframe);
+ for(const tf of ["1d","4h"]){if(!Array.isArray(input.timeframes?.[tf]))throw new Error("MISSING_TIMEFRAME_"+tf);validateCandles(input.timeframes[tf]);if(input.timeframes[tf].length<30)throw new Error("INSUFFICIENT_CANDLES_"+tf);}
+ if(!marketIsLiquid(input))return [];
+ const daily=features(input.timeframes["1d"]),fourHour=features(input.timeframes["4h"]),candles=input.timeframes[setupTimeframe],f=features(candles),price=candles.at(-1).close;
+ const btc=btcContextScore("BULLISH",input.marketContext),btcBear=btcContextScore("BEARISH",input.marketContext);
+ const recentSweep=latest(f.sweeps,x=>x.index>=candles.length-3),deviation=latest(f.deviations,x=>x.index===candles.length-1&&x.regime==="RANGE"),crt=latest(f.crt,x=>x.index===candles.length-1),trigger=latest(f.events,x=>x.index>=candles.length-3);
+ const direction=recentSweep?.direction??deviation?.direction??crt?.direction??trigger?.direction??"NEUTRAL";
+ if(direction==="NEUTRAL")return [];
+ const btcScore=direction==="BULLISH"?btc:btcBear,dominance=dominanceScore(direction,input.marketContext);
+ const countertrend=btcScore.opposed===true;
+ const displacement=latest(f.events,x=>x.direction===direction&&x.displacement&&x.index>=candles.length-3);
+ const choch=latest(f.events,x=>x.direction===direction&&x.type==="CHoCH"&&x.mss===true&&x.index>=candles.length-3);
+ const sweep=recentSweep?.direction===direction?recentSweep:null;
+ const fvg=inZone(f.fvgs.filter(x=>x.status!=="FILLED"),price,direction);
+ const breaker=inZone(f.breakers,price,direction),ob=inZone(f.obs.filter(x=>x.status!=="INVALIDATED"),price,direction);
+ const sd=f.supplyDemand.find(x=>(direction==="BULLISH"?x.type==="DEMAND":x.type==="SUPPLY")&&price>=x.low&&price<=x.high)??null;
+ const ote=inZone(f.otes,price,direction),range=deviation?{low:deviation.level,high:deviation.level,type:"RANGE_REENTRY"}:null;
+ const strictCountertrend=Boolean(sweep&&displacement&&choch&&fvg&&trigger?.direction===direction);
+ if(countertrend&&!strictCountertrend)return [];
+ const candidates=[],add=(key,evidence,zone=null)=>{const c=makeCandidate({symbol:input.symbol,direction,setupId:SETUP_IDS[key],candles,timeframe:setupTimeframe,daily,fourHour,features:f,evidence,zone,input,btc:btcScore,dominance,countertrend});if(c)candidates.push(c);};
+ if(ob)add("ob",["HTF_ORDER_BLOCK_REACTION"],ob);
+ if(sd)add("supply",["SUPPLY_DEMAND_REACTION"],sd);
+ if(sweep&&choch&&displacement&&fvg)add("sweep",["LIQUIDITY_SWEEP","CHOCH","MSS_DISPLACEMENT","FVG_CONFIRMED"],fvg);
+ if(breaker)add("breaker",["BREAKER_INVALIDATION_AND_RETEST"],breaker);
+ if(deviation&&range)add("range",["CONFIRMED_RANGE","DEVIATION","CLOSE_REENTRY"],range);
+ if(crt)add("crt",["CRT_SWEEP_RECLAIM"]);
+ if(ote)add("ote",["OTE_RETRACE"],ote);
+ if(trigger?.type==="BOS"&&trigger.direction===direction&&trigger.displacement)add("bos",["BOS_CLOSE","MSB_DISPLACEMENT"]);
+ return [...new Map(candidates.map(c=>[c.setupId,c])).values()].sort((a,b)=>b.score-a.score);
+}

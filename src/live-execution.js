@@ -58,7 +58,8 @@ export function validateLiveCandidate(candidate, {
   explicitConfirmation = false, idempotencyKey
 } = {}) {
   const reasons = [];
-  if (!candidate || !["scalp", "swing"].includes(candidate.engine)) reasons.push("INVALID_ENGINE");
+  if (!candidate || candidate.engine !== "swing") reasons.push("INVALID_ENGINE");
+  if (!["4h", "1d"].includes(String(candidate?.setupTimeframe ?? "").toLowerCase())) reasons.push("FORBIDDEN_SETUP_TIMEFRAME");
   if (candidate?.status !== "QUALIFIED" || candidate?.entryEligible !== true) reasons.push("CANDIDATE_NOT_ENTRY_READY");
   if (candidate?.entryConfirmation?.status !== "CONFIRMED") reasons.push("ENTRY_CONFIRMATION_REQUIRED");
   if (!SYMBOL_RE.test(candidate?.symbol ?? "")) reasons.push("INVALID_SYMBOL");
@@ -84,8 +85,8 @@ export function validateLiveCandidate(candidate, {
     ? Math.abs(target - entry) / Math.abs(entry - stop) : 0;
   if (rr < RISK_CONFIG.minRewardRisk) reasons.push("MINIMUM_RR_NOT_MET");
   const risky = riskMultiple === 0.5;
-  const minLeverage = risky ? 5 : RISK_CONFIG.minLeverage;
-  const maxLeverage = risky ? 10 : RISK_CONFIG.maxLeverage;
+  const minLeverage = RISK_CONFIG.minLeverage;
+  const maxLeverage = RISK_CONFIG.maxLeverage;
   const requestedLeverage = Number(candidate?.leverage);
   if (!Number.isInteger(requestedLeverage) || requestedLeverage < minLeverage || requestedLeverage > maxLeverage)
     reasons.push("LEVERAGE_OUTSIDE_POLICY");
