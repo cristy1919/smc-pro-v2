@@ -90,7 +90,7 @@ test("legacy compatibility adapter only publishes candidate snapshots and guards
   const adapter=createLegacyWorkerCompatibilityAdapter({readEngineSnapshot:async()=>({runnerEnabled:true}),writeCandidateSnapshot:async v=>{saved=v;}});
   const result=await adapter.publishCandidates({swing:[{id:"w1",engine:"swing",symbol:"BTC-USDT",direction:"BULLISH",setupId:"W01",setupTimeframe:"4h",state:"WATCH",score:70,evidence:[]}]});
   assert.equal(result.scalpCount,0);
-  assert.equal(saved.schemaVersion,1);
+  assert.equal(saved.schemaVersion,2);
   await assert.rejects(()=>adapter.close({positionId:"p1",closePercent:100}),/NOT_CONFIGURED/);
 });
 test("dashboard model publishes required tabs, independent counters and compact open positions",()=>{
@@ -114,28 +114,20 @@ test("BingX public provider reads historical funding settlements with exact time
  assert.deepEqual(rows,[{fundingTime:600000,fundingRate:0.0001}]);
 });
 
-test("90d Swing dataset requests enough candles for a full 15m and 1h comparison", async () => {
+test("90d Swing dataset fetches only 4H and 1D setup candles", async () => {
   const calls = [];
   const provider = { getCandles: async args => { calls.push(args); return []; } };
   const endTime = Date.UTC(2026, 10, 26), startTime = endTime - 90 * 86400000;
   await fetchEngineDataset({ provider, symbol: "BTC-USDT", engine: "swing", startTime, endTime });
   const byTf = Object.fromEntries(calls.map(x => [x.timeframe, x.limit]));
-  assert.ok(byTf["15m"] > 1440, "15m history must exceed the old 1440-candle cap");
-  assert.ok(byTf["1h"] > 1440, "1h history must cover the 90d window plus warmup");
-  assert.ok(byTf["1d"] >= 120, "daily history must include the 90d window plus warmup");
+  assert.equal(calls.length,2);
+  assert.ok(byTf["4h"] > 500, "4H history must include 90d plus warmup");
+  assert.ok(byTf["1d"] >= 120, "daily history must include 90d plus warmup");
 });
 test("walk-forward backtest rejects 1H and lower setup timeframes", () => {
-  const hour = 3600000, day = 24 * hour, start = Date.UTC(2026, 0, 1);
-  const make = (n, step) => Array.from({ length: n }, (_, i) => ({ timestamp: start + i * step, open: 100.1, high: 101, low: 100.2, close: 100.8, volume: 100, closed: true }));
-  const timeframes = { "1d": make(32, day), "4h": make(192, 4 * hour), "1h": make(32 * 24, hour), "15m": make(32 * 96, 15 * 60 * 1000) };
-  let emitted = false;
-  const report = runHistoricalBacktest({ engine: "swing", symbol: "BTC-USDT", timeframes, entryTimeframe: "1h", periodDays: [30], maxHoldBars: 5, evaluate: ({ timeframes: tf, entryTimeframe }) => {
-    assert.equal(entryTimeframe, "1h");
-    if (emitted) return [];
-    emitted = true;
-    const last = tf["1h"].at(-1);
-    return [{ id: "one-hour-trade", engine: "swing", symbol: "BTC-USDT", direction: "BULLISH", setupId: "W01_HTF_OB_REVERSAL", state: "QUALIFIED", score: 85, createdAt: last.timestamp, entry: 100.8, stop: 99, target: 107.1, zoneBounds: { low: 100, high: 101 }, hardFilters: { validStop: true, minimumRR: true } }];
-  }});
-  assert.equal(report.assumptions.entryTimeframe, "1h");
-  assert.equal(report.tradesByPeriod[30].length, 1);
+  const hour=3600000,day=24*hour,start=Date.UTC(2026,0,1);
+  const make=(n,step)=>Array.from({length:n},(_,i)=>({timestamp:start+i*step,open:100.1,high:101,low:100.2,close:100.8,volume:100,closed:true}));
+  const timeframes={"1d":make(120,day),"4h":make(720,4*hour)};
+  assert.throws(()=>runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,setupTimeframe:"1h",periodDays:[30],evaluate:()=>[]}),/FORBIDDEN_SETUP_TIMEFRAME/);
+  assert.throws(()=>runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes:{...timeframes,"1h":make(2880,hour)},periodDays:[30],evaluate:()=>[]}),/FORBIDDEN_BACKTEST_TIMEFRAME_1h/);
 });
