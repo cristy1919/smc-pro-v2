@@ -38,15 +38,18 @@ export class BingXPublicKlineProvider {
     if(!/^[A-Z0-9]+-USDT$/.test(symbol))throw new Error("INVALID_USDT_PERPETUAL_SYMBOL");
     if(!Number.isFinite(startTime)||!Number.isFinite(endTime)||endTime<=startTime)throw new RangeError("INVALID_FUNDING_TIME_RANGE");
     if(!Number.isInteger(limit)||limit<1||limit>100)throw new RangeError("FUNDING_LIMIT_MUST_BE_1_TO_100");
-    const rows=[];let cursor=startTime;
-    while(cursor<endTime){
-      const page=await this.#request({symbol,startTime:cursor,endTime,limit},"/openApi/swap/v2/quote/fundingRate");
+    const rows=[];let cursor=endTime,previousOldest=Infinity;
+    while(cursor>startTime&&rows.length<Math.ceil((endTime-startTime)/(8*60*60*1000))+10){
+      const page=await this.#request({symbol,startTime,endTime:cursor,limit},"/openApi/swap/v2/quote/fundingRate");
       if(!page.length)break;
-      const normalized=page.map(x=>({fundingTime:Number(x.fundingTime),fundingRate:Number(x.fundingRate)})).filter(x=>Number.isFinite(x.fundingTime)&&Number.isFinite(x.fundingRate)&&x.fundingTime>=startTime&&x.fundingTime<=endTime);
+      const normalized=page.map(x=>({fundingTime:Number(x.fundingTime),fundingRate:Number(x.fundingRate)}))
+        .filter(x=>Number.isFinite(x.fundingTime)&&Number.isFinite(x.fundingRate)&&x.fundingTime>=startTime&&x.fundingTime<=endTime);
       rows.push(...normalized);
-      const maxTime=Math.max(...normalized.map(x=>x.fundingTime));
-      if(!Number.isFinite(maxTime)||maxTime<cursor||page.length<limit)break;
-      cursor=maxTime+1;
+      const rawTimes=page.map(x=>Number(x.fundingTime)).filter(Number.isFinite);
+      const oldest=Math.min(...rawTimes);
+      if(!Number.isFinite(oldest)||oldest>=previousOldest||oldest<=startTime)break;
+      previousOldest=oldest;cursor=oldest-1;
+      if(page.length<limit)break;
     }
     return [...new Map(rows.map(x=>[x.fundingTime,x])).values()].sort((a,b)=>a.fundingTime-b.fundingTime);
   }
@@ -58,25 +61,26 @@ export class BingXPublicKlineProvider {
     if (!duration) throw new Error("UNSUPPORTED_KLINE_INTERVAL");
     if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) throw new RangeError("INVALID_TIME_RANGE");
     if (!Number.isInteger(limit) || limit < 1 || limit > 30000) throw new RangeError("KLINE_LIMIT_MUST_BE_1_TO_30000");
-    const rows = [];
-    let cursor = startTime;
-    while (cursor < endTime) {
-      const page = await this.#request({ symbol, interval: timeframe, startTime: cursor, endTime, limit: Math.min(1440, limit - rows.length) });
-      if (!page.length) break;
-      const normalized = page.map(row => ({
-        timestamp: Number(row.time), open: Number(row.open), high: Number(row.high),
-        low: Number(row.low), close: Number(row.close), volume: Number(row.volume),
-        closed: Number(row.time) + duration <= this.now()
-      })).filter(c => Number.isFinite(c.timestamp) && c.timestamp >= startTime && c.timestamp < endTime);
+    const rows = []; let cursor=endTime, previousOldest=Infinity;
+    while(cursor>startTime&&rows.length<limit){
+      const page=await this.#request({symbol,interval:timeframe,startTime,endTime:cursor,limit:Math.min(1440,limit-rows.length)});
+      if(!page.length)break;
+      const rawTimes=page.map(row=>Number(row.time)).filter(Number.isFinite);
+      const oldest=Math.min(...rawTimes);
+      const normalized=page.map(row=>({
+        timestamp:Number(row.time),open:Number(row.open),high:Number(row.high),low:Number(row.low),
+        close:Number(row.close),volume:Number(row.volume),closed:Number(row.time)+duration<=this.now()
+      })).filter(c=>Number.isFinite(c.timestamp)&&c.timestamp>=startTime&&c.timestamp<endTime);
       rows.push(...normalized);
-      const maxTime = Math.max(...normalized.map(c => c.timestamp));
-      if (!Number.isFinite(maxTime) || maxTime < cursor || page.length < 2) break;
-      cursor = maxTime + duration;
+      if(!Number.isFinite(oldest)||oldest>=previousOldest||oldest<=startTime)break;
+      previousOldest=oldest;cursor=oldest-1;
+      // Some BingX deployments cap the actual response below the requested limit.
+      // Continue paging backwards until the requested start is reached.
     }
-    const deduped = [...new Map(rows.map(c => [c.timestamp,c])).values()].sort((a,b)=>a.timestamp-b.timestamp);
-    const result = includeForming ? deduped : deduped.filter(c => c.closed);
+    const deduped=[...new Map(rows.map(c=>[c.timestamp,c])).values()].sort((a,b)=>a.timestamp-b.timestamp);
+    const result=includeForming?deduped:deduped.filter(c=>c.closed);
     validateCandles(result);
-    return result;
+    return result.slice(-limit);
   }
 }
 
