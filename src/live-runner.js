@@ -55,8 +55,8 @@ export async function runLiveSetupQueue({ env, setups = [], client, store, adapt
       const stopLoss = Number(setup.stopLoss);
       const takeProfit = Number(setup.takeProfit ?? setup.tp3 ?? setup.tp2 ?? setup.tp1);
       const unitRiskFraction = (Math.abs(markPrice - stopLoss) + markPrice * 0.0007 + stopLoss * 0.0007) / markPrice;
-      const minLeverage = riskMultiple === 0.5 ? 5 : 20;
-      const maxLeverage = riskMultiple === 0.5 ? 10 : 50;
+      const minLeverage = 20;
+      const maxLeverage = 50;
       if (!positive(unitRiskFraction) || unitRiskFraction > 1 / minLeverage * 0.8) {
         results.push({ setupId: scannerSetupIdentity(setup), action: "REJECT_LIQUIDATION_BUFFER" });
         continue;
