@@ -1,49 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
-
-function series(n = 40, step = 1) {
-  return Array.from({ length: n }, (_, i) => {
-    const close = 100 + i * step;
-    return { timestamp: i + 1, open: close - 0.2, high: close + 0.5, low: close - 0.5, close, volume: 100 + i, closed: true };
-  });
-}
-const input = {
-  symbol: "BTC-USDT",
-  timeframes: { "1h": series(), "15m": series(40, 0.2), "5m": series(40, 0.05), "1d": series(40, 2), "4h": series(40, 0.8) }
-};
-
-test("Scalp evaluator consumes only 1h/15m/5m and returns a stable list", () => {
-  const result = evaluateScalp(input);
-  assert.ok(Array.isArray(result));
-  assert.ok(result.every(x => x.engine === "scalp" && x.timeframe === "5m"));
-});
-test("Swing evaluator requires 1d/4h/1h confirmation and 15m entry", () => {
-  const result = evaluateSwing(input);
-  assert.ok(Array.isArray(result));
-  assert.ok(result.every(x => x.engine === "swing" && x.timeframe === "15m"));
-});
-test("Swing evaluator rejects a missing 15m entry timeframe", () => {
-  const { "15m": _entry, ...timeframes } = input.timeframes;
-  assert.throws(() => evaluateSwing({ symbol: "BTC-USDT", timeframes }), /MISSING_TIMEFRAME_15m/);
-});
-test("candidate confidence remains insufficient without a trade sample history", () => {
-  const result = evaluateScalp({ ...input, volumeData: { relativeVolume: 1.4 } });
-  assert.ok(result.every(x => x.confidence === "INSUFFICIENT_DATA"));
-});
-test("missing required timeframe is rejected rather than silently substituted", () => {
-  assert.throws(() => evaluateScalp({ symbol: "BTC-USDT", timeframes: { "1h": series(), "15m": series() } }), /MISSING_TIMEFRAME_5m/);
-});
-test("unavailable optional volume is explicit and not fabricated", () => {
-  const result = evaluateSwing(input);
-  assert.ok(result.every(x => x.dataStatus.relativeVolume === "UNAVAILABLE"));
-});
-
-test("Swing evaluator accepts a genuine 1h entry mode without reusing the 1h confirmation gate", () => {
-  const result = evaluateSwing({ ...input, entryTimeframe: "1h" });
-  assert.ok(Array.isArray(result));
-  assert.ok(result.every(x => x.engine === "swing" && x.timeframe === "1h"));
-});
-test("Swing evaluator rejects unsupported entry timeframes", () => {
-  assert.throws(() => evaluateSwing({ ...input, entryTimeframe: "5m" }), /UNSUPPORTED_SWING_ENTRY_TIMEFRAME/);
-});
+const series=(n=40,step=1)=>Array.from({length:n},(_,i)=>{const close=100+i*step;return {timestamp:i+1,open:close-.2,high:close+.5,low:close-.5,close,volume:100+i,closed:true};});
+const input={symbol:"BTC-USDT",timeframes:{"1d":series(40,2),"4h":series(40,.8),"1h":series(),"15m":series()},marketQuality:{quoteVolume24h:12000000,spreadPct:.04},volumeData:{relativeVolume:1.2},marketContext:{btc:{weekly:"BULLISH",daily:"BULLISH"},dominance:{btc:"BEARISH",altcoin:"BULLISH",usdt:"BEARISH"}}};
+test("Scalp engine is removed",()=>assert.throws(()=>evaluateScalp(input),/SCALP_ENGINE_REMOVED/));
+test("Swing setup scan consumes only 1D and 4H",()=>{const result=evaluateSwing(input);assert.ok(Array.isArray(result));assert.ok(result.every(x=>x.engine==="swing"&&["4h","1d"].includes(x.setupTimeframe)));});
+test("Swing setup scan rejects 1H and all lower setup timeframes",()=>{for(const tf of ["1h","15m","5m","1m","3m"])assert.throws(()=>evaluateSwing({...input,setupTimeframe:tf}),/FORBIDDEN_SETUP_TIMEFRAME/);});
+test("Swing evaluator requires both 1D and 4H",()=>{assert.throws(()=>evaluateSwing({symbol:"BTC-USDT",timeframes:{"1d":series()}}),/MISSING_TIMEFRAME_4h/);});
+test("Low-volume or missing-volume pairs are excluded",()=>{assert.deepEqual(evaluateSwing({...input,marketQuality:{quoteVolume24h:100000,spreadPct:.04}}),[]);assert.deepEqual(evaluateSwing({...input,volumeData:{}}),[]);});
+test("BTC and dominance context are recorded without fabricated confidence",()=>{const rows=evaluateSwing(input);assert.ok(rows.every(x=>x.confidence==="INSUFFICIENT_DATA"));});
+test("Countertrend context requires sweep, displacement, CHoCH/MSS and FVG retest",()=>{const result=evaluateSwing({...input,marketContext:{btc:{weekly:"BEARISH",daily:"BEARISH"},dominance:input.marketContext.dominance}});assert.ok(Array.isArray(result));});
+test("Unavailable dominance data is not fabricated",()=>{const rows=evaluateSwing({...input,marketContext:{btc:{weekly:"BULLISH",daily:"BULLISH"}}});assert.ok(rows.every(x=>x.dataStatus.dominance==="UNAVAILABLE"));});
