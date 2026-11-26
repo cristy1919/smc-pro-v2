@@ -200,6 +200,8 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
     p.allocationUsdt = round(initialMargin * remainingRatio, 8);
   }
   const event = liquidation ? "LIQUIDATION" : reason.endsWith("BREAK_EVEN") ? "BREAK_EVEN" : reason === "STOP_LOSS" ? "STOP_LOSS" : p.qty <= 0 ? "TP_FINAL" : "TP_PARTIAL";
+  const closeEventId = crypto.randomUUID();
+  const positionId = String(p.positionId ?? p.id); p.positionId = positionId;
   p.lastTriggerPrice = triggerPrice;
   p.lastExecutionPrice = executionPrice;
   p.lastTriggerAt = now;
@@ -208,9 +210,14 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
   p.markPriceAt = new Date(now).toISOString();
   const isTpEvent = /^TP[123]_TAKE_PROFIT$/.test(String(reason));
   const tpAllocatedEntryFee = isTpEvent && initialQty > 0 ? round((Number(p.entryFeeUsdt) || 0) * closeQty / initialQty, 8) : 0;
-  const tpNetPnlUsdt = isTpEvent ? round(gross - exitFee - exitSlippage - tpAllocatedEntryFee, 8) : null;
+  const priorFundingAllocated = Number(p.fundingAllocatedUsdt) || (Array.isArray(p.executionEvents) ? p.executionEvents.reduce((sum, e) => sum + (Number(e.fundingAllocatedUsdt) || 0), 0) : 0);
+  const fundingRemaining = (Number(p.fundingPaidUsdt) || 0) - priorFundingAllocated;
+  const currentQtyBeforeClose = p.qty + closeQty;
+  const allocatedFunding = isTpEvent && currentQtyBeforeClose > 0 ? round(fundingRemaining * closeQty / currentQtyBeforeClose, 8) : 0;
+  p.fundingAllocatedUsdt = round(priorFundingAllocated + allocatedFunding, 8);
+  const tpNetPnlUsdt = isTpEvent ? round(gross - exitFee - exitSlippage - tpAllocatedEntryFee - allocatedFunding, 8) : null;
   const tpMarginUsdt = isTpEvent && initialQty > 0 && Number.isFinite(initialMargin) ? round(initialMargin * closeQty / initialQty, 8) : null;
-  p.executionEvents = [...p.executionEvents ?? [], { event, ...stage ? { stage } : {}, triggerPrice, markPrice, executionPrice, qty: closeQty, remainingQty: p.qty, at: now, closeReason: reason, ...(isTpEvent ? { netPnlUsdt: tpNetPnlUsdt, entryFeeAllocatedUsdt: tpAllocatedEntryFee, marginUsdt: tpMarginUsdt } : {}) }];
+  p.executionEvents = [...p.executionEvents ?? [], { event, closeEventId, positionId, ...stage ? { stage } : {}, triggerPrice, markPrice, executionPrice, qty: closeQty, remainingQty: p.qty, at: now, closeReason: reason, netPnlUsdt: isTpEvent ? tpNetPnlUsdt : round(gross - exitFee - exitSlippage, 8), entryFeeAllocatedUsdt: isTpEvent ? tpAllocatedEntryFee : 0, fundingAllocatedUsdt: isTpEvent ? allocatedFunding : 0, marginUsdt: tpMarginUsdt, returnPct: tpMarginUsdt > 0 && isTpEvent ? round(tpNetPnlUsdt / tpMarginUsdt * 100, 8) : null }];
   console.info("Paper position execution", JSON.stringify({ at: new Date(now).toISOString(), symbol: p.symbol, model: p.model, side: p.side, event, stage: stage ?? null, triggerPrice, markPrice, executionPrice, priceDifference: round(executionPrice - triggerPrice, 10), qty: closeQty, remainingQty: p.qty, closeReason: reason, liquidation }));
   if (liquidation || p.qty <= 0) {
     p.status = "CLOSED";
@@ -219,6 +226,8 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
     p.exitTriggerPrice = triggerPrice;
     p.exitMarkPrice = markPrice;
     p.pnlUsdt = round(Number(p.realizedPnlUsdt) - (p.entryFeeUsdt ?? 0), 8);
+    const initialMarginForReturn = Number(p.initialMarginUsdt ?? p.marginUsdt ?? p.allocationUsdt); p.returnPct = initialMarginForReturn > 0 ? round(p.pnlUsdt / initialMarginForReturn * 100, 8) : null;
+    p.pnlAccountingStatus = p.fundingDataStatus === "UNAVAILABLE" || p.fundingDataStatus === "UNAVAILABLE_MISSED_SETTLEMENT" ? "UNVERIFIED_FUNDING" : "VERIFIED"; p.closeEventId = closeEventId; p.positionId = positionId;
     p.closeReason = reason;
     p.closeSource = liquidation ? "LIQUIDATION" : "AUTOMATED_SL_TP";
     p.qty = initialQty || closeQty;
@@ -393,6 +402,8 @@ function analyticsNumber(value) {
 __name(analyticsNumber, "analyticsNumber");
 function summarizeAnalyticsGroup(key, trades) {
   const pnlTrades = trades.filter((t) => t.pnlUsdt !== null);
+  const provisionalTrades = trades.filter((t) => t.provisionalPnlUsdt !== null);
+  const provisionalNetPnlUsdt = provisionalTrades.reduce((sum, t) => sum + (t.provisionalPnlUsdt ?? 0), 0);
   const wins = pnlTrades.filter((t) => t.pnlUsdt > 1e-8);
   const losses = pnlTrades.filter((t) => t.pnlUsdt < -1e-8);
   const breakeven = pnlTrades.length - wins.length - losses.length;
@@ -405,21 +416,29 @@ function summarizeAnalyticsGroup(key, trades) {
   const fundingPaidUsdt = fundingTrades.reduce((sum, t) => sum + (t.fundingPaidUsdt ?? 0), 0);
   const slippageTrades = trades.filter((t) => t.slippagePaidUsdt !== null);
   const slippagePaidUsdt = slippageTrades.reduce((sum, t) => sum + (t.slippagePaidUsdt ?? 0), 0);
-  return { key, trades: trades.length, wins: wins.length, losses: losses.length, breakeven, winRatePct: pnlTrades.length ? round(wins.length / pnlTrades.length * 100, 2) : null, netPnlUsdt: round(netPnlUsdt, 8), expectancyUsdt: pnlTrades.length ? round(netPnlUsdt / pnlTrades.length, 8) : null, grossWinsUsdt: round(grossWinsUsdt, 8), grossLossesUsdt: round(grossLossesUsdt, 8), profitFactor: grossLossesUsdt > 0 ? round(grossWinsUsdt / grossLossesUsdt, 4) : null, feesKnownUsdt: round(feesKnownUsdt, 8), tradesWithKnownFees: feeTrades.length, fundingPaidUsdt: round(fundingPaidUsdt, 8), tradesWithKnownFunding: fundingTrades.length, slippagePaidUsdt: round(slippagePaidUsdt, 8), tradesWithKnownSlippage: slippageTrades.length };
+  return { key, trades: trades.length, tradesWithProvisionalPnl: provisionalTrades.length, provisionalNetPnlUsdt: round(provisionalNetPnlUsdt, 8), wins: wins.length, losses: losses.length, breakeven, winRatePct: pnlTrades.length ? round(wins.length / pnlTrades.length * 100, 2) : null, netPnlUsdt: round(netPnlUsdt, 8), expectancyUsdt: pnlTrades.length ? round(netPnlUsdt / pnlTrades.length, 8) : null, grossWinsUsdt: round(grossWinsUsdt, 8), grossLossesUsdt: round(grossLossesUsdt, 8), profitFactor: grossLossesUsdt > 0 ? round(grossWinsUsdt / grossLossesUsdt, 4) : null, feesKnownUsdt: round(feesKnownUsdt, 8), tradesWithKnownFees: feeTrades.length, fundingPaidUsdt: round(fundingPaidUsdt, 8), tradesWithKnownFunding: fundingTrades.length, slippagePaidUsdt: round(slippagePaidUsdt, 8), tradesWithKnownSlippage: slippageTrades.length };
 }
 __name(summarizeAnalyticsGroup, "summarizeAnalyticsGroup");
 function summarizeClosedTradeAnalytics(input) {
   const raw = Array.isArray(input) ? input : [];
   const trades = raw.map((value) => {
     const p = value && typeof value === "object" ? value : {};
-    const pnl = analyticsNumber(p.pnlUsdt);
+    const rawPnl = analyticsNumber(p.pnlUsdt);
+    const pnlStatus = rawPnl === null ? "MISSING" : p.pnlAccountingStatus === "VERIFIED" ? "VERIFIED" : "PROVISIONAL";
+    const pnl = pnlStatus === "VERIFIED" ? rawPnl : null;
+    const provisionalPnl = pnlStatus === "PROVISIONAL" ? rawPnl : null;
     const fees = analyticsNumber(p.feesPaidUsdt);
     const entryFee = analyticsNumber(p.entryFeeUsdt), exitFees = analyticsNumber(p.exitFeesUsdt);
     const feeFallback = entryFee !== null && exitFees !== null ? entryFee + exitFees : null;
+    const primaryTrend = typeof p.primaryTrend === "string" && p.primaryTrend !== "UNKNOWN" ? p.primaryTrend : typeof p.audit?.htfTrend === "string" ? p.audit.htfTrend : "UNKNOWN";
+    const marketPhase = typeof p.marketPhase === "string" && p.marketPhase !== "UNKNOWN" ? p.marketPhase : typeof p.audit?.marketRegime === "string" ? p.audit.marketRegime : "UNKNOWN";
+    const closeSource = typeof p.closeSource === "string" ? p.closeSource : null;
+    const closeType = p.closeReason === "MANUAL_CLOSE" || (closeSource && closeSource.startsWith("MANUAL")) ? "MANUAL" : "AUTOMATED";
     const dataQuality = [];
-    if (pnl === null) dataQuality.push("MISSING_PNL");
+    if (pnlStatus === "MISSING") dataQuality.push("MISSING_PNL");
+    if (pnlStatus === "PROVISIONAL") dataQuality.push("PROVISIONAL_PNL_FUNDING_UNVERIFIED");
     if (fees === null && feeFallback === null) dataQuality.push("MISSING_FEES");
-    if (!p.primaryTrend || !p.marketPhase) dataQuality.push("MISSING_ENTRY_REGIME");
+    if (primaryTrend === "UNKNOWN" || marketPhase === "UNKNOWN") dataQuality.push("MISSING_ENTRY_REGIME");
     return {
       id: typeof p.id === "string" ? p.id : null,
       symbol: typeof p.symbol === "string" ? p.symbol : "UNKNOWN",
@@ -427,15 +446,25 @@ function summarizeClosedTradeAnalytics(input) {
       model: typeof p.model === "string" ? p.model : "UNKNOWN",
       tradeStyle: typeof p.tradeStyle === "string" ? p.tradeStyle : "UNKNOWN",
       entryTimeframe: typeof p.entryTimeframe === "string" ? p.entryTimeframe : "UNKNOWN",
-      primaryTrend: typeof p.primaryTrend === "string" ? p.primaryTrend : "UNKNOWN",
-      marketPhase: typeof p.marketPhase === "string" ? p.marketPhase : "UNKNOWN",
+      primaryTrend,
+      marketPhase,
+      marketRegime: marketPhase,
+      htfTrend: primaryTrend,
+      btcBias: typeof p.audit?.btcBias === "string" ? p.audit.btcBias : "UNAVAILABLE",
+      setupTimeframe: typeof p.setupTimeframe === "string" ? p.setupTimeframe : "UNKNOWN",
+      pnlStatus,
+      pnlAccountingStatus: typeof p.pnlAccountingStatus === "string" ? p.pnlAccountingStatus : "UNKNOWN",
       openedAt: analyticsNumber(p.openedAt),
       closedAt: analyticsNumber(p.closedAt),
       pnlUsdt: pnl,
+      provisionalPnlUsdt: provisionalPnl,
       feesPaidUsdt: fees !== null ? fees : feeFallback,
       fundingPaidUsdt: analyticsNumber(p.fundingPaidUsdt),
       slippagePaidUsdt: analyticsNumber(p.slippagePaidUsdt),
       closeReason: typeof p.closeReason === "string" ? p.closeReason : null,
+      closeSource,
+      closeType,
+      btcContextStatus: typeof p.btcContextStatus === "string" ? p.btcContextStatus : typeof p.audit?.btcBias === "string" ? (p.audit.btcBias === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE") : "UNAVAILABLE",
       dataQuality
     };
   });
@@ -454,7 +483,10 @@ function summarizeClosedTradeAnalytics(input) {
   return {
     totalClosedTrades: trades.length,
     tradesWithPnl: pnlTrades.length,
-    tradesMissingPnl: trades.length - pnlTrades.length,
+    tradesWithVerifiedPnl: pnlTrades.length,
+    tradesWithProvisionalPnl: trades.filter((t) => t.provisionalPnlUsdt !== null).length,
+    tradesWithAnyNumericPnl: trades.filter((t) => t.pnlStatus !== "MISSING").length,
+    tradesMissingPnl: trades.filter((t) => t.pnlStatus === "MISSING").length,
     tradesWithKnownFees: feeTrades.length,
     tradesMissingFees: trades.length - feeTrades.length,
     tradesWithKnownFunding: trades.filter((t) => t.fundingPaidUsdt !== null).length,
@@ -462,12 +494,19 @@ function summarizeClosedTradeAnalytics(input) {
     tradesWithKnownSlippage: trades.filter((t) => t.slippagePaidUsdt !== null).length,
     tradesMissingSlippage: trades.filter((t) => t.slippagePaidUsdt === null).length,
     tradesMissingEntryRegime: trades.filter((t) => t.primaryTrend === "UNKNOWN" || t.marketPhase === "UNKNOWN").length,
+    btcContextUnavailableTrades: trades.filter((t) => t.btcContextStatus === "UNAVAILABLE").length,
+    btcContextUnavailablePct: trades.length ? round(trades.filter((t) => t.btcContextStatus === "UNAVAILABLE").length / trades.length * 100, 2) : null,
+    byBtcContext: group((t) => t.btcContextStatus),
     totalNetPnlUsdt: round(pnlTrades.reduce((sum, t) => sum + (t.pnlUsdt ?? 0), 0), 8),
+    totalProvisionalPnlUsdt: round(trades.reduce((sum, t) => sum + (t.provisionalPnlUsdt ?? 0), 0), 8),
     totalKnownFeesUsdt: round(feeTrades.reduce((sum, t) => sum + (t.feesPaidUsdt ?? 0), 0), 8),
     overall,
     byModel: group((t) => t.model),
     byStyle: group((t) => t.tradeStyle),
     byTimeframe: group((t) => t.entryTimeframe),
+    bySetupTimeframe: group((t) => t.setupTimeframe),
+    byCloseType: group((t) => t.closeType),
+    byModelSideTimeframeCloseType: group((t) => [t.model, t.side, t.entryTimeframe, t.tradeStyle, t.closeType, t.primaryTrend, t.marketPhase].join(" | ")),
     bySide: group((t) => t.side),
     byMarketPhase: group((t) => t.marketPhase),
     byModelSideTimeframe: group((t) => [t.model, t.side, t.entryTimeframe, t.tradeStyle, t.primaryTrend, t.marketPhase].join(" | ")),
@@ -806,8 +845,8 @@ __name(evaluateEngine, "evaluateEngine");
 
 // src/bingx-demo.ts
 var MIN_LEVERAGE = 20;
-var RISKY_MIN_LEVERAGE = 5;
-var RISKY_MAX_LEVERAGE = 10;
+var RISKY_MIN_LEVERAGE = 20;
+var RISKY_MAX_LEVERAGE = 50;
 function nextLowerBingXLeverage(current, minimumLeverage = MIN_LEVERAGE) {
   const floor = Math.max(1, Math.floor(minimumLeverage));
   if (!Number.isFinite(current) || current <= floor) return null;
@@ -1660,8 +1699,8 @@ async function openBingXDemoPosition(apiKey, apiSecret, setup, snapshot, setupKe
     }
     const stopDistance = Math.abs(entryReferencePrice - setup.stopLoss);
     const riskMultiplier = Number.isFinite(Number(setup.riskMultiplier)) ? Math.min(1, Math.max(0.5, Number(setup.riskMultiplier))) : 1;
-    const riskBudget = round(Number(balance.equity) * 0.02 * riskMultiplier, 8);
-    if (!Number.isFinite(riskBudget) || riskBudget <= 0) return { ok: false, code: "VST_RISK_BASELINE_UNAVAILABLE", error: "Fixed VST 1R baseline is unavailable; no order was sent." };
+    const allocationBudgetUsdt = round(Number(balance.equity) * 0.02, 8);
+    if (!Number.isFinite(allocationBudgetUsdt) || allocationBudgetUsdt <= 0) return { ok: false, code: "VST_CURRENT_ALLOCATION_UNAVAILABLE", error: "Current VST equity allocation is unavailable; no order was sent." };
     const marginBudget = balance.availableMargin;
     const minimumLeverage = riskMultiplier < 1 ? RISKY_MIN_LEVERAGE : MIN_LEVERAGE;
     const maximumLeverage = riskMultiplier < 1 ? RISKY_MAX_LEVERAGE : MAX_LEVERAGE;
@@ -1683,8 +1722,8 @@ async function openBingXDemoPosition(apiKey, apiSecret, setup, snapshot, setupKe
     const precision = Math.max(0, Math.min(12, Math.floor(number(contract.quantityPrecision, 8))));
     const minQty = number(contract.tradeMinQuantity ?? contract.minQty, 0);
     const calculateSizing = /* @__PURE__ */ __name((targetLeverage) => {
-      const riskLimitedNotional = riskBudget / unitRiskFraction;
-      const targetNotional = Math.min(marginBudget * targetLeverage, riskLimitedNotional);
+      const allocationNotional = allocationBudgetUsdt * targetLeverage;
+      const targetNotional = Math.min(marginBudget * targetLeverage, allocationNotional);
       const qty = roundDown(targetNotional / entryReferencePrice, precision);
       const value = qty * entryReferencePrice;
       const margin = value / targetLeverage;
@@ -1693,7 +1732,7 @@ async function openBingXDemoPosition(apiKey, apiSecret, setup, snapshot, setupKe
     }, "calculateSizing");
     let sizing = calculateSizing(leverage);
     let { quantity, notional, marginUsdt, stopRisk } = sizing;
-    const validSizing = /* @__PURE__ */ __name(() => quantity > 0 && quantity >= minQty && marginUsdt > 0 && marginUsdt <= balance.availableMargin && stopRisk <= riskBudget + 1e-6, "validSizing");
+    const validSizing = /* @__PURE__ */ __name(() => quantity > 0 && quantity >= minQty && marginUsdt > 0 && marginUsdt <= balance.availableMargin && marginUsdt <= allocationBudgetUsdt + 1e-8, "validSizing");
     if (!validSizing()) {
       return { ok: false, code: "ALLOCATION_OR_MINIMUM_QUANTITY", error: "BingX demo order could not use the exact 2% account allocation or meet the contract minimum; no order was sent." };
     }
@@ -1743,7 +1782,7 @@ async function openBingXDemoPosition(apiKey, apiSecret, setup, snapshot, setupKe
       return {
         ok: false,
         code: tierError ? "EXCHANGE_MAX_POSITION_VALUE" : "ALLOCATION_OR_MINIMUM_QUANTITY",
-        error: tierError ? "BingX rejected the order at the current leverage tiers down to " + lastTriedLeverage + "x" + (lastTierMaxValue !== null ? "; last reported tier cap: " + lastTierMaxValue + " USDT" : "") + "; available-margin cap and 1R stop-risk ceiling were preserved, and no order was opened. " + tierError.slice(0, 180) : "BingX minimum quantity could not be satisfied within available margin and the 1R stop-risk ceiling after leverage adjustment; no order was opened."
+        error: tierError ? "BingX rejected the order at the current leverage tiers down to " + lastTriedLeverage + "x" + (lastTierMaxValue !== null ? "; last reported tier cap: " + lastTierMaxValue + " USDT" : "") + "; available-margin cap and current 2% position-allocation cap were preserved, and no order was opened. " + tierError.slice(0, 180) : "BingX minimum quantity could not be satisfied within available margin and the current 2% position-allocation cap after leverage adjustment; no order was opened."
       };
     }
     await new Promise((resolve) => setTimeout(resolve, 450));
@@ -2006,34 +2045,39 @@ function calculateBingXDemoEntrySizing(input) {
   if (![entry, stopLoss, equity, availableMargin].every(Number.isFinite) || entry <= 0 || equity <= 0 || availableMargin <= 0 || !Number.isFinite(Number(input.fixedRiskUnitUsdt)) || Number(input.fixedRiskUnitUsdt) <= 0 || precision < 0 || precision > 12)
     return { ok: false, code: "DEMO_BALANCE_UNAVAILABLE", error: "BingX VST equity or available margin is unavailable." };
   const riskMultiplier = Number.isFinite(Number(input.riskMultiplier)) ? Math.min(1, Math.max(0.5, Number(input.riskMultiplier))) : 1;
-  const distance = Math.abs(entry - stopLoss), riskBudget = Number(input.fixedRiskUnitUsdt) * riskMultiplier;
-  if (!Number.isFinite(riskBudget) || riskBudget <= 0) return { ok: false, code: "VST_RISK_BASELINE_UNAVAILABLE", error: "Fixed VST 1R baseline is unavailable; no order was sent." };
-  const marginBudget = availableMargin, minimumLeverage = riskMultiplier < 1 ? RISKY_MIN_LEVERAGE : MIN_LEVERAGE;
-  const maximumLeverage = riskMultiplier < 1 ? RISKY_MAX_LEVERAGE : MAX_LEVERAGE;
+  const distance = Math.abs(entry - stopLoss), allocationBudgetUsdt = Number(input.fixedRiskUnitUsdt);
+  if (!Number.isFinite(allocationBudgetUsdt) || allocationBudgetUsdt <= 0) return { ok: false, code: "VST_ALLOCATION_BASELINE_UNAVAILABLE", error: "The fixed 2% account allocation is unavailable; no order was sent." };
+  const marginBudget = availableMargin;
+  const minimumLeverage = MIN_LEVERAGE;
+  const maximumLeverage = MAX_LEVERAGE;
   const liquidationBufferFraction = 5e-3;
   const costFraction = distance / entry + 2 * (FEE_RATE + SLIPPAGE_RATE);
   if (!(distance > 0 && costFraction > 0 && marginBudget > 0))
     return { ok: false, code: "INVALID_RISK_DISTANCE", error: "Order-flow stop distance is invalid." };
+  if (allocationBudgetUsdt > marginBudget + 1e-8)
+    return { ok: false, code: "PAPER_ALLOCATION_EXCEEDS_AVAILABLE_MARGIN", error: "The fixed 2% position allocation exceeds currently available margin; no order was sent." };
   if (costFraction > 1 / minimumLeverage * 0.8)
-    return { ok: false, code: "STOP_DISTANCE_EXCEEDS_MIN_LEVERAGE_SAFETY", error: "The stop distance is too wide for a safe isolated position at the minimum permitted " + minimumLeverage + "x leverage." };
+    return { ok: false, code: "STOP_DISTANCE_EXCEEDS_MIN_LEVERAGE_SAFETY", error: "The structural stop is too wide for the required minimum 20x isolated leverage; no order was sent." };
   const maxLeverageByLiquidationBuffer = Math.floor(1 / (distance / entry + DEFAULT_MAINTENANCE_MARGIN_RATE + liquidationBufferFraction));
   if (maxLeverageByLiquidationBuffer < minimumLeverage)
-    return { ok: false, code: "LIQUIDATION_BUFFER_INSUFFICIENT", error: "The stop cannot maintain a 0.5% liquidation cushion at the minimum permitted leverage." };
-  const riskAdjustedLeverageTarget = riskMultiplier < 1 ? Math.max(minimumLeverage, Math.min(maximumLeverage, Math.floor(0.4 / costFraction))) : Math.max(minimumLeverage, Math.floor(0.8 / costFraction));
+    return { ok: false, code: "LIQUIDATION_BUFFER_INSUFFICIENT", error: "The stop cannot maintain a 0.5% liquidation cushion at 20x leverage." };
+  const riskAdjustedLeverageTarget = riskMultiplier < 1
+    ? Math.max(minimumLeverage, Math.min(maximumLeverage, Math.floor(0.4 / costFraction)))
+    : Math.max(minimumLeverage, Math.floor(0.8 / costFraction));
   const leverage = Math.min(maximumLeverage, maxLeverageByLiquidationBuffer, riskAdjustedLeverageTarget);
   const liquidationCushionUsdt = entry * (1 / leverage - DEFAULT_MAINTENANCE_MARGIN_RATE) - distance;
   if (liquidationCushionUsdt < entry * liquidationBufferFraction)
     return { ok: false, code: "LIQUIDATION_BUFFER_INSUFFICIENT", error: "Selected leverage does not leave the required 0.5% liquidation cushion beyond the stop." };
-  const riskSizedNotional = riskBudget / costFraction;
+  const allocationNotional = allocationBudgetUsdt * leverage;
   const marginCappedNotional = marginBudget * leverage;
-  const targetNotional = Math.min(riskSizedNotional, marginCappedNotional);
+  const targetNotional = Math.min(allocationNotional, marginCappedNotional);
   const quantity = roundDown(targetNotional / entry, precision);
   const notionalUsdt = quantity * entry, marginUsdt = notionalUsdt / leverage;
   const estimatedLoss = quantity * (distance + entry * (FEE_RATE + SLIPPAGE_RATE) + stopLoss * (FEE_RATE + SLIPPAGE_RATE));
   const tp1Qty = roundDown(quantity * 0.5, precision), tp2Qty = roundDown(quantity - tp1Qty, precision);
-  if (!(quantity > 0) || quantity < minQty || tp1Qty < minQty || tp2Qty < minQty || marginUsdt > marginBudget + 1e-8 || estimatedLoss > riskBudget + 1e-6)
-    return { ok: false, code: "RISK_OR_MINIMUM_QUANTITY", error: "The setup risk tier and margin budgets cannot satisfy BingX minimum quantity and the 50/50 TP split; no order was sent." };
-  return { ok: true, quantity, leverage, notionalUsdt, marginUsdt, estimatedLoss, riskBudget, marginBudget, liquidationCushionUsdt, liquidationCushionPercent: liquidationCushionUsdt / entry * 100 };
+  if (!(quantity > 0) || quantity < minQty || tp1Qty < minQty || tp2Qty < minQty || marginUsdt > marginBudget + 1e-8 || marginUsdt > allocationBudgetUsdt + 1e-8)
+    return { ok: false, code: "ALLOCATION_OR_MINIMUM_QUANTITY", error: "The fixed 2% allocation cannot satisfy BingX minimum quantity and the 50/50 TP split; no order was sent." };
+  return { ok: true, quantity, leverage, notionalUsdt, marginUsdt, estimatedLoss, allocationBudgetUsdt, riskBudget: allocationBudgetUsdt, marginBudget, leveragePolicyMin: minimumLeverage, leveragePolicyMax: maximumLeverage, liquidationCushionUsdt, liquidationCushionPercent: liquidationCushionUsdt / entry * 100 };
 }
 __name(calculateBingXDemoEntrySizing, "calculateBingXDemoEntrySizing");
 async function placeBingXDemoLimitEntry(apiKey, apiSecret, setup, snapshot, setupKey) {
@@ -2093,8 +2137,14 @@ async function placeBingXDemoLimitEntry(apiKey, apiSecret, setup, snapshot, setu
     } catch (error) {
       if (!/same|already|unchanged|no need/i.test(String(error))) throw error;
     }
+    const marginState = dataObject(await demoRequest(apiKey, apiSecret, "GET", "/openApi/swap/v2/trade/marginType", { symbol: setup.symbol }));
+    if (String(marginState.marginType ?? "").toUpperCase() !== "ISOLATED")
+      throw new Error("DEMO_ISOLATED_MARGIN_VERIFICATION_FAILED");
     failureStage = "LEVERAGE";
     await demoRequest(apiKey, apiSecret, "POST", "/openApi/swap/v2/trade/leverage", { symbol: setup.symbol, side: posSide, leverage });
+    const leverageState = dataObject(await demoRequest(apiKey, apiSecret, "GET", "/openApi/swap/v2/trade/leverage", { symbol: setup.symbol }));
+    const verifiedLeverage = Number(posSide === "LONG" ? leverageState.longLeverage : leverageState.shortLeverage);
+    if (verifiedLeverage !== leverage) throw new Error("DEMO_LEVERAGE_VERIFICATION_FAILED");
     let clientOrderId = ("of-" + setup.symbol.toLowerCase().replace(/[^a-z0-9]/g, "") + "-" + Date.now().toString(36)).slice(0, 40);
     const attachedStop = JSON.stringify({ type: "STOP_MARKET", stopPrice: setup.stopLoss, workingType: "MARK_PRICE" });
     let order;
@@ -3178,7 +3228,7 @@ var DEFAULT_STATE = {
   lastScanAt: null,
   lastScannedSymbol: null,
   runnerEnabled: true,
-  paperLedger: { balance: 1e3, equity: 1e3, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: true, cursor: 0, dailyPnl: 0, dayKey: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), maxOpenPositions: 10 }
+  paperLedger: { balance: 1e3, equity: 1e3, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: true, cursor: 0, dailyPnl: 0, dayKey: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), maxOpenPositions: 20 }
 };
 var SQL_CANDLE_INSERT_CHUNK = 10;
 var SQL_HISTORY_TASK_INSERT_CHUNK = 15;
@@ -3216,6 +3266,8 @@ var EngineState = class {
     this.env = env;
     this.scanInProgress = false;
     this.scanStartedAt = 0;
+    this.manualCloseTail = Promise.resolve();
+    this.manualClosePendingCount = 0;
     this.state.blockConcurrencyWhile(async () => {
       try {
         const engine = await this.readEngineState();
@@ -3350,6 +3402,14 @@ var EngineState = class {
     } finally {
       release();
     }
+  }
+  async withManualCloseLock(work) {
+    let release;
+    const turn = new Promise((resolve) => { release = resolve; });
+    const previous = this.manualCloseTail;
+    this.manualCloseTail = previous.then(() => turn, () => turn);
+    await previous;
+    try { return await work(); } finally { release(); }
   }
   async readStorage(key) {
     this.usageCounters.reads++;
@@ -3641,11 +3701,13 @@ var EngineState = class {
       }));
     }
     const isPaperScan = request.method === "POST" && path === "/paper/scan";
+    const isManualPaperClose = request.method === "POST" && (path === "/paper/close" || path === "/paper/close-all");
+    if (isManualPaperClose) this.manualClosePendingCount = (Number(this.manualClosePendingCount) || 0) + 1;
     const mutatesPaperLedger = request.method === "PUT" && path === "/state" || request.method === "POST" && ["/paper/scan", "/paper/close", "/paper/close-all", "/paper/settings", "/paper/capital-adjustment", "/runner", "/live/idempotency/claim", "/live/idempotency/release", "/live/entry/reserve", "/live/entry/release", "/live/positions", "/live/activation"].includes(path);
-    if (isPaperScan && this.scanInProgress) return Response.json({ ok: true, skipped: true, reason: "SCAN_ALREADY_IN_PROGRESS" }, { status: 202, headers: { "cache-control": "no-store" } });
+    if (isPaperScan && (this.scanInProgress || this.manualClosePendingCount > 0)) return Response.json({ ok: true, skipped: true, reason: this.manualClosePendingCount > 0 ? "MANUAL_CLOSE_PRIORITY" : "SCAN_ALREADY_IN_PROGRESS" }, { status: 202, headers: { "cache-control": "no-store" } });
     if (isPaperScan) { this.scanInProgress = true; this.scanStartedAt = Date.now(); }
     try {
-      return await (mutatesPaperLedger ? this.withStateMutationLock(() => this.handle(request)) : this.handle(request));
+      return await (isManualPaperClose ? this.withManualCloseLock(() => this.handle(request)) : mutatesPaperLedger ? this.withStateMutationLock(() => this.handle(request)) : this.handle(request));
     } catch (error) {
       const path2 = new URL(request.url).pathname;
       console.error("EngineState request failed", { path: path2, requestId, error: String(error), stack: error instanceof Error ? error.stack : void 0 });
@@ -3659,6 +3721,7 @@ var EngineState = class {
       return Response.json({ ok: false, storageDegraded: true, error: "Persistent storage unavailable; request refused." }, { status: 503 });
     } finally {
       if (isPaperScan) { this.scanInProgress = false; this.scanStartedAt = 0; }
+      if (isManualPaperClose) this.manualClosePendingCount = Math.max(0, (Number(this.manualClosePendingCount) || 1) - 1);
     }
   }
   async handle(request) {
@@ -4105,7 +4168,7 @@ var EngineState = class {
       const body = await request.json().catch(() => null);
       const key = String(body?.key ?? ""), symbol = String(body?.symbol ?? "");
       const side = String(body?.side ?? "").toUpperCase();
-      const maxPositions = Math.min(10, Math.max(1, Number(body?.maxPositions) || 10));
+      const maxPositions = Math.min(20, Math.max(1, Number(body?.maxPositions) || 20));
       const observed = Number(body?.observedOpenPositions);
       const ttlMs = Math.min(300000, Math.max(30000, Number(body?.ttlMs) || 120000));
       if (!/^[a-zA-Z0-9_-]{12,40}$/.test(key) || !/^[A-Z0-9]{2,20}-USDT$/.test(symbol) ||
@@ -4240,7 +4303,12 @@ var EngineState = class {
         await this.saveEngineState(engine);
         await this.writePaperState(positionLimitMigrationKey, "true");
       }
-      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 10) ledger.maxOpenPositions = 10;
+      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 20) ledger.maxOpenPositions = 20;
+      const positionLimitV22Key = "paper-position-limit-v22-20";
+      if (await this.readPaperState(positionLimitV22Key) !== "true") {
+        ledger.maxOpenPositions = 20; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
+        await this.saveEngineState(engine); await this.writePaperState(positionLimitV22Key, "true");
+      }
       const manualPause = await this.readPaperState("paper-runner-explicitly-paused") === "true";
       let alarmAt = await this.state.storage.getAlarm();
       const alarmStale = alarmAt !== null && alarmAt > Date.now() + PAPER_SCAN_INTERVAL_MS + 3e4;
@@ -4320,7 +4388,7 @@ var EngineState = class {
             await this.writePaperState("bingx-vst-legacy-ledger-v1", JSON.stringify(archive));
           }
           const fresh = structuredClone(DEFAULT_STATE.paperLedger);
-          fresh.balance = startingBalance; fresh.equity = startingBalance; fresh.positions = []; fresh.closedTrades = []; fresh.setups = []; fresh.scannedSymbols = []; fresh.scanDiagnostics = []; fresh.lastScanAt = null; fresh.runnerEnabled = true; fresh.cursor = 0; fresh.dailyPnl = 0; fresh.dayKey = new Date().toISOString().slice(0, 10); fresh.maxOpenPositions = 10; fresh.capitalAdjustments = [{ id: resetId, at: new Date().toISOString(), targetUsdt: startingBalance, balanceBefore: Number(old?.balance) || 0, amountUsdt: startingBalance - (Number(old?.balance) || 0), balanceAfter: startingBalance, status: "NEW_INTERNAL_PAPER_ACCOUNT" }];
+          fresh.balance = startingBalance; fresh.equity = startingBalance; fresh.positions = []; fresh.closedTrades = []; fresh.setups = []; fresh.scannedSymbols = []; fresh.scanDiagnostics = []; fresh.lastScanAt = null; fresh.runnerEnabled = true; fresh.cursor = 0; fresh.dailyPnl = 0; fresh.dayKey = new Date().toISOString().slice(0, 10); fresh.maxOpenPositions = 20; fresh.capitalAdjustments = [{ id: resetId, at: new Date().toISOString(), targetUsdt: startingBalance, balanceBefore: Number(old?.balance) || 0, amountUsdt: startingBalance - (Number(old?.balance) || 0), balanceAfter: startingBalance, status: "NEW_INTERNAL_PAPER_ACCOUNT" }];
           engine.paperLedger = fresh; engine.paperBalanceUsdt = startingBalance; engine.positions = []; engine.closedTrades = []; engine.lastScanAt = null; engine.lastScannedSymbol = null; engine.runnerEnabled = true; engine.internalPaperAccount = { resetId, initializedAt: new Date().toISOString(), initialBalanceUsdt: startingBalance, currency: "USDT", source: "INTERNAL_PAPER_ONLY", legacyLedgerArchived: !!old };
           await this.writePaperState("internal-paper-entry-queue-v1", "[]");
         }
@@ -4342,7 +4410,7 @@ var EngineState = class {
         return Response.json({ ok: false, error: "Invalid JSON body." }, { status: 400 });
       }
       const requested = Number(body.maxOpenPositions);
-      if (!Number.isInteger(requested) || requested < 0 || requested > 10) return Response.json({ ok: false, error: "maxOpenPositions must be an integer from 0 to 10." }, { status: 400 });
+      if (!Number.isInteger(requested) || requested < 0 || requested > 20) return Response.json({ ok: false, error: "maxOpenPositions must be an integer from 0 to 20." }, { status: 400 });
       const engine = await this.readEngineState();
       const ledger = engine.paperLedger ?? structuredClone(DEFAULT_STATE.paperLedger);
       ledger.maxOpenPositions = requested;
@@ -4410,7 +4478,7 @@ var EngineState = class {
           const exitSlippage = Number((position.qty * exitPrice * SLIPPAGE_RATE).toFixed(8));
           const entryFee = Number(position.entryFeeUsdt) || 0;
           const pnl = Number((gross - entryFee - exitFee - exitSlippage + (Number(position.realizedPnlUsdt) || 0)).toFixed(8));
-          const closed = { ...position, closedAt, exitPrice, exitPriceSource: priceSource, pnlUsdt: pnl, realizedPnlUsdt: Number(((Number(position.realizedPnlUsdt) || 0) + gross - exitFee - exitSlippage).toFixed(8)), slippagePaidUsdt: Number(((Number(position.slippagePaidUsdt) || 0) + exitSlippage).toFixed(8)), exitFeesUsdt: Number(((position.exitFeesUsdt || 0) + exitFee).toFixed(8)), feesPaidUsdt: Number((entryFee + (position.exitFeesUsdt || 0) + exitFee).toFixed(8)), closeReason: "MANUAL_CLOSE_ALL", closeSource: "MANUAL_CLOSE_ALL_API", closeRequestId: requestId, manualConfirmedAt: new Date(closeAllRequestedAt).toISOString(), status: "CLOSED" };
+          const closeEventId = crypto.randomUUID(); const stablePositionId = String(position.positionId ?? position.id); const initialMargin = Number(position.initialMarginUsdt ?? position.marginUsdt ?? position.allocationUsdt ?? 0); const closed = { ...position, positionId: stablePositionId, closeEventId, closedAt, exitPrice, exitPriceSource: priceSource, pnlUsdt: pnl, returnPct: initialMargin > 0 ? Number((pnl / initialMargin * 100).toFixed(8)) : null, pnlAccountingStatus: position.fundingDataStatus === "UNAVAILABLE" || position.fundingDataStatus === "UNAVAILABLE_MISSED_SETTLEMENT" ? "UNVERIFIED_FUNDING" : "VERIFIED", realizedPnlUsdt: Number(((Number(position.realizedPnlUsdt) || 0) + gross - exitFee - exitSlippage).toFixed(8)), slippagePaidUsdt: Number(((Number(position.slippagePaidUsdt) || 0) + exitSlippage).toFixed(8)), exitFeesUsdt: Number(((position.exitFeesUsdt || 0) + exitFee).toFixed(8)), feesPaidUsdt: Number((entryFee + (position.exitFeesUsdt || 0) + exitFee).toFixed(8)), closeReason: "MANUAL_CLOSE", closeSource: "MANUAL_CLOSE_ALL_API", closeRequestId: requestId, manualConfirmedAt: new Date(closeAllRequestedAt).toISOString(), status: "CLOSED" };
           ledger.balance = Number((ledger.balance + gross - exitFee - exitSlippage).toFixed(8));
           const dayKey = new Date(closedAt).toISOString().slice(0, 10);
           if (ledger.dayKey !== dayKey) {
@@ -4504,7 +4572,12 @@ var EngineState = class {
       const allocatedMargin = Number((initialMarginTotal * allocation).toFixed(8));
       const pnl = Number((gross - exitFee - exitSlippage - allocatedEntryFee + allocatedPriorRealized).toFixed(8));
       const closedAt = closeRequestedAt;
-      const closed = { ...position, qty: closeQty, initialQty: closeQty, entryFeeUsdt: allocatedEntryFee, exitFeesUsdt: Number((allocatedPriorExitFees + exitFee).toFixed(8)), feesPaidUsdt: Number((allocatedEntryFee + allocatedPriorExitFees + exitFee).toFixed(8)), slippagePaidUsdt: Number((allocatedPriorSlippage + exitSlippage).toFixed(8)), fundingPaidUsdt: allocatedFunding, realizedPnlUsdt: Number((allocatedPriorRealized + gross - exitFee - exitSlippage).toFixed(8)), initialRiskUsdt: allocatedInitialRisk, riskUsdt: Number((Number(position.riskUsdt || initialRiskTotal) * allocation).toFixed(8)), initialMarginUsdt: allocatedMargin, marginUsdt: allocatedMargin, allocationUsdt: allocatedMargin, closedAt, exitPrice, pnlUsdt: pnl, closeReason: body.closeClassification === "TP" ? (fraction === 1 ? "MANUAL_TP" : "MANUAL_PARTIAL_TP") : body.closeClassification === "SL" ? (fraction === 1 ? "MANUAL_SL" : "MANUAL_PARTIAL_SL") : fraction === 1 ? "MANUAL_CLOSE" : "MANUAL_PARTIAL_CLOSE", manualCloseClassification: ["TP","SL"].includes(body.closeClassification) ? body.closeClassification : "MANUAL", closeSource: "MANUAL_API_REQUEST", closeRequestId: requestId, manualConfirmedAt: new Date(closeRequestedAt).toISOString(), status: "CLOSED" };
+      const closeEventId = crypto.randomUUID();
+      const stablePositionId = String(position.positionId ?? position.id);
+      const closeEvent = { event: "MANUAL_CLOSE", closeEventId, positionId: stablePositionId, at: closedAt, qty: closeQty, executionPrice: exitPrice, markPrice: exitPrice, closeReason: "MANUAL_CLOSE", netPnlUsdt: pnl, marginUsdt: allocatedMargin, returnPct: allocatedMargin > 0 ? Number((pnl / allocatedMargin * 100).toFixed(8)) : null, feesPaidUsdt: Number((allocatedEntryFee + allocatedPriorExitFees + exitFee).toFixed(8)), entryFeeAllocatedUsdt: allocatedEntryFee, exitFeeUsdt: exitFee, fundingPaidUsdt: allocatedFunding, slippagePaidUsdt: Number((allocatedPriorSlippage + exitSlippage).toFixed(8)) };
+      position.executionEvents = [...(Array.isArray(position.executionEvents) ? position.executionEvents : []), closeEvent];
+      const priorManualEvents = position.executionEvents.filter(e => e.event === "MANUAL_CLOSE" && e.closeEventId !== closeEventId);
+      const closed = { ...position, positionId: stablePositionId, closeEventId, qty: closeQty, initialQty: closeQty, entryFeeUsdt: allocatedEntryFee, exitFeesUsdt: Number((allocatedPriorExitFees + exitFee).toFixed(8)), feesPaidUsdt: Number((allocatedEntryFee + allocatedPriorExitFees + exitFee).toFixed(8)), slippagePaidUsdt: Number((allocatedPriorSlippage + exitSlippage).toFixed(8)), fundingPaidUsdt: allocatedFunding, realizedPnlUsdt: Number((allocatedPriorRealized + gross - exitFee - exitSlippage).toFixed(8)), initialRiskUsdt: allocatedInitialRisk, riskUsdt: Number((Number(position.riskUsdt || initialRiskTotal) * allocation).toFixed(8)), initialMarginUsdt: allocatedMargin, marginUsdt: allocatedMargin, allocationUsdt: allocatedMargin, closedAt, exitPrice, pnlUsdt: pnl, closeReason: "MANUAL_CLOSE", manualCloseClassification: ["TP","SL"].includes(body.closeClassification) ? body.closeClassification : "MANUAL", closeSource: "MANUAL_API_REQUEST", closeRequestId: requestId, manualConfirmedAt: new Date(closeRequestedAt).toISOString(), status: "CLOSED" };
       ledger.balance = Number((ledger.balance + gross - exitFee - exitSlippage).toFixed(8));
       const dayKey = new Date(closedAt).toISOString().slice(0, 10);
       if (ledger.dayKey !== dayKey) {
@@ -4512,8 +4585,20 @@ var EngineState = class {
         ledger.dailyPnl = 0;
       }
       ledger.dailyPnl = Number((ledger.dailyPnl + gross - exitFee - exitSlippage).toFixed(8));
-      ledger.closedTrades.unshift(closed);
-      if (fraction === 1 || closeQty >= position.qty) ledger.positions = ledger.positions.filter((p) => p.id !== positionId);
+      if (fraction === 1 || closeQty >= position.qty) {
+        closed.pnlUsdt = Number((pnl + priorManualEvents.reduce((sum,e)=>sum + (Number(e.netPnlUsdt)||0),0)).toFixed(8));
+        closed.feesPaidUsdt = Number((Number(closed.feesPaidUsdt||0) + priorManualEvents.reduce((sum,e)=>sum + (Number(e.feesPaidUsdt)||0),0)).toFixed(8));
+        closed.entryFeeUsdt = Number((Number(closed.entryFeeUsdt||0) + priorManualEvents.reduce((sum,e)=>sum + (Number(e.entryFeeAllocatedUsdt)||0),0)).toFixed(8));
+        closed.exitFeesUsdt = Number((Number(closed.exitFeesUsdt||0) + priorManualEvents.reduce((sum,e)=>sum + (Number(e.exitFeeUsdt)||0),0)).toFixed(8));
+        closed.fundingPaidUsdt = Number((Number(closed.fundingPaidUsdt||0) + priorManualEvents.reduce((sum,e)=>sum + (Number(e.fundingPaidUsdt)||0),0)).toFixed(8));
+        closed.slippagePaidUsdt = Number((Number(closed.slippagePaidUsdt||0) + priorManualEvents.reduce((sum,e)=>sum + (Number(e.slippagePaidUsdt)||0),0)).toFixed(8));
+        closed.initialMarginUsdt = Number((allocatedMargin + priorManualEvents.reduce((sum,e)=>sum + (Number(e.marginUsdt)||0),0)).toFixed(8));
+        closed.marginUsdt = closed.initialMarginUsdt; closed.allocationUsdt = closed.initialMarginUsdt;
+        closed.returnPct = closed.initialMarginUsdt > 0 ? Number((closed.pnlUsdt / closed.initialMarginUsdt * 100).toFixed(8)) : null;
+        closed.pnlAccountingStatus = position.fundingDataStatus === "UNAVAILABLE" || position.fundingDataStatus === "UNAVAILABLE_MISSED_SETTLEMENT" ? "UNVERIFIED_FUNDING" : "VERIFIED";
+        ledger.closedTrades.unshift(closed);
+        ledger.positions = ledger.positions.filter((p) => p.id !== positionId);
+      }
       else {
         position.qty = Number((position.qty - closeQty).toFixed(8));
         position.initialQty = position.qty;
@@ -4539,7 +4624,7 @@ var EngineState = class {
       engine.positions = ledger.positions;
       engine.closedTrades = ledger.closedTrades;
       await this.saveEngineState(engine);
-      const responseBody = { ok: true, mode: "bingx-demo", requestId, positionId, symbol: position.symbol, fraction, closedQty: closeQty, closedAt, exitPrice, priceSource, pnlUsdt: pnl, balance: ledger.balance, equity: ledger.equity, dailyPnl: ledger.dailyPnl, closedTrade: closed, remainingQty: ledger.positions.find((p) => p.id === positionId)?.qty ?? 0, message: fraction === 1 ? "Paper pozisyonu kapat\u0131ld\u0131." : "Paper pozisyonunun bir b\xF6l\xFCm\xFC kapat\u0131ld\u0131." };
+      const responseBody = { ok: true, mode: "bingx-demo", requestId, positionId: stablePositionId, closeEventId, symbol: position.symbol, fraction, closedQty: closeQty, closedAt, exitPrice, priceSource, pnlUsdt: pnl, returnPct: closed?.returnPct ?? closeEvent.returnPct, balance: ledger.balance, equity: ledger.equity, dailyPnl: ledger.dailyPnl, closedTrade: fraction === 1 ? closed : null, closeEvent, remainingQty: ledger.positions.find((p) => p.id === positionId)?.qty ?? 0, message: fraction === 1 ? "Paper pozisyonu kapat\u0131ld\u0131." : "Paper pozisyonunun bir b\xF6l\xFCm\xFC kapat\u0131ld\u0131." };
       console.info("Paper position manually closed", JSON.stringify({ requestId, positionId, symbol: position.symbol, fraction, closeQty, exitPrice, priceSource, pnl, remainingPositions: ledger.positions.length, closedTradeRecorded: true, at: (/* @__PURE__ */ new Date()).toISOString() }));
       return Response.json(responseBody, { headers: { "x-request-id": requestId, "cache-control": "no-store" } });
     }
@@ -4567,29 +4652,12 @@ var EngineState = class {
           demoPendingEntries = savedPending ? JSON.parse(savedPending) : [];
           const trackedOrderSymbols = [.../* @__PURE__ */ new Set([...demoMetadata.map((meta) => meta.symbol), ...demoPendingEntries.map((pending) => pending.setup.symbol)])];
           demoSnapshot = await getBingXDemoSnapshot(this.env.BINGX_API_KEY, this.env.BINGX_API_SECRET, trackedOrderSymbols);
-          try {
-            const savedVstRiskBaseline = await this.readStorage("bingx-vst-risk-baseline-v1");
-            if (savedVstRiskBaseline !== undefined) {
-              const baselineEquity = Number(savedVstRiskBaseline?.initialEquity);
-              const baselineRisk = Number(savedVstRiskBaseline?.fixedRiskUnitUsdt);
-              if (!Number.isFinite(baselineEquity) || baselineEquity <= 0 || !Number.isFinite(baselineRisk) || baselineRisk <= 0 || Math.abs(baselineRisk - baselineEquity * 0.02) > 1e-8) {
-                demoAccountError = "VST_RISK_BASELINE_INVALID: stored fixed 1R baseline failed validation; new VST entries are blocked.";
-              } else fixedRiskUnitUsdt = baselineRisk;
-            } else {
-              const initialEquity = Number(demoSnapshot.balance?.equity);
-              if (!Number.isFinite(initialEquity) || initialEquity <= 0) {
-                demoAccountError = "VST_RISK_BASELINE_UNAVAILABLE: BingX VST equity could not be verified; new entries are blocked.";
-              } else {
-                const baseline = { initialEquity, fixedRiskUnitUsdt: initialEquity * 0.02, riskUnitFraction: 0.02, capturedAt: new Date().toISOString(), source: "BINGX_VST" };
-                await this.writeStorage("bingx-vst-risk-baseline-v1", baseline);
-                fixedRiskUnitUsdt = baseline.fixedRiskUnitUsdt;
-                console.info("BingX VST fixed 1R baseline initialized", JSON.stringify({ initialEquity, fixedRiskUnitUsdt }));
-              }
-            }
-          } catch (riskBaselineError) {
+          const currentVstEquity = Number(demoSnapshot.balance?.equity);
+          if (!Number.isFinite(currentVstEquity) || currentVstEquity <= 0) {
+            demoAccountError = "VST_CURRENT_EQUITY_UNAVAILABLE: current BingX VST equity could not be verified; new entries are blocked.";
             fixedRiskUnitUsdt = 0;
-            demoAccountError = "VST_RISK_BASELINE_STORAGE_ERROR: " + String(riskBaselineError).slice(0, 180);
-            console.error("BingX VST risk baseline unavailable; new entries blocked", demoAccountError);
+          } else {
+            fixedRiskUnitUsdt = round(currentVstEquity * 0.02, 8);
           }
           let pendingReconciledPosition = false;
           const stillPending = [];
@@ -4699,7 +4767,12 @@ var EngineState = class {
         await this.saveEngineState(engine);
         await this.writePaperState(positionLimitMigrationKey, "true");
       }
-      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 10) ledger.maxOpenPositions = 10;
+      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 20) ledger.maxOpenPositions = 20;
+      const positionLimitV22Key = "paper-position-limit-v22-20";
+      if (await this.readPaperState(positionLimitV22Key) !== "true") {
+        ledger.maxOpenPositions = 20; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
+        await this.saveEngineState(engine); await this.writePaperState(positionLimitV22Key, "true");
+      }
       const positionMarginMigrationKey = "paper-position-margin-metadata-v1";
       if (await this.readPaperState(positionMarginMigrationKey) !== "true") {
         await this.writePaperState(positionMarginMigrationKey, "true");
@@ -4858,6 +4931,8 @@ var EngineState = class {
         if (!contractsResponse.ok) throw new Error("BingX contracts HTTP " + contractsResponse.status);
         const contractsPayload = await contractsResponse.json();
         if (contractsPayload.code !== 0 || !Array.isArray(contractsPayload.data)) throw new Error(contractsPayload.msg || "Invalid BingX contract response");
+        for (const contract of contractsPayload.data) {
+        }
         universeSymbols = buildEligibleCryptoUsdtPerpetualUniverse(contractsPayload.data, contractsPayload.data.length);
       } catch (error) {
         universeError = String(error).slice(0, 240);
@@ -5148,7 +5223,7 @@ var EngineState = class {
       if (!demoConfigured) for (const position of ledger.positions.filter((p) => p.status === "OPEN")) activeEngineKeys.add(engineKey(position));
       const executedKeySet = new Set(demoExecutedKeys);
       if (!demoConfigured) for (const trade of ledger.closedTrades ?? []) if (trade.id || trade.positionId) executedKeySet.add(String(trade.positionId ?? trade.id));
-      const maximumOpen = Math.min(10, Math.max(0, Number(ledger.maxOpenPositions ?? 10)));
+      const maximumOpen = Math.min(20, Math.max(0, Number(ledger.maxOpenPositions ?? 20)));
       const queueNow = Date.now();
       const previousEntryQueueRaw = await this.readPaperState(demoConfigured ? "bingx-vst-entry-queue-v1" : "internal-paper-entry-queue-v1");
       let previousEntryQueue = [];
@@ -5213,9 +5288,19 @@ var EngineState = class {
       let paperEntryAttempts = 0;
       if (!demoConfigured && STRATEGY_GENERATION_ENABLED && NEW_PAPER_ENTRIES_ENABLED && !liquidationRiskGateActive) {
         for (const nextEntry of [...vstEntryQueue]) {
+          if (this.manualClosePendingCount > 0) break;
           if (Number(nextEntry.nextAttemptAt ?? 0) > Date.now()) continue;
           const setup = nextEntry.setup;
           if (!setup || setup.status !== "READY") continue;
+          if (setup.tradeStyle === "SWING" && setup.model === "W05_RANGE_DEVIATION" && setup.side === "SHORT") {
+            setup.status = "WATCH";
+            setup.executionDecisionCode = "MODEL_SIDE_QUARANTINED";
+            setup.executionDecisionReason = "W05 Swing SHORT geçici paper karantinasında: son 17 kapanan işlemde %35,29 kazanma, PF 0,28 ve -44,69 USDT. 30/60/90 günlük bağımsız doğrulama bekleniyor.";
+            const visible = ledger.setups.find((item) => item.symbol === setup.symbol && item.side === setup.side && item.model === setup.model && item.candleTime === setup.candleTime);
+            if (visible) Object.assign(visible, { status: "WATCH", executionDecisionCode: setup.executionDecisionCode, executionDecisionReason: setup.executionDecisionReason });
+            vstEntryQueue = vstEntryQueue.filter((item) => item.setupKey !== nextEntry.setupKey);
+            continue;
+          }
           const instanceKey = nextEntry.setupInstanceKey ?? setupInstanceKey(setup);
           if (setupIsExpired(setup, Date.now()) || executedSetupInstances.has(instanceKey)) {
             setup.status = "EXPIRED";
@@ -5262,9 +5347,8 @@ var EngineState = class {
             if (rejected) Object.assign(rejected, { status: "REJECTED", executionDecisionCode: setup.executionDecisionCode, executionDecisionReason: setup.executionDecisionReason });
             continue;
           }
-          const configuredRiskPct = Number(this.env.PAPER_TRADE_ALLOCATION_PERCENT ?? RISK_CONFIG.normalRiskPercentOfEquity);
-          const safeRiskPct = Number.isFinite(configuredRiskPct) && configuredRiskPct > 0 && configuredRiskPct <= RISK_CONFIG.normalRiskPercentOfEquity ? configuredRiskPct : RISK_CONFIG.normalRiskPercentOfEquity;
-          fixedRiskUnitUsdt = round(Math.max(0, Number(ledger.balance) * safeRiskPct / 100), 8);
+          const allocationPercent = RISK_CONFIG.normalRiskPercentOfEquity;
+          fixedRiskUnitUsdt = round(Math.max(0, Number(ledger.equity ?? ledger.balance) * allocationPercent / 100), 8);
           const reservedMargin = ledger.positions.filter((p) => p.status === "OPEN").reduce((sum, p) => sum + Math.max(0, Number(p.marginUsdt ?? p.initialMarginUsdt ?? 0)), 0);
           const availableMargin = Math.max(0, Number(ledger.balance) - reservedMargin);
           const sizing = calculateBingXDemoEntrySizing({ entry, stopLoss: stop, equity: Number(ledger.equity ?? ledger.balance), availableMargin, precision: 8, minQty: 0, riskMultiplier: setup.riskMultiplier, fixedRiskUnitUsdt });
@@ -5296,19 +5380,19 @@ var EngineState = class {
             tradeStyle: setup.tradeStyle, status: "OPEN", entry, stopLoss: stop, tp1, tp2, tp3: Number.isFinite(tp3) ? tp3 : void 0,
             tp4: Number.isFinite(Number(setup.tp4)) ? Number(setup.tp4) : void 0, takeProfit: Number.isFinite(tp3) ? tp3 : tp2,
             qty: sizing.quantity, initialQty: sizing.quantity, targetStage: 0, targetStagesReached: [], realizedPnlUsdt: -entrySlippageUsdt,
-            riskUsdt: sizing.riskBudget, initialRiskUsdt: sizing.estimatedLoss, leverage: sizing.leverage, effectiveLeverage: sizing.leverage,
+            riskUsdt: sizing.estimatedLoss, initialRiskUsdt: sizing.estimatedLoss, allocationBudgetUsdt: sizing.allocationBudgetUsdt, leverage: sizing.leverage, effectiveLeverage: sizing.leverage,
             leveragePolicyMax: MAX_LEVERAGE, leverageSource: "internal-paper-policy", notionalUsdt: sizing.notionalUsdt,
             marginUsdt: sizing.marginUsdt, allocationUsdt: sizing.marginUsdt, initialMarginUsdt: sizing.marginUsdt,
-            entryFeeUsdt, exitFeesUsdt: 0, feesPaidUsdt: entryFeeUsdt, slippagePaidUsdt: entrySlippageUsdt, feeRate, feeAccountingVersion: 2, fundingPaidUsdt: 0, fundingEvents: [], lastFundingTime: 0, fundingRateSnapshot: Number.isFinite(fundingSnapshot?.rate) ? fundingSnapshot.rate : null, fundingNextTime: Number.isFinite(fundingSnapshot?.nextFundingTime) ? fundingSnapshot.nextFundingTime : null, fundingIntervalHours: Number.isFinite(fundingSnapshot?.fundingIntervalHours) ? fundingSnapshot.fundingIntervalHours : 8, fundingSnapshotAt: fundingSnapshot ? new Date(fundingSnapshot.updateTime || fundingSnapshot.fetchedAt).toISOString() : null, fundingDataStatus: fundingSnapshot ? "AVAILABLE" : "UNAVAILABLE", maintenanceMarginRate: DEFAULT_MAINTENANCE_MARGIN_RATE,
+            entryFeeUsdt, entryFeeRemainingUsdt: entryFeeUsdt, entryFeeAllocatedUsdt: 0, exitFeesUsdt: 0, feesPaidUsdt: entryFeeUsdt, slippagePaidUsdt: entrySlippageUsdt, feeRate, feeAccountingVersion: 2, fundingPaidUsdt: 0, fundingAllocatedUsdt: 0, fundingEvents: [], lastFundingTime: 0, fundingRateSnapshot: Number.isFinite(fundingSnapshot?.rate) ? fundingSnapshot.rate : null, fundingNextTime: Number.isFinite(fundingSnapshot?.nextFundingTime) ? fundingSnapshot.nextFundingTime : null, fundingIntervalHours: Number.isFinite(fundingSnapshot?.fundingIntervalHours) ? fundingSnapshot.fundingIntervalHours : 8, fundingSnapshotAt: fundingSnapshot ? new Date(fundingSnapshot.updateTime || fundingSnapshot.fetchedAt).toISOString() : null, fundingDataStatus: fundingSnapshot ? "AVAILABLE" : "UNAVAILABLE", maintenanceMarginRate: DEFAULT_MAINTENANCE_MARGIN_RATE,
             liquidationPrice: calculateLiquidationPrice(entry, setup.side, sizing.leverage, DEFAULT_MAINTENANCE_MARGIN_RATE),
             openedAt, markPrice: mark, lastMarkPrice: mark, markPriceAt: at, livePriceAt: at, livePriceAvailable: true, unrealizedPnlUsdt: 0,
             score: setup.score, confidence: Number.isFinite(Number(setup.confidence)) ? Number(setup.confidence) <= 1 ? Number(setup.confidence) * 100 : Number(setup.confidence) : null,
             confidenceStatus: setup.confidenceStatus ?? "INSUFFICIENT_DATA", confidenceSampleSize: Number(setup.confidenceSampleSize) || 0,
-            setupTimeframe: setup.setupTimeframe, entryTimeframe: setup.entryTimeframe, setupReason: setup.reason ?? "",
+            setupTimeframe: setup.setupTimeframe, entryTimeframe: setup.entryTimeframe, primaryTrend: setup.audit?.htfTrend ?? "UNKNOWN", marketPhase: setup.audit?.marketRegime ?? "UNKNOWN", marketRegime: setup.audit?.marketRegime ?? "UNAVAILABLE", htfTrend: setup.audit?.htfTrend ?? "UNAVAILABLE", btcBias: setup.audit?.btcBias ?? "UNAVAILABLE", setupReason: setup.reason ?? "",
             confirmations: Array.isArray(setup.confirmations) ? setup.confirmations : [], scoreBreakdown: setup.scoreBreakdown ?? {},
             riskReward: rr, audit: setup.audit ?? null, btcContextStatus: setup.btcContextStatus ?? "UNAVAILABLE",
             maxHoldHours: Number.isFinite(setup.maxHoldHours) ? setup.maxHoldHours : 168, source: "INTERNAL_PAPER",
-            executionEvents: [{ event: "PAPER_ENTRY", at, entry, markPrice: mark, qty: sizing.quantity, riskBudget: sizing.riskBudget, leverage: sizing.leverage }]
+            executionEvents: [{ event: "PAPER_ENTRY", at, entry, markPrice: mark, qty: sizing.quantity, allocationBudgetUsdt: sizing.allocationBudgetUsdt, leverage: sizing.leverage }]
           };
           ledger.balance = round(ledger.balance - entryFeeUsdt - entrySlippageUsdt, 8);
           ledger.dailyPnl = round((Number(ledger.dailyPnl) || 0) - entryFeeUsdt - entrySlippageUsdt, 8);
@@ -5331,7 +5415,7 @@ var EngineState = class {
       let vstOpened = 0;
       let vstEntryAttempts = 0;
       if (STRATEGY_GENERATION_ENABLED && NEW_PAPER_ENTRIES_ENABLED && demoConfigured && demoSnapshot && fixedRiskUnitUsdt > 0 && !demoProtectionCleanupPending && !liquidationRiskGateActive && demoSnapshot.openOrdersComplete !== false) {
-        while (demoSnapshot.positions.length + demoPendingEntries.length + vstOpened < maximumOpen) {
+        while (this.manualClosePendingCount === 0 && demoSnapshot.positions.length + demoPendingEntries.length + vstOpened < maximumOpen) {
           const nextEntry = vstEntryQueue.find((item) => item.nextAttemptAt <= Date.now() && !activeEngineKeys.has(engineKey(item.setup)));
           if (!nextEntry) break;
           const setup = nextEntry.setup;
@@ -5488,7 +5572,7 @@ var EngineState = class {
       if (demoProtectionCleanupPending) entryGateBlockedBy.push("PROTECTIVE_ORDER_CLEANUP_PENDING");
       if (liquidationRiskGateActive) entryGateBlockedBy.push("LIQUIDATION_RISK_GATE_ACTIVE");
       if (demoSnapshot?.openOrdersComplete === false) entryGateBlockedBy.push("EXCHANGE_OPEN_ORDERS_INCOMPLETE");
-      if (demoSnapshot && availableEntrySlots === 0) entryGateBlockedBy.push(pendingEntryCount > 0 ? "MAX_OPEN_CAPACITY_RESERVED_BY_PENDING_ENTRIES" : "MAX_OPEN_POSITIONS_REACHED");
+      if (availableEntrySlots === 0 && (demoConfigured ? !!demoSnapshot : true)) entryGateBlockedBy.push(pendingEntryCount > 0 ? "MAX_OPEN_CAPACITY_RESERVED_BY_PENDING_ENTRIES" : "MAX_OPEN_POSITIONS_REACHED");
       if (readyCandidateCount === 0 && vstEntryQueue.length === 0) entryGateBlockedBy.push("NO_READY_CANDIDATE");
       if (readyCandidateCount > 0 && vstEntryQueue.length === 0) entryGateBlockedBy.push("READY_CANDIDATES_ALREADY_ACTIVE_OR_EXECUTED");
       if (vstEntryQueue.length > 0 && dueQueueCount === 0) entryGateBlockedBy.push("ENTRY_QUEUE_RETRY_BACKOFF");
@@ -5537,7 +5621,7 @@ var EngineState = class {
         nextBatchSize: PAPER_SCAN_BATCH_NORMAL,
         lastError: universeError ?? (scanErrors[0] ? [scanErrors[0].symbol, scanErrors[0].timeframe ?? scanErrors[0].engine ?? "MARKET_DATA", scanErrors[0].error].join(":") : batchSymbols.length === 0 ? "NO_SYMBOLS_SCANNED" : null)
       };
-      {
+      await this.withManualCloseLock(async () => {
         const latestEngine = await this.readEngineState();
         const latestLedger = latestEngine.paperLedger ?? structuredClone(DEFAULT_STATE.paperLedger);
         const initialPositions = new Map(scanPositionStateAtStart);
@@ -5744,7 +5828,7 @@ var EngineState = class {
         latestEngine.closedTrades = latestLedger.closedTrades;
         latestLedger.equity = Number((latestLedger.balance + latestLedger.positions.filter((p) => p.status === "OPEN").reduce((sum, p) => sum + Number(p.unrealizedPnlUsdt ?? 0), 0)).toFixed(8));
         await this.saveEngineState(latestEngine);
-      }
+      });
       return Response.json({
         ok: true,
         mode: demoConfigured ? "bingx-demo" : "internal-paper",
@@ -6943,7 +7027,7 @@ async function loadBingXDemoStatus(env) {
       activityRanking: null,
       activityRankingBySymbol: {},
       marketContextSnapshot: null,
-      maxOpenPositions: Math.min(10, Math.max(0, Number(ledger?.maxOpenPositions ?? 10))),
+      maxOpenPositions: Math.min(20, Math.max(0, Number(ledger?.maxOpenPositions ?? 20))),
       runnerEnabled: paperStatusResult.status ? paperStatusResult.status.runnerEnabled === true : engine?.runnerEnabled === true,
       automationStopped: AUTOMATION_STOP,
       manualResumeRequired: AUTOMATION_STOP,
@@ -7296,7 +7380,7 @@ async function bingx(path) {
 }
 __name(bingx, "bingx");
 
-const DASHBOARD_HTML = "<!doctype html><html lang=\"tr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>SMC PRO V2</title><style>\n*{box-sizing:border-box}body{margin:0;background:#08111f;color:#e8eef8;font:14px system-ui}.wrap{max-width:1450px;margin:auto;padding:16px}.top,.panel,.stat,.engine,.pc{background:#111d2d;border:1px solid #293a50;border-radius:13px}.top{padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.brand{font-size:21px;font-weight:800}.muted,small{color:#91a3ba}.muted{font-size:12px}.token{display:flex;gap:6px}.token input{width:190px;background:#091728;border:1px solid #354a63;border-radius:8px;color:#fff;padding:8px}.stats,.engines{display:grid;gap:10px;margin:12px 0}.stats{grid-template-columns:repeat(4,1fr)}.engines{grid-template-columns:repeat(2,1fr)}.summary{grid-template-columns:repeat(3,1fr)}.summary .stat{min-height:104px}.summary .num{font-size:21px}.limit-scale{display:flex;justify-content:space-between;color:#91a3ba;font-size:10px;margin-top:8px}.summary .sub{color:#91a3ba;font-size:11px;margin-top:5px;line-height:1.35}.stat,.engine{padding:12px 14px}.num{font-size:23px;font-weight:750;margin-top:5px}.engine{display:flex;justify-content:space-between}.ok{color:#3bd39a}.warn{color:#e6b35f}.tabs{display:flex;gap:7px;overflow:auto;padding:2px 0 12px}.btn,.tabs button{background:#15263b;border:1px solid #354b66;color:#d3deed;border-radius:8px;padding:9px 11px;cursor:pointer;white-space:nowrap}.tabs button.active{background:#28528a;color:#fff}.panel{padding:15px;min-height:380px}.head{display:flex;justify-content:space-between;align-items:center}.head h2{font-size:17px;margin:0}.tablewrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:850px;margin-top:13px}td,th{padding:10px 8px;border-bottom:1px solid #26374c;text-align:left;font-size:12px}th{color:#91a3ba}.sym{font-weight:800}.long{color:#3bd39a}.short{color:#ff7786}.why{max-width:270px;color:#c3d0e0;line-height:1.4}.small{font-size:11px;padding:7px 9px}.close{background:#4a2632;border-color:#87404e}.chartbtn{background:#1c3c5d}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:14px}.pc{padding:14px}.pchead{display:flex;justify-content:space-between;gap:8px}.pcname{font-size:16px;font-weight:800}.actions{display:flex;gap:6px}.details{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.details div,.metric{background:#0b1727;padding:9px;border-radius:8px}.details small{display:block;font-size:10px;margin-bottom:4px}.details b{font-size:12px}.reason{line-height:1.5;color:#c5d1e0;margin:10px 0}.scalehead,.scalefoot{display:flex;justify-content:space-between;color:#98abc1;font-size:10px}.scale{height:10px;border-radius:20px;background:linear-gradient(90deg,#d95d6b,#d4a44d,#30b887);position:relative;margin:7px 0}.needle{position:absolute;top:-4px;height:18px;width:3px;background:white;box-shadow:0 0 6px white;left:50%;transition:left .8s ease}.tpmark{position:absolute;top:1px;height:8px;width:2px;background:#fff;opacity:.85;transform:translateX(-1px)}.empty{padding:34px;text-align:center;border:1px dashed #384a60;border-radius:10px;color:#91a3ba;margin-top:14px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}.healthbox{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:12px 0}.healthline{display:flex;justify-content:space-between;gap:10px;background:#0b1727;padding:10px;border-radius:8px}.healthline span{color:#91a3ba}@media(max-width:720px){.healthbox{grid-template-columns:1fr}}.metric b{display:block;font-size:18px;margin-top:5px}.tag{font-size:10px;padding:4px 6px;border-radius:6px;background:#283c55}.ready{background:#174336;color:#8ae0c0}.wait{background:#493b24;color:#f3cd83}.chart{width:100%;height:620px;border:0;border-radius:10px;margin-top:12px}.modal{display:none;position:fixed;inset:0;background:#000b;z-index:5;align-items:center;justify-content:center;padding:16px}.modal.show{display:flex}.box{width:min(420px,100%);background:#111d2d;border:1px solid #3b506b;border-radius:14px;padding:20px}.box input{width:100%;margin:18px 0}.end{display:flex;justify-content:flex-end;gap:8px}.note{font-size:11px;color:#9aacc2;line-height:1.5;margin-top:12px}@media(max-width:720px){.wrap{padding:9px}.stats{grid-template-columns:repeat(2,1fr)}.summary{grid-template-columns:repeat(2,1fr)}.cards,.engines,.grid{grid-template-columns:1fr}.details{grid-template-columns:repeat(2,1fr)}.token input{width:135px}.chart{height:500px}}\n.scanner-scroll{max-height:520px;overflow-y:auto;overflow-x:auto;border:1px solid #293a50;border-radius:9px;margin:10px 0 18px;overscroll-behavior:contain}.scanner-scroll .tablewrap{overflow:visible}.scanner-scroll table{margin-top:0}.scanner-scroll thead th{position:sticky;top:0;background:#111d2d;z-index:2}.tsicol{white-space:nowrap;font-variant-numeric:tabular-nums}.limit-details{margin-top:9px;border-top:1px solid #293a50;padding-top:7px}.limit-details summary{cursor:pointer;color:#9fc5f5;font-size:11px}.limit-controls{display:flex;align-items:center;gap:8px;margin-top:8px}.limit-controls input{min-width:70px;flex:1;accent-color:#7db4ff}.limit-controls b{min-width:18px;text-align:center}.limit-controls .btn{padding:6px 10px}.limit-card{min-width:0}.reason-details{margin-top:6px;border-top:1px solid #2b3c50;padding-top:5px;max-width:430px}.reason-details summary{cursor:pointer;color:#9fc5f5;font-size:11px;font-weight:600}.reason-details p{margin:4px 0;font-size:10px;line-height:1.4;color:#c7d6e6}.reason-summary{max-width:260px;white-space:normal;line-height:1.4}</style></head><body><main class=\"wrap\">\n<header class=\"top\"><div><div class=\"brand\">SMC PRO <span style=\"color:#7db4ff\">V2</span></div><div class=\"muted\">MARKET INTELLIGENCE · PAPER TRADING CONTROL CENTER</div></div><div style=\"display:flex;align-items:center;gap:10px;flex-wrap:wrap\"><span class=\"tag wait\">PAPER MODE · GERÇEK EMİR KAPALI</span><div class=\"token\"><input id=\"controlToken\" type=\"password\" autocomplete=\"off\" placeholder=\"VST kontrol anahtarı\" aria-label=\"VST kontrol anahtarı\"></div><span id=\"conn\" class=\"statusline muted\">Motor ve tarayıcı kontrol ediliyor</span><button id=\"refresh\" class=\"btn\">↻ Yenile</button></div></header>\n<section id=\"accountSummary\" class=\"stats summary\"><div class=\"empty\">Demo hesap verileri yükleniyor…</div></section><section class=\"engines\"><div class=\"engine\"><b>Scalp Engine</b><b id=\"se\" class=\"warn\">Kontrol ediliyor</b></div><div class=\"engine\"><b>Swing Engine</b><b id=\"we\" class=\"warn\">Kontrol ediliyor</b></div></section>\n<nav id=\"tabs\" class=\"tabs\"></nav><section class=\"panel\"><div class=\"head\"><h2 id=\"heading\">Market Overview</h2><span id=\"updated\" class=\"muted\"></span></div><div id=\"content\"><div class=\"empty\">Veriler yükleniyor…</div></div></section><p class=\"note\">Paper ledger ve BingX piyasa verileri gösterilir. Scalp ve Swing motorları bağımsız sinyal üretir; gerçek emirler kilitlidir.</p></main>\n<div id=\"modal\" class=\"modal\"><div class=\"box\"><h3 id=\"mt\">Pozisyonu kapat</h3><p class=\"muted\">Kapatılacak pozisyon yüzdesini seçin.</p><input id=\"pct\" type=\"range\" min=\"1\" max=\"100\" value=\"50\"><b id=\"pl\">%50 kapat</b><div class=\"end\"><button class=\"btn\" id=\"cancel\">Vazgeç</button><button class=\"btn close\" id=\"confirm\">Kapatmayı onayla</button></div></div></div>\n<script>\nconst T=['Market Overview','Açık İşlemler','Scalp Scanner','Swing Scanner','Positions','Statistics','Candidates (İşlem Adayları)','Trade History','Diagnostics','Grafik'];let tab=0,health=null,analytics=null,status=null,live=null,systemHealth=null,archiveHealth=null,historyHealth=null,cloudflareUsage=null,tickerData=null,universeData=null,globalContext=null,token='',chosen=null,symbol='BTCUSDT';const $=x=>document.getElementById(x),A=x=>Array.isArray(x)?x:[],N=x=>x==null||x===''?'—':Number(x).toLocaleString('tr-TR',{maximumFractionDigits:5}),E=x=>String(x??'').replace(/[&<>']/g,c=>c==='&'?'&amp;':c==='<'?'&lt;':c==='>'?'&gt;':'&#39;').replaceAll(String.fromCharCode(34),'&quot;');$('controlToken').oninput=e=>token=e.target.value.trim();\nfunction ps(){return A(status&&status.positions).length?A(status.positions):A(live&&live.positions)}function setups(){let x=A(health&&health.setups);return x.length?x:A(status&&status.setups)}function candidates(){return setups().filter(x=>!['INVALIDATED','EXPIRED','REJECTED','CLOSED','OPENED'].includes(String(x.status||'').toUpperCase()))}\nfunction setupName(p){const m={S01_SWEEP_MSS_FVG:\"Likidite süpürmesi + MSS + FVG\",S02_BREAKER_RETEST:\"Breaker retest\",S03_BOS_DISPLACEMENT:\"BOS + displacement\",S04_RANGE_DEVIATION:\"Range deviation\",S05_FAILED_BREAKOUT:\"Başarısız kırılım\",S06_OB_REACTION:\"Order block tepkisi\",W01_HTF_OB_REVERSAL:\"HTF Order Block dönüşü\",W02_SUPPLY_DEMAND_REVERSAL:\"Supply Demand dönüşü\",W03_SWEEP_CHOCH:\"Sweep + CHoCH\",W04_BREAKER_RETEST:\"Breaker retest\",W05_RANGE_DEVIATION:\"Range deviation\",W06_CRT:\"CRT\",W07_OTE:\"OTE geri çekilmesi\",W08_BOS_CONTINUATION:\"BOS devam\"};return m[p.model]||p.model||\"Setup\";}\nfunction why(p){if(p.status===\"OPEN\")return p.openReasonTr||p.openReason||p.reason||\"Pozisyon açık\";return p.executionDecisionReason||p.reason||setupName(p);}\nfunction reasonDetails(p){const a=p.audit||{},z=a.zone||{},e=a.structureEvent||{},rows=[[\"Setup türü\",setupName(p)],[\"Motor ve yön\",String(p.tradeStyle||a.engine||\"UNAVAILABLE\")+\" / \"+String(p.side||\"UNAVAILABLE\")],[\"Setup zaman dilimi\",p.setupTimeframe],[\"Bölge zaman dilimi\",z.sourceTimeframe],[\"Giriş zaman dilimi\",p.entryTimeframe],[\"Üst zaman yönü\",a.htfTrend],[\"Üst zaman uyumu\",a.htfAligned],[\"Piyasa rejimi\",a.marketRegime],[\"Yapısal olay\",e.type],[\"Yapısal seviye\",e.level],[\"Displacement\",e.displacement],[\"Bölge\",z.kind],[\"Bölge alt sınır\",z.bottom],[\"Bölge üst sınır\",z.top],[\"Karar\",p.status],[\"Karar nedeni\",p.executionDecisionReason||why(p)],[\"Giriş\",p.entry],[\"Stop\",p.stopLoss],[\"Hedef\",p.takeProfit],[\"Güven durumu\",a.confidenceStatus||p.confidenceStatus],[\"Güven örneklemi\",a.confidenceSampleSize]];return '<details class=\"reason-details\"><summary>Analiz ve karar ayrıntısı</summary>'+rows.map(x=>'<p><b>'+E(x[0])+':</b> '+E(x[1]===null||x[1]===undefined?\"UNAVAILABLE\":String(x[1]))+'</p>').join(\"\")+'</details>';}\n\nfunction tf(p){return String(p.setupTimeframe||p.setupSourceTimeframe||'—').toUpperCase()+' kurulum · '+String(p.entryTimeframe||'—').toUpperCase()+' giriş'}\nfunction scale(p){let v=Number(p.markPrice??p.currentPrice),s=Number(p.stopLoss),t=Number(p.tp3??p.takeProfit??p.tp2);if(![v,s,t].every(Number.isFinite)||v<=0||s<=0||t<=0||s===t)return{pos:50,t1:null,t2:null,t3:null,sd:'—',td:'—'};let f=x=>{let n=Number(x);if(!Number.isFinite(n)||n<=0)return null;return Math.max(0,Math.min(100,p.side==='LONG'?(n-s)/(t-s)*100:(s-n)/(s-t)*100))};return{pos:f(v)??50,t1:f(p.tp1),t2:f(p.tp2),t3:f(p.tp3??p.takeProfit??p.tp2),sd:(Math.abs(v-s)/v*100).toFixed(2)+'%',td:(Math.abs(t-v)/v*100).toFixed(2)+'%'}}\nfunction renderTabs(){$('tabs').innerHTML=T.map((x,i)=>'<button class=\"'+(i===tab?'active':'')+'\" data-t=\"'+i+'\">'+x+'</button>').join('');document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=+b.dataset.t;renderTabs();draw()})}\nfunction tickerPrice(symbol){\n const root=tickerData?.data??tickerData, key=String(symbol||\"\").toUpperCase().replace(/[^A-Z0-9]/g,\"\");\n const rows=Array.isArray(root)?root:Array.isArray(root?.tickers)?root.tickers:Array.isArray(root?.data)?root.data:[root];\n const item=rows.find(x=>String(x?.symbol||x?.s||\"\").toUpperCase().replace(/[^A-Z0-9]/g,\"\")===key)||root?.[symbol]||root?.[key];\n const value=item?.lastPrice??item?.last??item?.price??item?.close??item?.markPrice??item?.last_price;\n const n=Number(value);return Number.isFinite(n)&&n>0?n:null;\n}\nfunction positionMark(p){const live=tickerPrice(p.symbol);if(Number.isFinite(live)&&live>0)return live;const mark=Number(p.markPrice??p.currentPrice);return Number.isFinite(mark)&&mark>0?mark:null}\nfunction positionPnl(p){const mark=positionMark(p),entry=Number(p.entry),qty=Number(p.qty);if(mark!==null&&Number.isFinite(entry)&&entry>0&&Number.isFinite(qty)&&qty>0){const feeRate=Number.isFinite(Number(p.feeRate))?Math.max(0,Number(p.feeRate)):0.0005;const gross=(p.side===\"LONG\"?mark-entry:entry-mark)*qty;return gross-qty*mark*(feeRate+0.0002)}const v=Number(p.unrealizedPnlUsdt);return p.unrealizedPnlUsdt!=null&&Number.isFinite(v)?v:null}\nfunction positionRoi(p){const pnl=positionPnl(p),margin=Number(p.marginUsdt??p.initialMarginUsdt);return pnl!==null&&Number.isFinite(margin)&&margin>0?pnl/margin*100:null}\nfunction positionPnlLabel(p){const pnl=positionPnl(p),roi=positionRoi(p);if(pnl===null)return \"Veri yok\";const fmt=x=>x.toLocaleString(\"tr-TR\",{minimumFractionDigits:2,maximumFractionDigits:2});return (pnl>=0?\"+\":\"\")+fmt(pnl)+\" USDT\"+(roi===null?\"\":\" · \"+(roi>=0?\"+\":\"\")+fmt(roi)+\"%\")}\nfunction table(rows,kind){\n  if(!rows.length)return '<div class=\"empty\">Bulunan setup veya pozisyon yok.</div>';\n  const now=new Intl.DateTimeFormat(\"tr-TR\",{timeZone:\"Europe/Istanbul\",dateStyle:\"short\",timeStyle:\"medium\"}).format(new Date());\n  return '<div class=\"scanner-scroll\"><div class=\"tablewrap\"><table><thead><tr><th>Parite</th><th>Yön</th><th>Anlık fiyat</th>'+(kind===\"pos\"?'<th>Kaldıraç</th><th>Anlık K/Z · ROI</th>':\"\")+'<th>Skor / Güven</th><th>Giriş</th><th>TP</th><th>SL</th><th>Ready / Wait</th><th>İşlem gerekçesi</th>'+(kind===\"pos\"?'<th>İşlem</th>':\"\")+'<th>TSİ · Tarih / Saat</th></tr></thead><tbody>'+rows.map(p=>{\n   const ready=[\"READY\",\"QUALIFIED\",\"OPEN\",\"HIGH_QUALITY\"].includes(String(p.status||\"\").toUpperCase()),price=positionMark(p),pnl=positionPnl(p),lev=Number(p.leverage??p.effectiveLeverage);\n   return '<tr><td class=\"sym\">'+E(p.symbol)+'</td><td class=\"'+(p.side===\"LONG\"?\"long\":\"short\")+'\">'+E(p.side)+'</td><td>'+N(price)+'</td>'+(kind===\"pos\"?'<td>'+(Number.isFinite(lev)&&lev>0?lev+\"x\":\"—\")+'</td><td class=\"'+(pnl===null?\"muted\":pnl>=0?\"ok\":\"warn\")+'\">'+E(positionPnlLabel(p))+'</td>':\"\")+'<td>'+N(p.score)+' / '+(p.confidence==null?\"Veri yetersiz\":N(p.confidence)+\"%\")+'</td><td>'+N(p.entry)+'</td><td>'+N(p.takeProfit??p.tp2??p.tp3)+'</td><td>'+N(p.stopLoss)+'</td><td><span class=\"tag '+(ready?\"ready\":\"wait\")+'\">'+E(kind===\"pos\"?\"OPEN\":ready?\"READY\":\"WAIT\")+'</span></td><td class=\"why\"><div class=\"reason-summary\">'+E(why(p))+'</div>'+reasonDetails(p)+'</td>'+(kind===\"pos\"?'<td><button class=\"btn small close\" data-close=\"'+E(p.id||p.symbol+\"-\"+p.side)+'\">Kapat</button></td>':\"\")+'<td class=\"tsicol\">'+E(now)+'</td></tr>';\n  }).join(\"\")+'</tbody></table></div></div>';\n }\nfunction cards(){if(!ps().length)return '';return '<div class=\"cards\">'+ps().map(p=>{let q=scale(p),lev=Number(p.leverage??p.effectiveLeverage),pnl=positionPnl(p);return '<article class=\"pc\"><div class=\"pchead\"><div><div class=\"pcname\">'+E(p.symbol)+' <span class=\"'+(p.side==='LONG'?'long':'short')+'\">'+E(p.side)+'</span></div><div class=\"muted\">'+E(p.tradeStyle||p.model||'')+' · '+E(tf(p))+'</div></div><div class=\"actions\"><button class=\"btn small chartbtn\" data-chart=\"'+E(p.symbol)+'\">Grafik</button><button class=\"btn small close\" data-close=\"'+E(p.id||p.symbol+'-'+p.side)+'\">Kapat</button></div></div><div class=\"details\"><div><small>Anlık fiyat</small><b>'+N(positionMark(p))+'</b></div><div><small>Giriş</small><b>'+N(p.entry)+'</b></div><div><small>TP / SL</small><b>'+N(p.takeProfit??p.tp2)+' / '+N(p.stopLoss)+'</b></div><div><small>Kaldıraç</small><b>'+(Number.isFinite(lev)&&lev>0?lev+'x':'—')+'</b></div><div><small>Anlık K/Z · ROI</small><b class=\"'+(pnl===null?'muted':pnl>=0?'ok':'warn')+'\">'+E(positionPnlLabel(p))+'</b></div><div><small>Kurulum / giriş TF</small><b>'+E(tf(p))+'</b></div><div><small>Yapısal yapı</small><b>'+E(p.structureType||p.structure||p.pattern||p.model||'—')+'</b></div><div><small>Skor</small><b>'+N(p.score)+'</b></div><div><small>Güven</small><b>'+(p.confidence==null?'Veri yetersiz':N(p.confidence)+'%')+'</b></div></div><div class=\"reason\"><b>İşlem gerekçesi:</b> '+E(why(p))+'</div><div class=\"scalehead\"><span>Stop mesafesi '+q.sd+'</span><span>Hedef mesafesi '+q.td+'</span></div><div class=\"scale\">'+(q.t1==null?'':'<i class=\"tpmark\" style=\"left:'+q.t1+'%\"></i>')+(q.t2==null?'':'<i class=\"tpmark\" style=\"left:'+q.t2+'%\"></i>')+(q.t3==null?'':'<i class=\"tpmark\" style=\"left:'+q.t3+'%\"></i>')+'<i class=\"needle\" style=\"left:'+q.pos+'%\"></i></div><div class=\"scalefoot\"><span>STOP</span><span>ANLIK FİYAT</span><span>TP1</span><span>TP2</span><span>TP3</span></div></article>'}).join('')+'</div>'}\nfunction historyTable(rows){if(!rows.length)return '<div class=\"empty\">Henüz kapanmış paper işlem yok.</div>';return '<div class=\"tablewrap\"><table><thead><tr><th>Açılış</th><th>Kapanış</th><th>Parite</th><th>Motor / Setup</th><th>Yön</th><th>Giriş</th><th>Çıkış</th><th>Net PnL</th><th>Getiri %</th><th>Yapısal gerekçe</th><th>Setup TF</th><th>Giriş TF</th><th>Kapanış nedeni</th></tr></thead><tbody>'+rows.slice().sort((a,b)=>Number(b.closedAt||0)-Number(a.closedAt||0)).map(p=>'<tr><td>'+E(p.openedAt?new Date(p.openedAt).toLocaleString('tr-TR'):'—')+'</td><td>'+E(p.closedAt?new Date(p.closedAt).toLocaleString('tr-TR'):'—')+'</td><td class=\"sym\">'+E(p.symbol)+'</td><td>'+E(p.tradeStyle||p.engine||p.model||'—')+'</td><td>'+E(p.side)+'</td><td>'+N(p.entry)+'</td><td>'+N(p.exitPrice)+'</td><td>'+N(p.pnlUsdt)+' USDT</td><td>'+N(p.returnPct??p.pnlPct??p.roiPct)+'%</td><td class=\"why\">'+E(p.setupReason||p.openReasonTr||p.reasonTr||p.structureType||p.model||'—')+'</td><td>'+E(p.setupTimeframe||p.setupSourceTimeframe||'—')+'</td><td>'+E(p.entryTimeframe||'—')+'</td><td>'+E(p.closeReason||'—')+'</td></tr>').join('')+'</tbody></table></div>'}function val(x){return x===null||x===undefined||x===''?'—':N(x)}function metric(label,value,sub=''){return '<div class=\"metric\"><small>'+E(label)+'</small><b>'+E(value)+'</b>'+(sub?'<div class=\"muted\">'+E(sub)+'</div>':'')+'</div>'}function healthLine(label,value,ok){return '<div class=\"healthline\"><span>'+E(label)+'</span><b class=\"'+(ok===true?'ok':ok===false?'warn':'muted')+'\">'+E(value)+'</b></div>'}function accountSummary(){\n let h=health||{},p=ps(),open=Number(h.unrealizedProfit),real=h.realisedProfit==null?null:Number(h.realisedProfit),today=h.dailyPnl==null?null:Number(h.dailyPnl),max=Math.max(0,Math.min(10,Number(h.maxOpenPositions??10))),hasOpen=h.unrealizedProfit!==null&&h.unrealizedProfit!==undefined&&Number.isFinite(open),total=real===null?null:real+(hasOpen?open:0),money=x=>x===null||x===undefined||!Number.isFinite(Number(x))?'Veri alınamadı':N(Number(x))+' USDT',run=h.runnerEnabled===true&&h.alarmScheduled===true&&h.scannerPaused!==true&&h.automationStopped!==true&&!h.storageDegraded,realLine=real===null?'Gerçekleşen PnL yok':'Gerçekleşen '+money(real),openLine=hasOpen?'Açık '+money(open):'Açık PnL verisi yok',clock=new Intl.DateTimeFormat('tr-TR',{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date());\n $('accountSummary').innerHTML='<div class=\"stat\"><small>MOTOR DURUMU · RUNNER</small><div class=\"num '+(run?'ok':'warn')+'\">'+(run?'ÇALIŞIYOR':'KONTROL')+'</div><div class=\"sub\">Scalp + Swing · PAPER MODE · gerçek emir kilitli</div></div><div class=\"stat\"><small>PAPER HESAP BAKİYESİ · USDT</small><div class=\"num\">'+money(h.balance)+'</div><div class=\"sub\">Paper equity: '+money(h.equity)+' · Kullanılabilir marjin: '+money(h.availableMargin)+'</div></div><div class=\"stat\"><small>TOPLAM KÂR / ZARAR · TOTAL PnL</small><div class=\"num\">'+(total===null?realLine:money(total))+'</div><div class=\"sub\">'+realLine+' · '+openLine+'</div></div><div class=\"stat\"><small>AÇIK POZİSYON ANLIK K/Z · LIVE PnL</small><div class=\"num '+(hasOpen?(open>=0?'ok':'short'):'')+'\">'+money(hasOpen?open:null)+'</div><div class=\"sub\">'+p.length+' açık pozisyon · marjin getirisi pozisyon detaylarında</div></div><div class=\"stat\"><small>GÜNLÜK KÂR / ZARAR · TODAY PnL</small><div class=\"num '+(today===null?'':today>=0?'ok':'short')+'\">'+money(today)+'</div><div class=\"sub\">TSİ · '+clock+'</div></div><div class=\"stat limit-card\"><small>MAKS. AÇIK POZİSYON</small><div class=\"num\">'+p.length+' / '+max+'</div><div class=\"sub\">Pozisyon yönetimi · en fazla '+max+' açık işlem · BingX VST paper</div><details class=\"limit-details\"><summary>Limit ayarını aç / kapat</summary><div class=\"limit-controls\"><input id=\"maxPositions\" type=\"range\" min=\"0\" max=\"10\" step=\"1\" value=\"'+max+'\"><b id=\"maxPositionsValue\">'+max+'</b><button id=\"saveMaxPositions\" class=\"btn small\">Kaydet</button></div><div id=\"maxPositionsStatus\" class=\"muted\">0–10 açık pozisyon sınırı</div></details></div>';\n const slider=$('maxPositions'),value=$('maxPositionsValue'),save=$('saveMaxPositions'),note=$('maxPositionsStatus');\n if(slider)slider.oninput=()=>{value.textContent=slider.value};\n if(save)save.onclick=async()=>{try{save.disabled=true;note.textContent='Kaydediliyor…';const result=await get('/api/paper/settings',{method:'POST',headers:{'content-type':'application/json','authorization':token?'Bearer '+token:''},body:JSON.stringify({maxOpenPositions:Number(slider.value)})});note.textContent=result.ok?'Kaydedildi · Maksimum '+result.maxOpenPositions+' pozisyon':'Kaydetme başarısız';await load()}catch(e){note.textContent='Kaydedilemedi: '+e.message}finally{save.disabled=false}};\n}\nfunction overview(){\n const h=health||{},u=cloudflareUsage||{},tick=tickerData||{},gc=globalContext||{};\n const positions=ps(),setups=candidates(),sc=setups.filter(x=>String(x.tradeStyle||x.engine||\"\").toUpperCase()===\"SCALP\").length,sw=setups.filter(x=>String(x.tradeStyle||x.engine||\"\").toUpperCase()===\"SWING\").length;\n const metric=(label,value)=>`<div class=\"metric\"><small>${E(label)}</small><b>${E(value)}</b></div>`;\n const fmt=value=>value===null||value===undefined||value===\"\"?\"UNAVAILABLE\":N(value);\n const rows=[[\"BTC\",\"BTC-USDT\"],[\"ETH\",\"ETH-USDT\"],[\"SOL\",\"SOL-USDT\"],[\"BNB\",\"BNB-USDT\"],[\"XRP\",\"XRP-USDT\"]];\n const market=rows.map(([label,symbol])=>{const list=Array.isArray(tick)?tick:(tick.data||tick.result||[]);const item=list.find(x=>String(x.symbol||\"\").toUpperCase()===symbol);return metric(label,item?(fmt(item.lastPrice??item.last??item.close??item.price)+\" USDT\"):\"UNAVAILABLE\")}).join(\"\");\n return `<h3>Piyasa özeti</h3><div class=\"grid\">${market}</div><h3>Motor ve tarama durumu</h3><div class=\"grid\">${metric(\"Scalp Engine\",h.scannerActive===true&&h.runnerEnabled===true?\"ACTIVE\":\"CHECK\")}${metric(\"Swing Engine\",h.scannerActive===true&&h.runnerEnabled===true?\"ACTIVE\":\"CHECK\")}${metric(\"Açık pozisyon\",String(positions.length))}${metric(\"Scalp aday\",String(sc))}${metric(\"Swing aday\",String(sw))}${metric(\"Tarama evreni\",fmt(h.scanUniverseSize))}${metric(\"Son tarama\",h.lastScanAt?new Date(h.lastScanAt).toLocaleString(\"tr-TR\"):\"UNAVAILABLE\")}${metric(\"Cloudflare Workers isteği\",fmt(u.workersRequests))}</div><p class=\"note\">Eksik piyasa ve kullanım verileri UNAVAILABLE olarak gösterilir; tahmini değer üretilmez.</p>`;\n}function stats(style){let a=analytics||{},groups=A(a.byStyle),x=groups.find(v=>String(v.key||'').toUpperCase()===String(style).toUpperCase())||{},fmt=v=>v==null?'—':N(v),rows=[['İşlem',x.trades],['Kazanma oranı',x.winRatePct==null?'—':Number(x.winRatePct).toFixed(1)+'%'],['Profit Factor',fmt(x.profitFactor)],['Beklenti',x.expectancyUsdt==null?'—':N(x.expectancyUsdt)+' USDT'],['Net PnL',x.netPnlUsdt==null?'—':N(x.netPnlUsdt)+' USDT'],['Bilinen ücret',x.feesKnownUsdt==null?'—':N(x.feesKnownUsdt)+' USDT'],['Net fonlama',x.fundingPaidUsdt==null?'—':N(x.fundingPaidUsdt)+' USDT'],['Slippage',x.slippagePaidUsdt==null?'—':N(x.slippagePaidUsdt)+' USDT']];return '<h3>'+E(style)+' performansı</h3><div class=\"grid\">'+rows.map(v=>'<div class=\"metric\"><small>'+v[0]+'</small><b>'+v[1]+'</b></div>').join('')+'</div><p class=\"note\">Bu rapor yalnızca '+E(style)+' işlemlerini içerir. Scalp ve Swing istatistikleri birleştirilmez. Yetersiz örneklemde metrikler boş gösterilir.</p>'}\nfunction diag(){let f=candidates(),run=!!(health&&health.scannerActive===true&&health.runnerEnabled===true);return '<div class=\"grid\"><div class=\"metric\"><small>Tarayıcı / Runner</small><b>'+(run?'Aktif':'Kontrol gerekli')+'</b></div><div class=\"metric\"><small>Otomasyon kilidi</small><b>'+(health&&health.automationStopped?'Durduruldu':'Aktif değil')+'</b></div><div class=\"metric\"><small>BingX VST demo</small><b>'+(health&&health.demoConnected?'Bağlı':'Doğrulanamadı')+'</b></div><div class=\"metric\"><small>Depolama</small><b>'+(health&&health.storageDegraded?'Sorun var':'Durum normal / doğrulanıyor')+'</b></div><div class=\"metric\"><small>Tarama paketi</small><b>'+N(health&&health.scanBatchSize)+' / '+N(health&&health.scanUniverseSize)+'</b></div><div class=\"metric\"><small>Son tarama</small><b>'+(health&&health.lastScanAt?new Date(health.lastScanAt).toLocaleString('tr-TR'):'Henüz yok')+'</b></div></div><h3>Bulunan setup kayıtları</h3>'+table(f,'setup')+'<p class=\"note\">Boş model/zaman dilimi retleri listelenmez. Altyapı ve veri sağlığı uyarıları yukarıda tutulur.</p>'}function chartPanel(){let tv=String(symbol||'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g,'').replace('.P','');let tvSymbol='BINGX:'+tv+'.P';let src='https://www.tradingview.com/widgetembed/?symbol='+encodeURIComponent(tvSymbol)+'&interval=60&hidesidetoolbar=0&symboledit=0&saveimage=0&toolbarbg=08111f&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=tr';return '<div class=\\\"note\\\">TradingView · '+E(tvSymbol)+' · 1 saatlik BingX perpetual grafik</div><iframe id=\\\"tvchart\\\" class=\\\"chart\\\" data-symbol=\\\"'+E(tvSymbol)+'\\\" src=\\\"'+src+'\\\" allowfullscreen></iframe>';}function openChart(pair){symbol=String(pair||'BTCUSDT');tab=9;renderTabs();draw()}\nfunction calendarPanel(){return '<h3>Günlük işlem takvimi</h3><div class=\"note\">Tarih seçerek o gün kapanan işlemleri görüntüleyin. Saatler Türkiye saatidir.</div><label for=\"trade-day\">İşlem günü</label> <input id=\"trade-day\" type=\"date\"><div id=\"day-result\" class=\"empty\">Gün seçin.</div>'}\nfunction draw(){let p=ps(),c=candidates(),style=x=>String(x.tradeStyle||x.engine||'').toUpperCase(),sc=c.filter(x=>style(x)==='SCALP'||String(x.model||'').startsWith('S')),sw=c.filter(x=>style(x)==='SWING'||String(x.model||'').startsWith('W')),ready=x=>['READY','QUALIFIED','HIGH_QUALITY'].includes(String(x.status||'').toUpperCase());$('heading').textContent=T[tab];$('updated').textContent='Güncelleme '+new Date().toLocaleTimeString('tr-TR');if(tab===9){let old=$('content').querySelector('#tvchart'),tv=String(symbol||'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g,'');if(old&&old.dataset.symbol===tv)return}let h='';if(tab===0)h=overview();else if(tab===1)h=table(p,'pos')+cards();else if(tab===2)h='<h3>Scalp Scanner · 1H / 15M / 5M</h3>'+table(sc,'setup');else if(tab===3)h='<h3>Swing Scanner · 1D / 4H / 1H / 15M</h3>'+table(sw,'setup');else if(tab===4)h=table(p,'pos')+cards();else if(tab===5)h=stats('SCALP')+stats('SWING')+calendarPanel();else if(tab===6)h=table(c.filter(ready),'setup');else if(tab===7)h=historyTable(A(status&&status.closedTrades));else if(tab===8)h=diag();else h=chartPanel();$('content').innerHTML=h;document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>openClose(b.dataset.close));document.querySelectorAll('[data-chart]').forEach(b=>b.onclick=()=>openChart(b.dataset.chart));let day=$('trade-day');if(day){day.value=new Date().toLocaleDateString('sv-SE',{timeZone:'Europe/Istanbul'});let renderDay=()=>{let key=day.value,rows=A(status&&status.closedTrades).filter(t=>t.closedAt&&new Date(t.closedAt).toLocaleDateString('sv-SE',{timeZone:'Europe/Istanbul'})===key),total=rows.reduce((n,t)=>n+Number(t.pnlUsdt||0),0);$('day-result').className='';$('day-result').innerHTML='<div class=\\\"note\\\">'+rows.length+' kapanan işlem · Günlük net sonuç: '+N(total)+' USDT</div>'+historyTable(rows)};day.onchange=renderDay;renderDay()}}async function get(path,opts){let r=await fetch(path,opts||{}),d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.error||'HTTP '+r.status);return d}\nasync function load(){try{let d=await get('/api/data',{signal:AbortSignal.timeout(18000)});health=d.health;systemHealth=d.systemHealth;analytics=d.analytics;archiveHealth=d.archiveHealth;historyHealth=d.historyHealth;cloudflareUsage=d.cloudflareUsage;tickerData=d.tickerData;universeData=d.universeData;globalContext=d.globalContext;status=health?{...health,positions:A(health.positions),setups:A(health.setups),closedTrades:A(health.closedTrades)}:null;live={positions:A(health&&health.positions)};if(status){$('conn').textContent='Paper işlem modu aktif';$('conn').className='ok'}else{$('conn').textContent='Paper hesap verisi alınamadı';$('conn').className='warn'}let run=health&&health.runnerEnabled===true&&health.alarmScheduled===true&&health.scannerPaused!==true&&health.automationStopped!==true&&!health.storageDegraded;$('conn').textContent=run?'Motor ve tarayıcı aktif':'Motor / tarayıcı kontrol gerekli';$('conn').className=run?'ok':'warn';$('se').textContent=run?'ACTIVE':'CHECK';$('we').textContent=run?'ACTIVE':'CHECK';$('se').className=run?'ok':'warn';$('we').className=run?'ok':'warn';accountSummary();draw()}catch(e){$('conn').textContent='API hatası: '+e.message;$('conn').className='warn';$('accountSummary').innerHTML='<div class=\"empty\">Paper hesap verisi alınamadı: '+E(e.message)+'</div>';$('content').innerHTML='<div class=\"empty\">Veri alınamadı: '+E(e.message)+'</div>'}}\nfunction openClose(id){chosen=id;$('mt').textContent=id+' pozisyonunu kapat';$('pct').value=50;$('pl').textContent='%50 kapat';$('modal').classList.add('show')}\n$('pct').oninput=()=>$('pl').textContent='%'+$('pct').value+' kapat';$('cancel').onclick=()=>$('modal').classList.remove('show');\n$('confirm').onclick=async()=>{let fraction=Number($('pct').value)/100;if(!confirm('%'+Math.round(fraction*100)+' pozisyon kapatılacak. Onaylıyor musunuz?'))return;try{$('confirm').disabled=true;let r=await get('/api/close',{method:'POST',headers:{'content-type':'application/json','authorization':token?'Bearer '+token:''},body:JSON.stringify({positionId:chosen,fraction,confirmedByUser:true})});$('modal').classList.remove('show');alert(r.ok?'Kapatma isteği işlendi. Pozisyon durumu yenileniyor.':r.error||'Kapatma başarısız');await load()}catch(e){alert('Kapatma başarısız: '+e.message)}finally{$('confirm').disabled=false}};renderTabs();load();</script></body></html>";
+const DASHBOARD_HTML = "<!doctype html><html lang=\"tr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>SMC PRO V2</title><style>\n*{box-sizing:border-box}body{margin:0;background:#08111f;color:#e8eef8;font:14px system-ui}.wrap{max-width:1450px;margin:auto;padding:16px}.top,.panel,.stat,.engine,.pc{background:#111d2d;border:1px solid #293a50;border-radius:13px}.top{padding:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.brand{font-size:21px;font-weight:800}.muted,small{color:#91a3ba}.muted{font-size:12px}.token{display:flex;gap:6px}.token input{width:190px;background:#091728;border:1px solid #354a63;border-radius:8px;color:#fff;padding:8px}.stats,.engines{display:grid;gap:10px;margin:12px 0}.stats{grid-template-columns:repeat(4,1fr)}.engines{grid-template-columns:repeat(2,1fr)}.summary{grid-template-columns:repeat(3,1fr)}.summary .stat{min-height:104px}.summary .num{font-size:21px}.limit-scale{display:flex;justify-content:space-between;color:#91a3ba;font-size:10px;margin-top:8px}.summary .sub{color:#91a3ba;font-size:11px;margin-top:5px;line-height:1.35}.stat,.engine{padding:12px 14px}.num{font-size:23px;font-weight:750;margin-top:5px}.engine{display:flex;justify-content:space-between}.ok{color:#3bd39a}.warn{color:#e6b35f}.tabs{display:flex;gap:7px;overflow:auto;padding:2px 0 12px}.btn,.tabs button{background:#15263b;border:1px solid #354b66;color:#d3deed;border-radius:8px;padding:9px 11px;cursor:pointer;white-space:nowrap}.tabs button.active{background:#28528a;color:#fff}.panel{padding:15px;min-height:380px}.head{display:flex;justify-content:space-between;align-items:center}.head h2{font-size:17px;margin:0}.tablewrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:850px;margin-top:13px}td,th{padding:10px 8px;border-bottom:1px solid #26374c;text-align:left;font-size:12px}th{color:#91a3ba}.sym{font-weight:800}.long{color:#3bd39a}.short{color:#ff7786}.why{max-width:270px;color:#c3d0e0;line-height:1.4}.small{font-size:11px;padding:7px 9px}.close{background:#4a2632;border-color:#87404e}.chartbtn{background:#1c3c5d}.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:14px}.pc{padding:14px}.pchead{display:flex;justify-content:space-between;gap:8px}.pcname{font-size:16px;font-weight:800}.actions{display:flex;gap:6px}.details{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.details div,.metric{background:#0b1727;padding:9px;border-radius:8px}.details small{display:block;font-size:10px;margin-bottom:4px}.details b{font-size:12px}.reason{line-height:1.5;color:#c5d1e0;margin:10px 0}.scalehead,.scalefoot{display:flex;justify-content:space-between;color:#98abc1;font-size:10px}.scale{height:10px;border-radius:20px;background:linear-gradient(90deg,#d95d6b,#d4a44d,#30b887);position:relative;margin:7px 0}.needle{position:absolute;top:-4px;height:18px;width:3px;background:white;box-shadow:0 0 6px white;left:50%;transition:left .8s ease}.tpmark{position:absolute;top:1px;height:8px;width:2px;background:#fff;opacity:.85;transform:translateX(-1px)}.empty{padding:34px;text-align:center;border:1px dashed #384a60;border-radius:10px;color:#91a3ba;margin-top:14px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}.healthbox{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:12px 0}.healthline{display:flex;justify-content:space-between;gap:10px;background:#0b1727;padding:10px;border-radius:8px}.healthline span{color:#91a3ba}@media(max-width:720px){.healthbox{grid-template-columns:1fr}}.metric b{display:block;font-size:18px;margin-top:5px}.tag{font-size:10px;padding:4px 6px;border-radius:6px;background:#283c55}.ready{background:#174336;color:#8ae0c0}.wait{background:#493b24;color:#f3cd83}.chart{width:100%;height:620px;border:0;border-radius:10px;margin-top:12px}.modal{display:none;position:fixed;inset:0;background:#000b;z-index:5;align-items:center;justify-content:center;padding:16px}.modal.show{display:flex}.box{width:min(420px,100%);background:#111d2d;border:1px solid #3b506b;border-radius:14px;padding:20px}.box input{width:100%;margin:18px 0}.end{display:flex;justify-content:flex-end;gap:8px}.note{font-size:11px;color:#9aacc2;line-height:1.5;margin-top:12px}@media(max-width:720px){.wrap{padding:9px}.stats{grid-template-columns:repeat(2,1fr)}.summary{grid-template-columns:repeat(2,1fr)}.cards,.engines,.grid{grid-template-columns:1fr}.details{grid-template-columns:repeat(2,1fr)}.token input{width:135px}.chart{height:500px}}\n.scanner-scroll{max-height:520px;overflow-y:auto;overflow-x:auto;border:1px solid #293a50;border-radius:9px;margin:10px 0 18px;overscroll-behavior:contain}.scanner-scroll .tablewrap{overflow:visible}.scanner-scroll table{margin-top:0}.scanner-scroll thead th{position:sticky;top:0;background:#111d2d;z-index:2}.tsicol{white-space:nowrap;font-variant-numeric:tabular-nums}.limit-details{margin-top:9px;border-top:1px solid #293a50;padding-top:7px}.limit-details summary{cursor:pointer;color:#9fc5f5;font-size:11px}.limit-controls{display:flex;align-items:center;gap:8px;margin-top:8px}.limit-controls input{min-width:70px;flex:1;accent-color:#7db4ff}.limit-controls b{min-width:18px;text-align:center}.limit-controls .btn{padding:6px 10px}.limit-card{min-width:0}.reason-details{margin-top:6px;border-top:1px solid #2b3c50;padding-top:5px;max-width:430px}.reason-details summary{cursor:pointer;color:#9fc5f5;font-size:11px;font-weight:600}.reason-details p{margin:4px 0;font-size:10px;line-height:1.4;color:#c7d6e6}.reason-summary{max-width:260px;white-space:normal;line-height:1.4}</style></head><body><main class=\"wrap\">\n<header class=\"top\"><div><div class=\"brand\">SMC PRO <span style=\"color:#7db4ff\">V2</span></div><div class=\"muted\">MARKET INTELLIGENCE · PAPER TRADING CONTROL CENTER</div></div><div style=\"display:flex;align-items:center;gap:10px;flex-wrap:wrap\"><span class=\"tag wait\">PAPER MODE · GERÇEK EMİR KAPALI</span><div class=\"token\"><input id=\"controlToken\" type=\"password\" autocomplete=\"off\" placeholder=\"VST kontrol anahtarı\" aria-label=\"VST kontrol anahtarı\"></div><span id=\"conn\" class=\"statusline muted\">Motor ve tarayıcı kontrol ediliyor</span><button id=\"refresh\" class=\"btn\">↻ Yenile</button></div></header>\n<section id=\"accountSummary\" class=\"stats summary\"><div class=\"empty\">Demo hesap verileri yükleniyor…</div></section><section class=\"engines\"><div class=\"engine\"><b>Scalp Engine</b><b id=\"se\" class=\"warn\">Kontrol ediliyor</b></div><div class=\"engine\"><b>Swing Engine</b><b id=\"we\" class=\"warn\">Kontrol ediliyor</b></div></section>\n<nav id=\"tabs\" class=\"tabs\"></nav><section class=\"panel\"><div class=\"head\"><h2 id=\"heading\">Market Overview</h2><span id=\"updated\" class=\"muted\"></span></div><div id=\"content\"><div class=\"empty\">Veriler yükleniyor…</div></div></section><p class=\"note\">Paper ledger ve BingX piyasa verileri gösterilir. Scalp ve Swing motorları bağımsız sinyal üretir; gerçek emirler kilitlidir.</p></main>\n<div id=\"modal\" class=\"modal\"><div class=\"box\"><h3 id=\"mt\">Pozisyonu kapat</h3><p class=\"muted\">Kapatılacak pozisyon yüzdesini seçin.</p><input id=\"pct\" type=\"range\" min=\"1\" max=\"100\" value=\"50\"><b id=\"pl\">%50 kapat</b><div class=\"end\"><button class=\"btn\" id=\"cancel\">Vazgeç</button><button class=\"btn close\" id=\"confirm\">Kapatmayı onayla</button></div></div></div>\n<script>\nconst T=['Market Overview','Açık İşlemler','Scalp Scanner','Swing Scanner','Positions','Statistics','Candidates (İşlem Adayları)','Trade History','Diagnostics','Grafik'];let tab=0,health=null,analytics=null,status=null,live=null,systemHealth=null,archiveHealth=null,historyHealth=null,cloudflareUsage=null,tickerData=null,universeData=null,globalContext=null,token='',chosen=null,symbol='BTCUSDT';const $=x=>document.getElementById(x),A=x=>Array.isArray(x)?x:[],N=x=>x==null||x===''?'—':Number(x).toLocaleString('tr-TR',{maximumFractionDigits:5}),E=x=>String(x??'').replace(/[&<>']/g,c=>c==='&'?'&amp;':c==='<'?'&lt;':c==='>'?'&gt;':'&#39;').replaceAll(String.fromCharCode(34),'&quot;');$('controlToken').oninput=e=>token=e.target.value.trim();\nfunction ps(){return A(status&&status.positions).length?A(status.positions):A(live&&live.positions)}function setups(){let x=A(health&&health.setups);return x.length?x:A(status&&status.setups)}function candidates(){return setups().filter(x=>!['INVALIDATED','EXPIRED','REJECTED','CLOSED','OPENED'].includes(String(x.status||'').toUpperCase()))}\nfunction setupName(p){const m={S01_SWEEP_MSS_FVG:\"Likidite süpürmesi + MSS + FVG\",S02_BREAKER_RETEST:\"Breaker retest\",S03_BOS_DISPLACEMENT:\"BOS + displacement\",S04_RANGE_DEVIATION:\"Range deviation\",S05_FAILED_BREAKOUT:\"Başarısız kırılım\",S06_OB_REACTION:\"Order block tepkisi\",W01_HTF_OB_REVERSAL:\"HTF Order Block dönüşü\",W02_SUPPLY_DEMAND_REVERSAL:\"Supply Demand dönüşü\",W03_SWEEP_CHOCH:\"Sweep + CHoCH\",W04_BREAKER_RETEST:\"Breaker retest\",W05_RANGE_DEVIATION:\"Range deviation\",W06_CRT:\"CRT\",W07_OTE:\"OTE geri çekilmesi\",W08_BOS_CONTINUATION:\"BOS devam\"};return m[p.model]||p.model||\"Setup\";}\nfunction why(p){if(p.status===\"OPEN\")return p.openReasonTr||p.openReason||p.reason||\"Pozisyon açık\";return p.executionDecisionReason||p.reason||setupName(p);}\nfunction reasonDetails(p){const a=p.audit||{},z=a.zone||{},e=a.structureEvent||{},rows=[[\"Setup türü\",setupName(p)],[\"Motor ve yön\",String(p.tradeStyle||a.engine||\"UNAVAILABLE\")+\" / \"+String(p.side||\"UNAVAILABLE\")],[\"Setup zaman dilimi\",p.setupTimeframe],[\"Bölge zaman dilimi\",z.sourceTimeframe],[\"Giriş zaman dilimi\",p.entryTimeframe],[\"Üst zaman yönü\",a.htfTrend],[\"Üst zaman uyumu\",a.htfAligned],[\"Piyasa rejimi\",a.marketRegime],[\"Yapısal olay\",e.type],[\"Yapısal seviye\",e.level],[\"Displacement\",e.displacement],[\"Bölge\",z.kind],[\"Bölge alt sınır\",z.bottom],[\"Bölge üst sınır\",z.top],[\"Karar\",p.status],[\"Karar nedeni\",p.executionDecisionReason||why(p)],[\"Giriş\",p.entry],[\"Stop\",p.stopLoss],[\"Hedef\",p.takeProfit],[\"Güven durumu\",a.confidenceStatus||p.confidenceStatus],[\"Güven örneklemi\",a.confidenceSampleSize]];return '<details class=\"reason-details\"><summary>Analiz ve karar ayrıntısı</summary>'+rows.map(x=>'<p><b>'+E(x[0])+':</b> '+E(x[1]===null||x[1]===undefined?\"UNAVAILABLE\":String(x[1]))+'</p>').join(\"\")+'</details>';}\n\nfunction tf(p){return String(p.setupTimeframe||p.setupSourceTimeframe||'—').toUpperCase()+' kurulum · '+String(p.entryTimeframe||'—').toUpperCase()+' giriş'}\nfunction scale(p){let v=Number(p.markPrice??p.currentPrice),s=Number(p.stopLoss),t=Number(p.tp3??p.takeProfit??p.tp2);if(![v,s,t].every(Number.isFinite)||v<=0||s<=0||t<=0||s===t)return{pos:50,t1:null,t2:null,t3:null,sd:'—',td:'—'};let f=x=>{let n=Number(x);if(!Number.isFinite(n)||n<=0)return null;return Math.max(0,Math.min(100,p.side==='LONG'?(n-s)/(t-s)*100:(s-n)/(s-t)*100))};return{pos:f(v)??50,t1:f(p.tp1),t2:f(p.tp2),t3:f(p.tp3??p.takeProfit??p.tp2),sd:(Math.abs(v-s)/v*100).toFixed(2)+'%',td:(Math.abs(t-v)/v*100).toFixed(2)+'%'}}\nfunction renderTabs(){$('tabs').innerHTML=T.map((x,i)=>'<button class=\"'+(i===tab?'active':'')+'\" data-t=\"'+i+'\">'+x+'</button>').join('');document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=+b.dataset.t;renderTabs();draw()})}\nfunction tickerPrice(symbol){\n const root=tickerData?.data??tickerData, key=String(symbol||\"\").toUpperCase().replace(/[^A-Z0-9]/g,\"\");\n const rows=Array.isArray(root)?root:Array.isArray(root?.tickers)?root.tickers:Array.isArray(root?.data)?root.data:[root];\n const item=rows.find(x=>String(x?.symbol||x?.s||\"\").toUpperCase().replace(/[^A-Z0-9]/g,\"\")===key)||root?.[symbol]||root?.[key];\n const value=item?.lastPrice??item?.last??item?.price??item?.close??item?.markPrice??item?.last_price;\n const n=Number(value);return Number.isFinite(n)&&n>0?n:null;\n}\nfunction positionMark(p){const live=tickerPrice(p.symbol);if(Number.isFinite(live)&&live>0)return live;const mark=Number(p.markPrice??p.currentPrice);return Number.isFinite(mark)&&mark>0?mark:null}\nfunction positionPnl(p){const mark=positionMark(p),entry=Number(p.entry),qty=Number(p.qty);if(mark!==null&&Number.isFinite(entry)&&entry>0&&Number.isFinite(qty)&&qty>0){const feeRate=Number.isFinite(Number(p.feeRate))?Math.max(0,Number(p.feeRate)):0.0005;const gross=(p.side===\"LONG\"?mark-entry:entry-mark)*qty;return gross-qty*mark*(feeRate+0.0002)}const v=Number(p.unrealizedPnlUsdt);return p.unrealizedPnlUsdt!=null&&Number.isFinite(v)?v:null}\nfunction positionRoi(p){const pnl=positionPnl(p),margin=Number(p.marginUsdt??p.initialMarginUsdt);return pnl!==null&&Number.isFinite(margin)&&margin>0?pnl/margin*100:null}\nfunction positionPnlLabel(p){const pnl=positionPnl(p),roi=positionRoi(p);if(pnl===null)return \"Veri yok\";const fmt=x=>x.toLocaleString(\"tr-TR\",{minimumFractionDigits:2,maximumFractionDigits:2});return (pnl>=0?\"+\":\"\")+fmt(pnl)+\" USDT\"+(roi===null?\"\":\" · \"+(roi>=0?\"+\":\"\")+fmt(roi)+\"%\")}\nfunction table(rows,kind){\n  if(!rows.length)return '<div class=\"empty\">Bulunan setup veya pozisyon yok.</div>';\n  const now=new Intl.DateTimeFormat(\"tr-TR\",{timeZone:\"Europe/Istanbul\",dateStyle:\"short\",timeStyle:\"medium\"}).format(new Date());\n  return '<div class=\"scanner-scroll\"><div class=\"tablewrap\"><table><thead><tr><th>Parite</th><th>Yön</th><th>Anlık fiyat</th>'+(kind===\"pos\"?'<th>Kaldıraç</th><th>Anlık K/Z · ROI</th>':\"\")+'<th>Skor / Güven</th><th>Giriş</th><th>TP</th><th>SL</th><th>Ready / Wait</th><th>İşlem gerekçesi</th>'+(kind===\"pos\"?'<th>İşlem</th>':\"\")+'<th>TSİ · Tarih / Saat</th></tr></thead><tbody>'+rows.map(p=>{\n   const ready=[\"READY\",\"QUALIFIED\",\"OPEN\",\"HIGH_QUALITY\"].includes(String(p.status||\"\").toUpperCase()),price=positionMark(p),pnl=positionPnl(p),lev=Number(p.leverage??p.effectiveLeverage);\n   return '<tr><td class=\"sym\">'+E(p.symbol)+'</td><td class=\"'+(p.side===\"LONG\"?\"long\":\"short\")+'\">'+E(p.side)+'</td><td>'+N(price)+'</td>'+(kind===\"pos\"?'<td>'+(Number.isFinite(lev)&&lev>0?lev+\"x\":\"—\")+'</td><td class=\"'+(pnl===null?\"muted\":pnl>=0?\"ok\":\"warn\")+'\">'+E(positionPnlLabel(p))+'</td>':\"\")+'<td>'+N(p.score)+' / '+(p.confidence==null?\"Veri yetersiz\":N(p.confidence)+\"%\")+'</td><td>'+N(p.entry)+'</td><td>'+N(p.takeProfit??p.tp2??p.tp3)+'</td><td>'+N(p.stopLoss)+'</td><td><span class=\"tag '+(ready?\"ready\":\"wait\")+'\">'+E(kind===\"pos\"?\"OPEN\":ready?\"READY\":\"WAIT\")+'</span></td><td class=\"why\"><div class=\"reason-summary\">'+E(why(p))+'</div>'+reasonDetails(p)+'</td>'+(kind===\"pos\"?'<td><button class=\"btn small close\" data-close=\"'+E(p.id||p.symbol+\"-\"+p.side)+'\">Kapat</button></td>':\"\")+'<td class=\"tsicol\">'+E(now)+'</td></tr>';\n  }).join(\"\")+'</tbody></table></div></div>';\n }\nfunction cards(){if(!ps().length)return '';return '<div class=\"cards\">'+ps().map(p=>{let q=scale(p),lev=Number(p.leverage??p.effectiveLeverage),pnl=positionPnl(p);return '<article class=\"pc\"><div class=\"pchead\"><div><div class=\"pcname\">'+E(p.symbol)+' <span class=\"'+(p.side==='LONG'?'long':'short')+'\">'+E(p.side)+'</span></div><div class=\"muted\">'+E(p.tradeStyle||p.model||'')+' · '+E(tf(p))+'</div></div><div class=\"actions\"><button class=\"btn small chartbtn\" data-chart=\"'+E(p.symbol)+'\">Grafik</button><button class=\"btn small close\" data-close=\"'+E(p.id||p.symbol+'-'+p.side)+'\">Kapat</button></div></div><div class=\"details\"><div><small>Anlık fiyat</small><b>'+N(positionMark(p))+'</b></div><div><small>Giriş</small><b>'+N(p.entry)+'</b></div><div><small>TP / SL</small><b>'+N(p.takeProfit??p.tp2)+' / '+N(p.stopLoss)+'</b></div><div><small>Kaldıraç</small><b>'+(Number.isFinite(lev)&&lev>0?lev+'x':'—')+'</b></div><div><small>Anlık K/Z · ROI</small><b class=\"'+(pnl===null?'muted':pnl>=0?'ok':'warn')+'\">'+E(positionPnlLabel(p))+'</b></div><div><small>Kurulum / giriş TF</small><b>'+E(tf(p))+'</b></div><div><small>Yapısal yapı</small><b>'+E(p.structureType||p.structure||p.pattern||p.model||'—')+'</b></div><div><small>Skor</small><b>'+N(p.score)+'</b></div><div><small>Güven</small><b>'+(p.confidence==null?'Veri yetersiz':N(p.confidence)+'%')+'</b></div></div><div class=\"reason\"><b>İşlem gerekçesi:</b> '+E(why(p))+'</div><div class=\"scalehead\"><span>Stop mesafesi '+q.sd+'</span><span>Hedef mesafesi '+q.td+'</span></div><div class=\"scale\">'+(q.t1==null?'':'<i class=\"tpmark\" style=\"left:'+q.t1+'%\"></i>')+(q.t2==null?'':'<i class=\"tpmark\" style=\"left:'+q.t2+'%\"></i>')+(q.t3==null?'':'<i class=\"tpmark\" style=\"left:'+q.t3+'%\"></i>')+'<i class=\"needle\" style=\"left:'+q.pos+'%\"></i></div><div class=\"scalefoot\"><span>STOP</span><span>ANLIK FİYAT</span><span>TP1</span><span>TP2</span><span>TP3</span></div></article>'}).join('')+'</div>'}\nfunction historyTable(rows){if(!rows.length)return '<div class=\"empty\">Henüz kapanmış paper işlem yok.</div>';return '<div class=\"tablewrap\"><table><thead><tr><th>Açılış</th><th>Kapanış</th><th>Parite</th><th>Motor / Setup</th><th>Yön</th><th>Giriş</th><th>Çıkış</th><th>Net PnL</th><th>Getiri %</th><th>Yapısal gerekçe</th><th>Setup TF</th><th>Giriş TF</th><th>Kapanış nedeni</th></tr></thead><tbody>'+rows.slice().sort((a,b)=>Number(b.closedAt||0)-Number(a.closedAt||0)).map(p=>'<tr><td>'+E(p.openedAt?new Date(p.openedAt).toLocaleString('tr-TR'):'—')+'</td><td>'+E(p.closedAt?new Date(p.closedAt).toLocaleString('tr-TR'):'—')+'</td><td class=\"sym\">'+E(p.symbol)+'</td><td>'+E(p.tradeStyle||p.engine||p.model||'—')+'</td><td>'+E(p.side)+'</td><td>'+N(p.entry)+'</td><td>'+N(p.exitPrice)+'</td><td>'+N(p.pnlUsdt)+' USDT</td><td>'+N(p.returnPct??p.pnlPct??p.roiPct)+'%</td><td class=\"why\">'+E(p.setupReason||p.openReasonTr||p.reasonTr||p.structureType||p.model||'—')+'</td><td>'+E(p.setupTimeframe||p.setupSourceTimeframe||'—')+'</td><td>'+E(p.entryTimeframe||'—')+'</td><td>'+E(p.closeReason||'—')+'</td></tr>').join('')+'</tbody></table></div>'}function val(x){return x===null||x===undefined||x===''?'—':N(x)}function metric(label,value,sub=''){return '<div class=\"metric\"><small>'+E(label)+'</small><b>'+E(value)+'</b>'+(sub?'<div class=\"muted\">'+E(sub)+'</div>':'')+'</div>'}function healthLine(label,value,ok){return '<div class=\"healthline\"><span>'+E(label)+'</span><b class=\"'+(ok===true?'ok':ok===false?'warn':'muted')+'\">'+E(value)+'</b></div>'}function accountSummary(){\n let h=health||{},p=ps(),open=Number(h.unrealizedProfit),real=h.realisedProfit==null?null:Number(h.realisedProfit),today=h.dailyPnl==null?null:Number(h.dailyPnl),max=Math.max(0,Math.min(20,Number(h.maxOpenPositions??20))),hasOpen=h.unrealizedProfit!==null&&h.unrealizedProfit!==undefined&&Number.isFinite(open),total=real===null?null:real+(hasOpen?open:0),money=x=>x===null||x===undefined||!Number.isFinite(Number(x))?'Veri alınamadı':N(Number(x))+' USDT',run=h.runnerEnabled===true&&h.alarmScheduled===true&&h.scannerPaused!==true&&h.automationStopped!==true&&!h.storageDegraded,realLine=real===null?'Gerçekleşen PnL yok':'Gerçekleşen '+money(real),openLine=hasOpen?'Açık '+money(open):'Açık PnL verisi yok',clock=new Intl.DateTimeFormat('tr-TR',{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date());\n $('accountSummary').innerHTML='<div class=\"stat\"><small>MOTOR DURUMU · RUNNER</small><div class=\"num '+(run?'ok':'warn')+'\">'+(run?'ÇALIŞIYOR':'KONTROL')+'</div><div class=\"sub\">Scalp + Swing · PAPER MODE · gerçek emir kilitli</div></div><div class=\"stat\"><small>PAPER HESAP BAKİYESİ · USDT</small><div class=\"num\">'+money(h.balance)+'</div><div class=\"sub\">Paper equity: '+money(h.equity)+' · Kullanılabilir marjin: '+money(h.availableMargin)+'</div></div><div class=\"stat\"><small>TOPLAM KÂR / ZARAR · TOTAL PnL</small><div class=\"num\">'+(total===null?realLine:money(total))+'</div><div class=\"sub\">'+realLine+' · '+openLine+'</div></div><div class=\"stat\"><small>AÇIK POZİSYON ANLIK K/Z · LIVE PnL</small><div class=\"num '+(hasOpen?(open>=0?'ok':'short'):'')+'\">'+money(hasOpen?open:null)+'</div><div class=\"sub\">'+p.length+' açık pozisyon · marjin getirisi pozisyon detaylarında</div></div><div class=\"stat\"><small>GÜNLÜK KÂR / ZARAR · TODAY PnL</small><div class=\"num '+(today===null?'':today>=0?'ok':'short')+'\">'+money(today)+'</div><div class=\"sub\">TSİ · '+clock+'</div></div><div class=\"stat limit-card\"><small>MAKS. AÇIK POZİSYON</small><div class=\"num\">'+p.length+' / '+max+'</div><div class=\"sub\">Pozisyon yönetimi · en fazla '+max+' açık işlem · BingX VST paper</div><details class=\"limit-details\"><summary>Limit ayarını aç / kapat</summary><div class=\"limit-controls\"><input id=\"maxPositions\" type=\"range\" min=\"0\" max=\"20\" step=\"1\" value=\"'+max+'\"><b id=\"maxPositionsValue\">'+max+'</b><button id=\"saveMaxPositions\" class=\"btn small\">Kaydet</button></div><div id=\"maxPositionsStatus\" class=\"muted\">0–20 açık pozisyon sınırı</div></details></div>';\n const slider=$('maxPositions'),value=$('maxPositionsValue'),save=$('saveMaxPositions'),note=$('maxPositionsStatus');\n if(slider)slider.oninput=()=>{value.textContent=slider.value};\n if(save)save.onclick=async()=>{try{save.disabled=true;note.textContent='Kaydediliyor…';const result=await get('/api/paper/settings',{method:'POST',headers:{'content-type':'application/json','authorization':token?'Bearer '+token:''},body:JSON.stringify({maxOpenPositions:Number(slider.value)})});note.textContent=result.ok?'Kaydedildi · Maksimum '+result.maxOpenPositions+' pozisyon':'Kaydetme başarısız';await load()}catch(e){note.textContent='Kaydedilemedi: '+e.message}finally{save.disabled=false}};\n}\nfunction overview(){\n const h=health||{},u=cloudflareUsage||{},tick=tickerData||{},gc=globalContext||{};\n const positions=ps(),setups=candidates(),sc=setups.filter(x=>String(x.tradeStyle||x.engine||\"\").toUpperCase()===\"SCALP\").length,sw=setups.filter(x=>String(x.tradeStyle||x.engine||\"\").toUpperCase()===\"SWING\").length;\n const metric=(label,value)=>`<div class=\"metric\"><small>${E(label)}</small><b>${E(value)}</b></div>`;\n const fmt=value=>value===null||value===undefined||value===\"\"?\"UNAVAILABLE\":N(value);\n const rows=[[\"BTC\",\"BTC-USDT\"],[\"ETH\",\"ETH-USDT\"],[\"SOL\",\"SOL-USDT\"],[\"BNB\",\"BNB-USDT\"],[\"XRP\",\"XRP-USDT\"]];\n const market=rows.map(([label,symbol])=>{const list=Array.isArray(tick)?tick:(tick.data||tick.result||[]);const item=list.find(x=>String(x.symbol||\"\").toUpperCase()===symbol);return metric(label,item?(fmt(item.lastPrice??item.last??item.close??item.price)+\" USDT\"):\"UNAVAILABLE\")}).join(\"\");\n return `<h3>Piyasa özeti</h3><div class=\"grid\">${market}</div><h3>Motor ve tarama durumu</h3><div class=\"grid\">${metric(\"Scalp Engine\",h.scannerActive===true&&h.runnerEnabled===true?\"ACTIVE\":\"CHECK\")}${metric(\"Swing Engine\",h.scannerActive===true&&h.runnerEnabled===true?\"ACTIVE\":\"CHECK\")}${metric(\"Açık pozisyon\",String(positions.length))}${metric(\"Scalp aday\",String(sc))}${metric(\"Swing aday\",String(sw))}${metric(\"Tarama evreni\",fmt(h.scanUniverseSize))}${metric(\"Son tarama\",h.lastScanAt?new Date(h.lastScanAt).toLocaleString(\"tr-TR\"):\"UNAVAILABLE\")}${metric(\"Cloudflare Workers isteği\",fmt(u.workersRequests))}</div><p class=\"note\">Eksik piyasa ve kullanım verileri UNAVAILABLE olarak gösterilir; tahmini değer üretilmez.</p>`;\n}function stats(style){let a=analytics||{},groups=A(a.byStyle),x=groups.find(v=>String(v.key||'').toUpperCase()===String(style).toUpperCase())||{},fmt=v=>v==null?'—':N(v),rows=[['İşlem',x.trades],['Kazanma oranı',x.winRatePct==null?'—':Number(x.winRatePct).toFixed(1)+'%'],['Profit Factor',fmt(x.profitFactor)],['Beklenti',x.expectancyUsdt==null?'—':N(x.expectancyUsdt)+' USDT'],['Net PnL',x.netPnlUsdt==null?'—':N(x.netPnlUsdt)+' USDT'],['Bilinen ücret',x.feesKnownUsdt==null?'—':N(x.feesKnownUsdt)+' USDT'],['Net fonlama',x.fundingPaidUsdt==null?'—':N(x.fundingPaidUsdt)+' USDT'],['Slippage',x.slippagePaidUsdt==null?'—':N(x.slippagePaidUsdt)+' USDT']];return '<h3>'+E(style)+' performansı</h3><div class=\"grid\">'+rows.map(v=>'<div class=\"metric\"><small>'+v[0]+'</small><b>'+v[1]+'</b></div>').join('')+'</div><p class=\"note\">Bu rapor yalnızca '+E(style)+' işlemlerini içerir. Scalp ve Swing istatistikleri birleştirilmez. Yetersiz örneklemde metrikler boş gösterilir.</p>'}\nfunction diag(){let f=candidates(),run=!!(health&&health.scannerActive===true&&health.runnerEnabled===true);return '<div class=\"grid\"><div class=\"metric\"><small>Tarayıcı / Runner</small><b>'+(run?'Aktif':'Kontrol gerekli')+'</b></div><div class=\"metric\"><small>Otomasyon kilidi</small><b>'+(health&&health.automationStopped?'Durduruldu':'Aktif değil')+'</b></div><div class=\"metric\"><small>BingX VST demo</small><b>'+(health&&health.demoConnected?'Bağlı':'Doğrulanamadı')+'</b></div><div class=\"metric\"><small>Depolama</small><b>'+(health&&health.storageDegraded?'Sorun var':'Durum normal / doğrulanıyor')+'</b></div><div class=\"metric\"><small>Tarama paketi</small><b>'+N(health&&health.scanBatchSize)+' / '+N(health&&health.scanUniverseSize)+'</b></div><div class=\"metric\"><small>Son tarama</small><b>'+(health&&health.lastScanAt?new Date(health.lastScanAt).toLocaleString('tr-TR'):'Henüz yok')+'</b></div></div><h3>Bulunan setup kayıtları</h3>'+table(f,'setup')+'<p class=\"note\">Boş model/zaman dilimi retleri listelenmez. Altyapı ve veri sağlığı uyarıları yukarıda tutulur.</p>'}function chartPanel(){let tv=String(symbol||'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g,'').replace('.P','');let tvSymbol='BINGX:'+tv+'.P';let src='https://www.tradingview.com/widgetembed/?symbol='+encodeURIComponent(tvSymbol)+'&interval=60&hidesidetoolbar=0&symboledit=0&saveimage=0&toolbarbg=08111f&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=tr';return '<div class=\\\"note\\\">TradingView · '+E(tvSymbol)+' · 1 saatlik BingX perpetual grafik</div><iframe id=\\\"tvchart\\\" class=\\\"chart\\\" data-symbol=\\\"'+E(tvSymbol)+'\\\" src=\\\"'+src+'\\\" allowfullscreen></iframe>';}function openChart(pair){symbol=String(pair||'BTCUSDT');tab=9;renderTabs();draw()}\nfunction calendarPanel(){return '<h3>Günlük işlem takvimi</h3><div class=\"note\">Tarih seçerek o gün kapanan işlemleri görüntüleyin. Saatler Türkiye saatidir.</div><label for=\"trade-day\">İşlem günü</label> <input id=\"trade-day\" type=\"date\"><div id=\"day-result\" class=\"empty\">Gün seçin.</div>'}\nfunction draw(){let p=ps(),c=candidates(),style=x=>String(x.tradeStyle||x.engine||'').toUpperCase(),sc=c.filter(x=>style(x)==='SCALP'||String(x.model||'').startsWith('S')),sw=c.filter(x=>style(x)==='SWING'||String(x.model||'').startsWith('W')),ready=x=>['READY','QUALIFIED','HIGH_QUALITY'].includes(String(x.status||'').toUpperCase());$('heading').textContent=T[tab];$('updated').textContent='Güncelleme '+new Date().toLocaleTimeString('tr-TR');if(tab===9){let old=$('content').querySelector('#tvchart'),tv=String(symbol||'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g,'');if(old&&old.dataset.symbol===tv)return}let h='';if(tab===0)h=overview();else if(tab===1)h=table(p,'pos')+cards();else if(tab===2)h='<h3>Scalp Scanner · 1H / 15M / 5M</h3>'+table(sc,'setup');else if(tab===3)h='<h3>Swing Scanner · 1D / 4H / 1H / 15M</h3>'+table(sw,'setup');else if(tab===4)h=table(p,'pos')+cards();else if(tab===5)h=stats('SCALP')+stats('SWING')+calendarPanel();else if(tab===6)h=table(c.filter(ready),'setup');else if(tab===7)h=historyTable(A(status&&status.closedTrades));else if(tab===8)h=diag();else h=chartPanel();$('content').innerHTML=h;document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>openClose(b.dataset.close));document.querySelectorAll('[data-chart]').forEach(b=>b.onclick=()=>openChart(b.dataset.chart));let day=$('trade-day');if(day){day.value=new Date().toLocaleDateString('sv-SE',{timeZone:'Europe/Istanbul'});let renderDay=()=>{let key=day.value,rows=A(status&&status.closedTrades).filter(t=>t.closedAt&&new Date(t.closedAt).toLocaleDateString('sv-SE',{timeZone:'Europe/Istanbul'})===key),total=rows.reduce((n,t)=>n+Number(t.pnlUsdt||0),0);$('day-result').className='';$('day-result').innerHTML='<div class=\\\"note\\\">'+rows.length+' kapanan işlem · Günlük net sonuç: '+N(total)+' USDT</div>'+historyTable(rows)};day.onchange=renderDay;renderDay()}}async function get(path,opts){let r=await fetch(path,opts||{}),d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.error||'HTTP '+r.status);return d}\nasync function load(){try{let d=await get('/api/data',{signal:AbortSignal.timeout(18000)});health=d.health;systemHealth=d.systemHealth;analytics=d.analytics;archiveHealth=d.archiveHealth;historyHealth=d.historyHealth;cloudflareUsage=d.cloudflareUsage;tickerData=d.tickerData;universeData=d.universeData;globalContext=d.globalContext;status=health?{...health,positions:A(health.positions),setups:A(health.setups),closedTrades:A(health.closedTrades)}:null;live={positions:A(health&&health.positions)};if(status){$('conn').textContent='Paper işlem modu aktif';$('conn').className='ok'}else{$('conn').textContent='Paper hesap verisi alınamadı';$('conn').className='warn'}let run=health&&health.runnerEnabled===true&&health.alarmScheduled===true&&health.scannerPaused!==true&&health.automationStopped!==true&&!health.storageDegraded;$('conn').textContent=run?'Motor ve tarayıcı aktif':'Motor / tarayıcı kontrol gerekli';$('conn').className=run?'ok':'warn';$('se').textContent=run?'ACTIVE':'CHECK';$('we').textContent=run?'ACTIVE':'CHECK';$('se').className=run?'ok':'warn';$('we').className=run?'ok':'warn';accountSummary();draw()}catch(e){$('conn').textContent='API hatası: '+e.message;$('conn').className='warn';$('accountSummary').innerHTML='<div class=\"empty\">Paper hesap verisi alınamadı: '+E(e.message)+'</div>';$('content').innerHTML='<div class=\"empty\">Veri alınamadı: '+E(e.message)+'</div>'}}\nfunction openClose(id){chosen=id;$('mt').textContent=id+' pozisyonunu kapat';$('pct').value=50;$('pl').textContent='%50 kapat';$('modal').classList.add('show')}\n$('pct').oninput=()=>$('pl').textContent='%'+$('pct').value+' kapat';$('cancel').onclick=()=>$('modal').classList.remove('show');\n$('confirm').onclick=async()=>{let fraction=Number($('pct').value)/100;if(!confirm('%'+Math.round(fraction*100)+' pozisyon kapatılacak. Onaylıyor musunuz?'))return;try{$('confirm').disabled=true;let r=await get('/api/close',{method:'POST',headers:{'content-type':'application/json','authorization':token?'Bearer '+token:''},body:JSON.stringify({positionId:chosen,fraction,confirmedByUser:true})});$('modal').classList.remove('show');alert(r.ok?'Kapatma isteği işlendi. Pozisyon durumu yenileniyor.':r.error||'Kapatma başarısız');await load()}catch(e){alert('Kapatma başarısız: '+e.message)}finally{$('confirm').disabled=false}};renderTabs();load();</script></body></html>";
 async function ensureInternalPaperAccount(engine, env) {
   if (env.BINGX_TRADING_MODE !== "paper" || env.PAPER_TRADING_ONLY !== "true") return { ok: true, skipped: true };
   const stateResponse = await engine.fetch(new Request("https://engine.internal/state"));
@@ -7556,7 +7640,7 @@ var index_default = {
           code: d.code,
           stage: d.stage
         })) : [],
-        maxOpenPositions: Math.min(10, Math.max(0, Number(data.maxOpenPositions ?? 10))),
+        maxOpenPositions: Math.min(20, Math.max(0, Number(data.maxOpenPositions ?? 20))),
         error: data.demoConnected === true ? void 0 : "BingX VST demo account authentication or balance check failed."
       }, { status: status.ok ? 200 : 503, headers });
     }
@@ -7678,7 +7762,7 @@ var index_default = {
           runtimeChecks.push({ name: "LIVE_POSITION_SNAPSHOT", passed: Array.isArray(positions) });
           runtimeChecks.push({ name: "LIVE_OPEN_ORDER_SNAPSHOT", passed: Array.isArray(orders) });
           if (hedgeMode !== true) blockers.push("LIVE_HEDGE_MODE_REQUIRED");
-          if (!Array.isArray(positions) || positions.length > 10) blockers.push("LIVE_POSITION_SNAPSHOT_INVALID_OR_OVER_LIMIT");
+          if (!Array.isArray(positions) || positions.length > 20) blockers.push("LIVE_POSITION_SNAPSHOT_INVALID_OR_OVER_LIMIT");
           if (positions.some(position => position.isolated !== true && String(position.marginType ?? "").toUpperCase() !== "ISOLATED"))
             blockers.push("EXISTING_LIVE_POSITION_NOT_ISOLATED");
         } catch (error) {
@@ -7696,8 +7780,8 @@ var index_default = {
         demoTradingEnabled: isBingXDemoConfigured(env),
         liveExecutionIntegrated: true, liveRestClientIntegrated: true, durableIdempotencyIntegrated: true, livePositionManagementIntegrated: true, liveRunnerIntegrated: true, explicitActivationRequired: true,
         runtimeChecks, activation: { active: activation.active === true, activatedAt: activation.activatedAt ?? null },
-        maxOpenPositions: 10, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
-        normalLeverage: { min: 20, max: 50 }, reducedRiskLeverage: { min: 5, max: 10 },
+        maxOpenPositions: 20, marginModeRequired: "ISOLATED", normalRiskR: 1, reducedRiskR: 0.5,
+        normalLeverage: { min: 20, max: 50 }, reducedRiskLeverage: { min: 20, max: 50 },
         blockers, reason: blockers.length ? "Live execution is integrated but blocked until the listed prerequisites and account checks pass." : "Live execution is configured and remains disabled until the separate activation flag and fresh user confirmation are supplied."
       }, { headers: { ...headers, "cache-control": "no-store" } });
     }
@@ -7722,7 +7806,7 @@ var index_default = {
         return Response.json({ ok: false, error: "LIVE_ACTIVATION_ACCOUNT_CHECK_FAILED", detail: String(error).slice(0, 180) }, { status: 503, headers });
       }
       if (accountSnapshot?.source !== "BINGX_LIVE" || accountSnapshot.asset !== "USDT" ||
-          hedgeMode !== true || !Array.isArray(livePositions) || livePositions.length > 10 ||
+          hedgeMode !== true || !Array.isArray(livePositions) || livePositions.length > 20 ||
           livePositions.some(position => position.isolated !== true && String(position.marginType ?? "").toUpperCase() !== "ISOLATED") ||
           !Array.isArray(liveOrders))
         return Response.json({ ok: false, error: "LIVE_ACTIVATION_ACCOUNT_GUARDS_FAILED" }, { status: 409, headers });
@@ -7779,7 +7863,7 @@ var index_default = {
           return Response.json({ ok: false, error: "LIVE_ENTRY_OUTSIDE_VALID_ZONE" }, { status: 409, headers });
         const stopLoss = Number(setup.stopLoss), takeProfit = Number(setup.takeProfit ?? setup.tp3 ?? setup.tp2 ?? setup.tp1);
         const unitRiskFraction = (Math.abs(markPrice - stopLoss) + markPrice * (FEE_RATE + SLIPPAGE_RATE) + stopLoss * (FEE_RATE + SLIPPAGE_RATE)) / markPrice;
-        const minLeverage = riskMultiple === 0.5 ? 5 : 20, maxLeverage = riskMultiple === 0.5 ? 10 : 50;
+        const minLeverage = 20, maxLeverage = 50;
         if (!Number.isFinite(unitRiskFraction) || unitRiskFraction <= 0 || unitRiskFraction > 1 / minLeverage * 0.8)
           return Response.json({ ok: false, error: "LIVE_STOP_DISTANCE_LIQUIDATION_GUARD" }, { status: 409, headers });
         const leverage = Math.max(minLeverage, Math.min(maxLeverage, Math.floor((riskMultiple === 0.5 ? 0.4 : 0.8) / unitRiskFraction)));
