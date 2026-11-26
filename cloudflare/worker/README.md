@@ -8,11 +8,11 @@ The production resources are the existing Cloudflare Workers `smcprov2` and `smc
 
 - Existing Worker and existing Durable Object/SQLite + KV state are retained.
 - Runner remains enabled. The scanner uses the existing 534-symbol USDT-M universe and 25-symbol scan batches.
-- Independent Scalp and Swing evaluators are present. Scalp uses 1H/15M/5M; Swing uses 1D/4H/1H/15M. 1M and 3M are not in the allowed timeframe set.
-- Existing Worker environment is `BINGX_TRADING_MODE=paper`, `PAPER_TRADING_ONLY=true`, `PAPER_START_BALANCE_USDT=1000`, `DEMO_TRADING_ENABLED=false`, and `LIVE_TRADING_ENABLED=false`.
-- The 1,000 USDT value is the existing **internal paper-account** starting setting, not verified BingX VST equity. The persisted paper ledger was preserved; it held two open positions, one closed trade, and approximately 988.81 USDT balance at the audit snapshot.
-- `NEW_PAPER_ENTRIES_ENABLED=false` is now deployed. Scanning/strategy generation and existing-position management remain enabled; no new internal-paper positions may be opened while the requested BingX VST account is unconfigured.
-- BingX VST execution is fail-closed until `BINGX_API_KEY` and `BINGX_API_SECRET` exist as Cloudflare secrets and the demo mode flags are explicitly configured. Those secrets were not present in the audited Worker settings.
+- Only the Swing evaluator is active. Setup generation and entry confirmation are restricted to 4H and 1D; 1H and lower are rejected. The 1D structure supplies directional context and 4H supplies structural zones.
+- BTC weekly/daily structure, BTC/altcoin/USDT dominance, liquidity, displacement, CHoCH/MSS, FVG/Breaker/OB zones, closed-candle retests, quote volume, relative volume, and spread are used by the production scanner. Countertrend setups require additional sweep, displacement, structure-shift, structural-zone, and entry-confirmation evidence.
+- Production environment must be `BINGX_TRADING_MODE=demo`, `DEMO_TRADING_ENABLED=true`, `PAPER_TRADING_ONLY=true`, and `LIVE_TRADING_ENABLED=false`. Internal paper entries are explicitly gated to `BINGX_TRADING_MODE=paper`; selecting demo mode without credentials cannot silently fall back to internal paper execution.
+- BingX VST execution remains fail-closed until `BINGX_API_KEY` and `BINGX_API_SECRET` are configured as Cloudflare Worker secrets. The latest settings audit did not show either secret binding. Until both are restored, scanner diagnostics may run but account snapshots, order cancellation, and VST entries cannot be verified or executed.
+- The existing ten legacy pending-order records include 1H setups and are retired by the active-strategy filter. When demo credentials are restored, the runner cancels and reconciles these legacy orders before allowing new entries. Do not delete the records before exchange-side cancellation is confirmed.
 - Live execution remains hard-disabled.
 - New VST entries, once credentials are configured, calculate 1R from **2% of current verified VST equity** at order time. Reduced-risk setups use 0.5R. The originally captured VST equity snapshot remains available for audit, not as the new-trade sizing base.
 - Score bands now match the requested boundaries: 0–59 RED, 60–64 WAIT, 65–69 WATCH, 70–83 QUALIFIED, 84–100 HIGH_QUALITY. Setup readiness follows those gates; minimum R:R is 1:1 and the standard target remains 3.5R.
