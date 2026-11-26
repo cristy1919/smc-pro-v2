@@ -226,7 +226,8 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
     p.exitPrice = executionPrice;
     p.exitTriggerPrice = triggerPrice;
     p.exitMarkPrice = markPrice;
-    p.pnlUsdt = round(Number(p.realizedPnlUsdt) - (p.entryFeeUsdt ?? 0), 8);\n    p.grossPnlUsdt = round(Number(p.grossRealizedPnlUsdt) || 0, 8);
+    p.pnlUsdt = round(Number(p.realizedPnlUsdt) - (p.entryFeeUsdt ?? 0), 8);
+    p.grossPnlUsdt = round(Number(p.grossRealizedPnlUsdt) || 0, 8);
     p.netPnlUsdt = p.pnlUsdt;
     const initialMarginForReturn = Number(p.initialMarginUsdt ?? p.marginUsdt ?? p.allocationUsdt); p.returnPct = initialMarginForReturn > 0 ? round(p.pnlUsdt / initialMarginForReturn * 100, 8) : null;
     p.pnlAccountingStatus = p.fundingDataStatus === "UNAVAILABLE" || p.fundingDataStatus === "UNAVAILABLE_MISSED_SETTLEMENT" ? "UNVERIFIED_FUNDING" : "VERIFIED"; p.closeEventId = closeEventId; p.positionId = positionId;
@@ -4600,7 +4601,9 @@ var EngineState = class {
       const closeEvent = { event: "MANUAL_CLOSE", closeEventId, positionId: stablePositionId, at: closedAt, qty: closeQty, executionPrice: exitPrice, markPrice: exitPrice, closeReason: "MANUAL_CLOSE", grossPnlUsdt: gross, netPnlUsdt: pnl, marginUsdt: allocatedMargin, returnPct: allocatedMargin > 0 ? Number((pnl / allocatedMargin * 100).toFixed(8)) : null, feesPaidUsdt: Number((allocatedEntryFee + allocatedPriorExitFees + exitFee).toFixed(8)), entryFeeAllocatedUsdt: allocatedEntryFee, exitFeeUsdt: exitFee, fundingPaidUsdt: allocatedFunding, slippagePaidUsdt: Number((allocatedPriorSlippage + exitSlippage).toFixed(8)) };
       position.executionEvents = [...(Array.isArray(position.executionEvents) ? position.executionEvents : []), closeEvent];
       const priorManualEvents = position.executionEvents.filter(e => e.event === "MANUAL_CLOSE" && e.closeEventId !== closeEventId);
-      const manualCloseEvents = [...priorManualEvents, closeEvent];\n      const totalManuallyClosedQty = Number(manualCloseEvents.reduce((sum, e) => sum + (Number(e.qty) || 0), 0).toFixed(8));\n      const weightedManualExitPrice = totalManuallyClosedQty > 0 ? Number((manualCloseEvents.reduce((sum, e) => sum + (Number(e.executionPrice) || 0) * (Number(e.qty) || 0), 0) / totalManuallyClosedQty).toFixed(8)) : exitPrice;
+      const manualCloseEvents = [...priorManualEvents, closeEvent];
+      const totalManuallyClosedQty = Number(manualCloseEvents.reduce((sum, e) => sum + (Number(e.qty) || 0), 0).toFixed(8));
+      const weightedManualExitPrice = totalManuallyClosedQty > 0 ? Number((manualCloseEvents.reduce((sum, e) => sum + (Number(e.executionPrice) || 0) * (Number(e.qty) || 0), 0) / totalManuallyClosedQty).toFixed(8)) : exitPrice;
       const closed = { ...position, positionId: stablePositionId, closeEventId, qty: closeQty, initialQty: closeQty, entryFeeUsdt: allocatedEntryFee, exitFeesUsdt: Number((allocatedPriorExitFees + exitFee).toFixed(8)), feesPaidUsdt: Number((allocatedEntryFee + allocatedPriorExitFees + exitFee).toFixed(8)), slippagePaidUsdt: Number((allocatedPriorSlippage + exitSlippage).toFixed(8)), fundingPaidUsdt: allocatedFunding, realizedPnlUsdt: Number((allocatedPriorRealized + gross - exitFee - exitSlippage).toFixed(8)), initialRiskUsdt: allocatedInitialRisk, riskUsdt: Number((Number(position.riskUsdt || initialRiskTotal) * allocation).toFixed(8)), initialMarginUsdt: allocatedMargin, marginUsdt: allocatedMargin, allocationUsdt: allocatedMargin, closedAt, exitPrice, pnlUsdt: pnl, closeReason: "MANUAL_CLOSE", manualCloseClassification: ["TP","SL"].includes(body.closeClassification) ? body.closeClassification : "MANUAL", closeSource: "MANUAL_API_REQUEST", closeRequestId: requestId, manualConfirmedAt: new Date(closeRequestedAt).toISOString(), status: "CLOSED" };
       ledger.balance = Number((ledger.balance + gross - exitFee - exitSlippage).toFixed(8));
       const dayKey = new Date(closedAt).toISOString().slice(0, 10);
@@ -4611,7 +4614,11 @@ var EngineState = class {
       ledger.dailyPnl = Number((ledger.dailyPnl + gross - exitFee - exitSlippage).toFixed(8));
       if (fraction === 1 || closeQty >= position.qty) {
         closed.pnlUsdt = Number((pnl + priorManualEvents.reduce((sum,e)=>sum + (Number(e.netPnlUsdt)||0),0)).toFixed(8));
-        closed.netPnlUsdt = closed.pnlUsdt;\n        closed.grossPnlUsdt = Number((gross + priorManualEvents.reduce((sum,e)=>sum + (Number(e.grossPnlUsdt)||0),0)).toFixed(8));\n        closed.grossRealizedPnlUsdt = closed.grossPnlUsdt;\n        closed.qty = totalManuallyClosedQty; closed.initialQty = totalManuallyClosedQty;\n        closed.exitPrice = weightedManualExitPrice; closed.averageExitPrice = weightedManualExitPrice; closed.lastExitPrice = exitPrice;
+        closed.netPnlUsdt = closed.pnlUsdt;
+        closed.grossPnlUsdt = Number((gross + priorManualEvents.reduce((sum,e)=>sum + (Number(e.grossPnlUsdt)||0),0)).toFixed(8));
+        closed.grossRealizedPnlUsdt = closed.grossPnlUsdt;
+        closed.qty = totalManuallyClosedQty; closed.initialQty = totalManuallyClosedQty;
+        closed.exitPrice = weightedManualExitPrice; closed.averageExitPrice = weightedManualExitPrice; closed.lastExitPrice = exitPrice;
         closed.feesPaidUsdt = Number((Number(closed.feesPaidUsdt||0) + priorManualEvents.reduce((sum,e)=>sum + (Number(e.feesPaidUsdt)||0),0)).toFixed(8));
         closed.entryFeeUsdt = Number((Number(closed.entryFeeUsdt||0) + priorManualEvents.reduce((sum,e)=>sum + (Number(e.entryFeeAllocatedUsdt)||0),0)).toFixed(8));
         closed.exitFeesUsdt = Number((Number(closed.exitFeesUsdt||0) + priorManualEvents.reduce((sum,e)=>sum + (Number(e.exitFeeUsdt)||0),0)).toFixed(8));
