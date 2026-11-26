@@ -5079,6 +5079,15 @@ var EngineState = class {
           }
         }
       }
+      if (!structuralCandlesBySymbol.has("BTC-USDT") || !valid(structuralCandlesBySymbol.get("BTC-USDT")?.["1w"])) {
+        const btcRows = structuralCandlesBySymbol.get("BTC-USDT") ?? {};
+        for (const [interval, limit, duration] of [["4h", 180, 144e5], ["1d", 180, 864e5], ["1w", 100, 6048e5]]) {
+          if (valid(btcRows[interval])) continue;
+          try { const candles = await fetchMarketCandles("BTC-USDT", interval, limit, duration); if (candles.length >= (interval === "1w" ? 20 : 60)) btcRows[interval] = candles; }
+          catch (btcContextError) { console.warn("BTC context candles unavailable", interval, String(btcContextError).slice(0, 120)); }
+        }
+        structuralCandlesBySymbol.set("BTC-USDT", btcRows);
+      }
       const biasMeasuredAt = Date.now();
       const structuralBiasBySymbol = ledger.structuralBiasBySymbol ?? (ledger.structuralBiasBySymbol = {});
       for (const symbol of symbolsToEvaluate) {
