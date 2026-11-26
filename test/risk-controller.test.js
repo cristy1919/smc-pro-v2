@@ -12,10 +12,10 @@ test("global risk gate fails closed when liquidity or liquidation data is unavai
  assert.equal(r.eligible,false);assert.ok(r.reasons.includes("MARKET_LIQUIDITY_UNAVAILABLE"));assert.ok(r.reasons.includes("LIQUIDATION_DISTANCE_UNAVAILABLE"));
 });
 test("global risk gate prevents duplicate Swing symbol positions",()=>{
- const open=[{engine:"swing",symbol:"BTC-USDT",status:"OPEN"}];
- const r=evaluateEntryEligibility(candidate,{...deps,openPositions:open});
+ const r=evaluateEntryEligibility(candidate,deps);
  assert.equal(r.eligible,true);
  const duplicate=evaluateEntryEligibility(candidate,{...deps,openPositions:[{engine:"swing",symbol:"BTC-USDT",status:"OPEN"}]});
+ assert.equal(duplicate.eligible,false);
  assert.ok(duplicate.reasons.includes("DUPLICATE_ENGINE_SYMBOL_POSITION"));
 });
 test("global risk gate enforces ten open positions and reduced-risk sizing",()=>{
