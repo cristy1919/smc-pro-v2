@@ -21,7 +21,7 @@ function summarize(engine,symbol,days,trades,initialEquity,skipped){
   const totalR=trades.reduce((s,t)=>s+t.netR,0);
   return {engine,symbol,periodDays:days,initialEquity,endingEquity:Number(equity.toFixed(4)),trades:trades.length,wins:wins.length,losses:losses.length,winRate:trades.length?wins.length/trades.length:0,profitFactor:grossLoss?grossWin/grossLoss:grossWin?Infinity:0,expectancyR:trades.length?totalR/trades.length:0,totalR,maxDrawdownPct:maxDrawdown*100,skipped,feesIncluded:true,confidence:trades.length<30?"INSUFFICIENT_DATA":"SAMPLE_AVAILABLE"};
 }
-export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],initialEquity,feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars=500,maxWaitBars=6,entryTimeframe}){
+export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],initialEquity,feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars=500,maxWaitBars=6,entryTimeframe,setupIdFilter,directionFilter}){
   if(!["scalp","swing"].includes(engine))throw new Error("INVALID_ENGINE");
   if(typeof evaluate!=="function")throw new TypeError("evaluate callback is required");
   if(!finite(initialEquity)||initialEquity<=0)throw new RangeError("VERIFIED_INITIAL_EQUITY_REQUIRED");
@@ -52,7 +52,7 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
       if(Object.values(sliced).some(rows=>rows.length<25)){skipped++;continue;}
       let candidates;
       try{candidates=evaluate({symbol,timeframes:sliced,entryTimeframe:entryTf});}catch{skipped++;continue;}
-      const candidate=candidates.find(c=>c.state==="QUALIFIED"&&c.score>=80&&c.hardFilters?.validStop&&c.hardFilters?.minimumRR);
+      const candidate=candidates.find(c=>c.state==="QUALIFIED"&&c.score>=80&&c.hardFilters?.validStop&&c.hardFilters?.minimumRR&&(!setupIdFilter||c.setupId===setupIdFilter)&&(!directionFilter||c.direction===directionFilter));
       if(!candidate||seen.has(candidate.id))continue;
       seen.add(candidate.id);
       const future=entryRows.slice(i+1,i+1+maxWaitBars);
@@ -81,5 +81,5 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
     }
     reports.push({summary:summarize(engine,symbol,days,trades,initialEquity,skipped),trades});
   }
-  return {engine,symbol,periods:reports.map(r=>r.summary),tradesByPeriod:Object.fromEntries(reports.map(r=>[r.summary.periodDays,r.trades])),assumptions:{riskPerTrade:RISK_CONFIG.riskUnitFraction,compounding:"CURRENT_EQUITY",feeRate,slippageRate,fundingMode:fundingRates.length?"HISTORICAL_SETTLEMENTS":"FLAT_RATE_FALLBACK",fundingRateFallback:fundingRate,stopFirstWhenStopAndTargetSameCandle:true,maxWaitBars,maxHoldBars,entryTimeframe:entryTf,entryTimeframeComparison:engine==="swing"?"1d-bias/4h-zone/1h-confirmation-for-15m-entry; 1d-bias/4h-zone/1h-entry-for-1h-entry":"NOT_APPLICABLE"},dataRange:{start:entryRows[0].timestamp,end:entryRows.at(-1).timestamp}};
+  return {engine,symbol,periods:reports.map(r=>r.summary),tradesByPeriod:Object.fromEntries(reports.map(r=>[r.summary.periodDays,r.trades])),assumptions:{riskPerTrade:RISK_CONFIG.riskUnitFraction,compounding:"CURRENT_EQUITY",feeRate,slippageRate,fundingMode:fundingRates.length?"HISTORICAL_SETTLEMENTS":"FLAT_RATE_FALLBACK",fundingRateFallback:fundingRate,stopFirstWhenStopAndTargetSameCandle:true,maxWaitBars,maxHoldBars,entryTimeframe:entryTf,entryTimeframeComparison:engine==="swing"?"1d-bias/4h-zone/1h-confirmation-for-15m-entry; 1d-bias/4h-zone/1h-entry-for-1h-entry":"NOT_APPLICABLE",setupIdFilter:setupIdFilter??null,directionFilter:directionFilter??null},dataRange:{start:entryRows[0].timestamp,end:entryRows.at(-1).timestamp}};
 }
