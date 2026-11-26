@@ -5132,6 +5132,7 @@ var EngineState = class {
       catch (dominanceError) { dominanceContext = deriveDominanceDirections(null); console.warn("Dominance scoring data unavailable", String(dominanceError).slice(0, 140)); }
       const altcoinBreadthBias = summarizeAltcoinBreadthBias(structuralBiasBySymbol, universeSymbols, biasMeasuredAt);
       ledger.structuralMarketBiasSnapshot = { ...altcoinBreadthBias, btcBias, measuredAt: biasMeasuredAt };
+      ledger.marketContextSnapshot = { btcBias, btcWeeklyBias, btcDailyBias, dominance: dominanceContext, measuredAt: new Date(biasMeasuredAt).toISOString() };
       const activitySnapshots = ledger.activitySnapshots ?? (ledger.activitySnapshots = {});
       const activityQuotesBySymbol = {};
       let activityTickerError = null;
@@ -6510,7 +6511,7 @@ async function fetchGlobalDominanceSnapshot(env, store = null) {
   }
   if (changed) {
     try {
-      const serialized = JSON.stringify({ points, lastLiveCollectionDate, lastBackfillAttemptDate, source: historySource ?? "unavailable", updatedAt: measuredAt });
+      const serialized = JSON.stringify({ points, lastLiveCollectionDate, lastBackfillAttemptDate, source: historySource ?? "unavailable", lastError: error ?? null, updatedAt: measuredAt });
       if (store) await store.put(DOMINANCE_HISTORY_KEY, serialized);
       else await env.PAPER_STATE.put(DOMINANCE_HISTORY_KEY, serialized);
     } catch (storageError) {
@@ -6540,9 +6541,9 @@ async function fetchGlobalDominanceSnapshot(env, store = null) {
 __name(fetchGlobalDominanceSnapshot, "fetchGlobalDominanceSnapshot");
 function deriveDominanceDirections(snapshot) {
   const history = Array.isArray(snapshot?.history) ? snapshot.history.filter((x) => x && typeof x.date === "string") : [];
-  if (history.length < 8) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: snapshot?.btc ?? null, altDomPct: snapshot?.altcoin ?? null, usdtDomPct: snapshot?.usdt ?? null, measuredAt: snapshot?.measuredAt ?? null, available: false };
+  if (history.length < 8) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: snapshot?.btc ?? null, altDomPct: snapshot?.altcoin ?? null, usdtDomPct: snapshot?.usdt ?? null, measuredAt: snapshot?.measuredAt ?? null, historyCoverageDays: history.length, historySource: snapshot?.historySource ?? null, error: snapshot?.error ?? null, available: false };
   const latestPoint = history.at(-1), latestDate = Date.parse(latestPoint.date);
-  if (!Number.isFinite(latestDate) || Date.now() - latestDate > 2 * 864e5) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: null, altDomPct: null, usdtDomPct: null, measuredAt: snapshot?.measuredAt ?? null, available: false };
+  if (!Number.isFinite(latestDate) || Date.now() - latestDate > 2 * 864e5) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: null, altDomPct: null, usdtDomPct: null, measuredAt: snapshot?.measuredAt ?? null, historyCoverageDays: history.length, historySource: snapshot?.historySource ?? null, error: snapshot?.error ?? null, available: false };
   const cutoff = latestDate - 6 * 864e5;
   const baseline = [...history].reverse().find((x) => Date.parse(x.date) <= cutoff) ?? history[Math.max(0, history.length - 8)];
   const trend = (key) => {
@@ -6559,6 +6560,9 @@ function deriveDominanceDirections(snapshot) {
     altDomPct: snapshot?.altcoin ?? latestPoint.altDomPct ?? null,
     usdtDomPct: snapshot?.usdt ?? latestPoint.usdtDomPct ?? null,
     measuredAt: snapshot?.measuredAt ?? null,
+    historyCoverageDays: history.length,
+    historySource: snapshot?.historySource ?? null,
+    error: snapshot?.error ?? null,
     available: true
   };
 }
