@@ -12,7 +12,7 @@ test("BingX public provider retries transient 100410 responses with backoff", as
     fetchImpl: async () => {
       calls++;
       if (calls < 3) return { ok: true, json: async () => ({ code: 100410, msg: "retry later" }) };
-      return { ok: true, json: async () => ({ code: 0, data: [{ time: 1 }] }) };
+      return { ok: true, json: async () => ({ code: 0, data: [{ time: 1, open: 100, high: 101, low: 99, close: 100.5, volume: 12 }] }) };
     }
   });
   const result = await provider.getCandles({
