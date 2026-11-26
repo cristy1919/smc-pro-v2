@@ -887,7 +887,9 @@ function evaluateEngine(engine, symbol, input, btcBias = "UNAVAILABLE", history 
   const setups = [], diagnostics = [];
   if (unavailable.length) return { engine, symbol, setups, diagnostics, structure, zones: allZones, unavailable };
   const direction = structure[directionTf].trend, setupRows = input[setupTf], entryRows = input[entryTf], z = allZones.filter((x) => x.sourceTimeframe === zoneTf || x.sourceTimeframe === setupTf), ids = ENGINE_CONFIG[engine].setups;
-  const recentVolume = Number(last(entryRows)?.volume), baseVolume = median(entryRows.slice(-21, -1).map((x) => Number(x.volume)).filter(Number.isFinite));
+  const rawRecentVolume = last(entryRows)?.volume;
+  const recentVolume = rawRecentVolume === null || rawRecentVolume === void 0 ? NaN : Number(rawRecentVolume);
+  const baseVolume = median(entryRows.slice(-21, -1).map((x) => x.volume === null || x.volume === void 0 ? NaN : Number(x.volume)).filter(Number.isFinite));
   const relativeVolume = Number.isFinite(recentVolume) && baseVolume > 0 ? recentVolume / baseVolume : NaN;
   // Relative volume is contextual scoring only; it must never suppress otherwise valid price-action setups.
   const volumeContext = Number.isFinite(relativeVolume) ? Number(relativeVolume.toFixed(3)) : "UNAVAILABLE";
