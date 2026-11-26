@@ -4,11 +4,11 @@ export function createLegacyWorkerCompatibilityAdapter({readEngineSnapshot,write
   if(typeof writeCandidateSnapshot!=="function")throw new TypeError("writeCandidateSnapshot adapter is required");
   return Object.freeze({
     async read(){const snapshot=await readEngineSnapshot();if(!snapshot||typeof snapshot!=="object")throw new Error("LEGACY_ENGINE_SNAPSHOT_UNAVAILABLE");return snapshot;},
-    async publishCandidates({scalp=[],swing=[],generatedAt=Date.now()}={}){
-      if(!Array.isArray(scalp)||!Array.isArray(swing))throw new TypeError("candidate lists must be arrays");
-      const safe={schemaVersion:1,generatedAt,scalp:scalp.map(sanitizeCandidate),swing:swing.map(sanitizeCandidate)};
+    async publishCandidates({swing=[],generatedAt=Date.now()}={}){
+      if(!Array.isArray(swing))throw new TypeError("candidate list must be an array");
+      const safe={schemaVersion:2,generatedAt,scalp:[],swing:swing.filter(c=>["4h","1d"].includes(String(c.setupTimeframe??c.timeframe??"").toLowerCase())).map(sanitizeCandidate)};
       await writeCandidateSnapshot(safe);
-      return {published:true,scalpCount:safe.scalp.length,swingCount:safe.swing.length};
+      return {published:true,scalpCount:0,swingCount:safe.swing.length};
     },
     async close({positionId,closePercent}){
       if(typeof closePosition!=="function")throw new Error("LEGACY_POSITION_CLOSE_ADAPTER_NOT_CONFIGURED");
@@ -19,6 +19,6 @@ export function createLegacyWorkerCompatibilityAdapter({readEngineSnapshot,write
   });
 }
 function sanitizeCandidate(c){
-  if(!c||typeof c!=="object"||!["scalp","swing"].includes(c.engine))throw new TypeError("invalid research candidate");
+  if(!c||typeof c!=="object"||c.engine!=="swing"||!["4h","1d"].includes(String(c.setupTimeframe??c.timeframe??"").toLowerCase()))throw new TypeError("invalid research candidate");
   return {id:String(c.id),engine:c.engine,symbol:String(c.symbol),direction:c.direction,setupId:c.setupId,state:c.state,score:c.score,confidence:c.confidence,entry:c.entry,stop:c.stop,target:c.target,createdAt:c.createdAt,evidence:Array.isArray(c.evidence)?c.evidence:[],entryConfirmation:c.entryConfirmation??{status:"PENDING"}};
 }
