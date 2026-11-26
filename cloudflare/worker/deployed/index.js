@@ -239,7 +239,8 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
     p.pnlAccountingStatus = p.fundingDataStatus === "UNAVAILABLE" || p.fundingDataStatus === "UNAVAILABLE_MISSED_SETTLEMENT" ? "UNVERIFIED_FUNDING" : "VERIFIED"; p.closeEventId = closeEventId; p.positionId = positionId;
     p.closeReason = reason;
     p.closeSource = liquidation ? "LIQUIDATION" : "AUTOMATED_SL_TP";
-    p.qty = totalClosedQty || initialQty || closeQty;\n    p.initialQty = p.qty;
+    p.qty = totalClosedQty || initialQty || closeQty;
+    p.initialQty = p.qty;
     if (Number.isFinite(initialMargin) && initialMargin >= 0) {
       p.marginUsdt = initialMargin;
       p.allocationUsdt = initialMargin;
