@@ -5074,9 +5074,9 @@ var EngineState = class {
       const forcedExecutionRechecks = [...staleExecutionBySymbol.values()].sort((a, b) => a.score - b.score || a.at - b.at).map((row) => row.symbol);
       const rotationUniverseKey = universeSymbols.join(",");
       const rotationSeenSymbols = new Set(ledger.scanRotation?.universeKey === rotationUniverseKey ? ledger.scanRotation.seenSymbols ?? [] : []);
-      const orderedUniverseFromCursor = [...universeSymbols.slice(startCursor), ...universeSymbols.slice(0, startCursor)];
+      const orderedUniverseFromCursor = [...universeSymbols.slice(startCursor), ...universeSymbols.slice(0, startCursor)].sort((a, b) => { const ar = ledger.activityRankingBySymbol?.[a]; const br = ledger.activityRankingBySymbol?.[b]; const ae = ar?.eligible === true; const be = br?.eligible === true; if (ae !== be) return ae ? -1 : 1; return (Number(br?.priorityScore) || 0) - (Number(ar?.priorityScore) || 0); });
       const pendingRotationSymbols = rotationSeenSymbols.size ? orderedUniverseFromCursor.filter((symbol) => !rotationSeenSymbols.has(symbol)) : [];
-      const batchSymbols = SCANNER_PAUSED ? [] : pendingRotationSymbols.length ? pendingRotationSymbols.slice(0, PAPER_SCAN_BATCH_NORMAL) : universeSymbols.slice(startCursor, startCursor + PAPER_SCAN_BATCH_NORMAL);
+      const batchSymbols = SCANNER_PAUSED ? [] : pendingRotationSymbols.length ? pendingRotationSymbols.slice(0, PAPER_SCAN_BATCH_NORMAL) : orderedUniverseFromCursor.slice(0, PAPER_SCAN_BATCH_NORMAL);
       const nextSequentialCursor = universeSymbols.length ? (batchSymbols.length ? (universeSymbols.indexOf(batchSymbols.at(-1)) + 1) % universeSymbols.length : startCursor) : startCursor;
       const activityPriorityBatch = { symbols: batchSymbols, prioritySymbols: [], rotatingSymbols: batchSymbols, nextCursor: nextSequentialCursor, rotationAdvance: batchSymbols.length };
       if (!SCANNER_PAUSED) ledger.cursor = nextSequentialCursor;
