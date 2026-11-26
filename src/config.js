@@ -5,10 +5,14 @@ export const SETUP_SCORE_MINIMUM = 70;
 export const MIN_QUOTE_VOLUME_24H_USDT = 5000000;
 export const MIN_RELATIVE_VOLUME = 0.8;
 export const MAX_SPREAD_PCT = 0.15;
-const ALLOWED = new Set(["4h", "1d", "1w"]);
+const ALLOWED = new Set(["5m", "15m", "1h", "4h", "1d", "1w"]);
 export function assertSupportedTimeframe(tf) {
-  if (tf === "1m" || tf === "3m" || tf === "5m" || tf === "15m" || tf === "1h") throw new Error("Forbidden setup timeframe: " + tf);
+  if (tf === "1m" || tf === "3m") throw new Error("Forbidden timeframe: " + tf);
   if (!ALLOWED.has(tf)) throw new Error("Unsupported timeframe: " + tf);
+  return true;
+}
+export function assertSetupTimeframe(tf) {
+  if (tf !== "4h" && tf !== "1d") throw new Error("Forbidden setup timeframe: " + tf);
   return true;
 }
 export function calculateRiskUnitUsd(initialVstEquity) {
