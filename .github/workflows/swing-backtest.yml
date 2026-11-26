@@ -7,7 +7,7 @@ on:
       - scripts/run-bingx-swing-50x90-backtest.js
       - src/multi-timeframe-backtest.js
 concurrency:
-  group: bingx-swing-50x90-backtest
+  group: bingx-swing-50x90-walk-forward
   cancel-in-progress: true
 jobs:
   swing-backtest:
