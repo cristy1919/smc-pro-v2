@@ -753,8 +753,9 @@ function classifyMarketRegime(structure, candles, timeframeZones) {
 }
 __name(classifyMarketRegime, "classifyMarketRegime");
 function volumePoints(rows, max) {
-  const v = last(rows).volume, base = median(rows.slice(-21, -1).map((x) => Number(x.volume)));
-  if (v === void 0 || base === null || base <= 0) return 0;
+  const raw = last(rows)?.volume, v = raw === null || raw === void 0 ? NaN : Number(raw);
+  const base = median(rows.slice(-21, -1).map((x) => x.volume === null || x.volume === void 0 ? NaN : Number(x.volume)).filter(Number.isFinite));
+  if (!Number.isFinite(v) || base === null || base <= 0) return 0;
   return Math.min(max, v / base >= 1.8 ? max : v / base >= 1.2 ? Math.round(max * 0.7) : v / base >= 0.8 ? Math.round(max * 0.5) : Math.round(max * 0.2));
 }
 __name(volumePoints, "volumePoints");
@@ -869,7 +870,7 @@ function makeSetup(engine, id, symbol, side, entryRows, setupRows, st, z, htfTre
   const contextReady = weeklySide !== null && dailySide !== null && dominanceAvailable;
   const status = !contextReady ? score >= 60 ? "WAIT" : "REJECTED" : countertrend ? score >= 84 ? "READY" : score >= 70 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED" : score >= 70 ? "READY" : score >= 65 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED";
   const tp1 = c.close + (side === "LONG" ? 1 : -1) * risk, tp2 = c.close + (side === "LONG" ? 2 : -2) * risk, tp3 = c.close + (side === "LONG" ? 3.5 : -3.5) * risk;
-  return { symbol, side, model: id, tradeStyle: engine, entryTimeframe: setupTimeframe, setupTimeframe, setupCandleTime: c.time, score, scoreBreakdown: points, entry: c.close, stopLoss: stop, takeProfit: tp3, tp1, tp2, tp3, riskReward: 3.5, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, reason: id + ": " + reason + "; " + band + "; BTC W " + (btcWeeklyBias ?? "UNAVAILABLE") + " / D " + (btcDailyBias ?? "UNAVAILABLE"), candleTime: c.time, status, riskMultiplier, btcContextStatus, confirmations: [id, "CLOSED_CANDLE_CONFIRMATION", ...z ? [z.kind] : [], ...ev ? [ev.type] : []], audit: { engine, setupId: id, scoreBand: band, riskPercent: riskMultiplier * 2, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, marketRegime, htfAligned, htfTrend, btcBias, btcWeeklyBias: btcWeeklyBias ?? "UNAVAILABLE", btcDailyBias: btcDailyBias ?? "UNAVAILABLE", dominanceRegime, countertrend, structureTrend: st.trend, structureEvent: ev ?? null, zone: z ?? null, closedCandleOnly: true, volume: c.volume === void 0 ? "UNAVAILABLE" : "AVAILABLE", funding: latestFundingSnapshots.has(symbol) ? "AVAILABLE" : "UNAVAILABLE", fundingRate: latestFundingSnapshots.get(symbol)?.rate ?? null, fundingNextTime: latestFundingSnapshots.get(symbol)?.nextFundingTime ?? null, openInterest: "UNAVAILABLE", btcDominance: dominanceContext?.btcDomPct ?? "UNAVAILABLE", altcoinDominance: dominanceContext?.altDomPct ?? "UNAVAILABLE", usdtDominance: dominanceContext?.usdtDomPct ?? "UNAVAILABLE", dominanceDataStatus: dominanceAvailable ? "AVAILABLE" : "UNAVAILABLE", aggressorFlow: "UNAVAILABLE" } };
+  return { symbol, side, model: id, tradeStyle: engine, entryTimeframe: setupTimeframe, setupTimeframe, setupCandleTime: c.time, score, scoreBreakdown: points, entry: c.close, stopLoss: stop, takeProfit: tp3, tp1, tp2, tp3, riskReward: 3.5, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, reason: id + ": " + reason + "; " + band + "; BTC W " + (btcWeeklyBias ?? "UNAVAILABLE") + " / D " + (btcDailyBias ?? "UNAVAILABLE"), candleTime: c.time, status, riskMultiplier, btcContextStatus, confirmations: [id, "CLOSED_CANDLE_CONFIRMATION", ...z ? [z.kind] : [], ...ev ? [ev.type] : []], audit: { engine, setupId: id, scoreBand: band, riskPercent: riskMultiplier * 2, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, marketRegime, htfAligned, htfTrend, btcBias, btcWeeklyBias: btcWeeklyBias ?? "UNAVAILABLE", btcDailyBias: btcDailyBias ?? "UNAVAILABLE", dominanceRegime, countertrend, structureTrend: st.trend, structureEvent: ev ?? null, zone: z ?? null, closedCandleOnly: true, volume: c.volume === null || c.volume === void 0 || !Number.isFinite(Number(c.volume)) ? "UNAVAILABLE" : "AVAILABLE", funding: latestFundingSnapshots.has(symbol) ? "AVAILABLE" : "UNAVAILABLE", fundingRate: latestFundingSnapshots.get(symbol)?.rate ?? null, fundingNextTime: latestFundingSnapshots.get(symbol)?.nextFundingTime ?? null, openInterest: "UNAVAILABLE", btcDominance: dominanceContext?.btcDomPct ?? "UNAVAILABLE", altcoinDominance: dominanceContext?.altDomPct ?? "UNAVAILABLE", usdtDominance: dominanceContext?.usdtDomPct ?? "UNAVAILABLE", dominanceDataStatus: dominanceAvailable ? "AVAILABLE" : "UNAVAILABLE", aggressorFlow: "UNAVAILABLE" } };
 }
 __name(makeSetup, "makeSetup");
 function requiresHtfDirectionalAlignment(id) { return false; }
@@ -886,12 +887,13 @@ function evaluateEngine(engine, symbol, input, btcBias = "UNAVAILABLE", history 
   const setups = [], diagnostics = [];
   if (unavailable.length) return { engine, symbol, setups, diagnostics, structure, zones: allZones, unavailable };
   const direction = structure[directionTf].trend, setupRows = input[setupTf], entryRows = input[entryTf], z = allZones.filter((x) => x.sourceTimeframe === zoneTf || x.sourceTimeframe === setupTf), ids = ENGINE_CONFIG[engine].setups;
-  const recentVolume = last(entryRows)?.volume, baseVolume = median(entryRows.slice(-21, -1).map((x) => Number(x.volume)));
+  const recentVolume = Number(last(entryRows)?.volume), baseVolume = median(entryRows.slice(-21, -1).map((x) => Number(x.volume)).filter(Number.isFinite));
   const relativeVolume = Number.isFinite(recentVolume) && baseVolume > 0 ? recentVolume / baseVolume : NaN;
-  if (!Number.isFinite(relativeVolume) || relativeVolume < 0.8) return { engine, symbol, setups, diagnostics: [{ reason: "LOW_OR_UNAVAILABLE_RELATIVE_VOLUME" }], structure, zones: allZones, unavailable: [] };
+  // Relative volume is contextual scoring only; it must never suppress otherwise valid price-action setups.
+  const volumeContext = Number.isFinite(relativeVolume) ? Number(relativeVolume.toFixed(3)) : "UNAVAILABLE";
   for (const side of ["LONG", "SHORT"]) for (const id of ids) {
     const sig = evaluatePattern(id, side, setupRows, structure[setupTf], z, structure[zoneTf], input[zoneTf], input["1d"]);
-    if (!sig.ok) continue;
+    if (!sig.ok) { diagnostics.push({ setupId: id, side, score: 0, band: "RED", accepted: false, reason: "PATTERN_CONDITIONS_NOT_MET", detail: sig.reason ?? null }); continue; }
     const weeklySide = normalizeBiasSide(btcWeeklyBias), dailySide = normalizeBiasSide(btcDailyBias);
     const btcOpposing = [weeklySide, dailySide].some((value) => value !== null && value !== side);
     const htfOpposing = direction !== "NEUTRAL" && direction !== side;
@@ -917,7 +919,7 @@ function evaluateEngine(engine, symbol, input, btcBias = "UNAVAILABLE", history 
     candidate.entryTimeframe = setupTf;
     candidate.audit.setupTimeframe = setupTf;
     setups.push(candidate);
-    diagnostics.push({ setupId: id, side, score: candidate.score, band: scoreBand(candidate.score), reason: sig.reason });
+    diagnostics.push({ setupId: id, side, score: candidate.score, band: scoreBand(candidate.score), accepted: true, reason: sig.reason, relativeVolume: volumeContext });
   }
   return { engine, symbol, setups, diagnostics, structure, zones: allZones, unavailable };
 }
@@ -5325,10 +5327,19 @@ var EngineState = class {
         const timeframeDiagnostics = {};
         const rejectionSummary = {};
         const setupIds = ["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W06_CRT", "W07_OTE", "W08_BOS_CONTINUATION"];
-        for (const result of [swing4h, swing1d]) for (const setupId of setupIds) for (const side of ["LONG", "SHORT"]) {
-          const key = setupId + ":" + side, hasSetup = candidates.some((setup) => setup.model === setupId && setup.side === side);
-          if (hasSetup) timeframeDiagnostics[key] = { setups: (timeframeDiagnostics[key]?.setups ?? 0) + 1 };
-          else { const reason = result.unavailable.length ? "INSUFFICIENT_CANDLE_HISTORY" : "STRUCTURAL_PATTERN_NOT_CONFIRMED"; rejectionSummary[reason] = (rejectionSummary[reason] ?? 0) + 1; }
+        for (const result of [swing4h, swing1d]) {
+          if (result.unavailable.length) {
+            rejectionSummary.INSUFFICIENT_CANDLE_HISTORY = (rejectionSummary.INSUFFICIENT_CANDLE_HISTORY ?? 0) + setupIds.length * 2;
+            continue;
+          }
+          for (const item of result.diagnostics ?? []) {
+            const key = item.setupId && item.side ? item.setupId + ":" + item.side : null;
+            if (item.accepted === true && key) timeframeDiagnostics[key] = { setups: 1, score: item.score, band: item.band };
+            else {
+              const reason = item.reason ?? "PATTERN_CONDITIONS_NOT_MET";
+              rejectionSummary[reason] = (rejectionSummary[reason] ?? 0) + 1;
+            }
+          }
         }
         diagnostics.push({
           symbol,
