@@ -3306,7 +3306,7 @@ var DEFAULT_STATE = {
   lastScanAt: null,
   lastScannedSymbol: null,
   runnerEnabled: true,
-  paperLedger: { balance: 1e3, equity: 1e3, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: true, cursor: 0, dailyPnl: 0, dayKey: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), maxOpenPositions: 20 }
+  paperLedger: { balance: 1e3, equity: 1e3, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: true, cursor: 0, dailyPnl: 0, dayKey: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10), maxOpenPositions: 10 }
 };
 var SQL_CANDLE_INSERT_CHUNK = 10;
 var SQL_HISTORY_TASK_INSERT_CHUNK = 15;
@@ -4381,10 +4381,10 @@ var EngineState = class {
         await this.saveEngineState(engine);
         await this.writePaperState(positionLimitMigrationKey, "true");
       }
-      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 20) ledger.maxOpenPositions = 20;
+      if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 10) ledger.maxOpenPositions = 10;
       const positionLimitV22Key = "paper-position-limit-v22-20";
       if (await this.readPaperState(positionLimitV22Key) !== "true") {
-        ledger.maxOpenPositions = 20; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
+        ledger.maxOpenPositions = 10; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
         await this.saveEngineState(engine); await this.writePaperState(positionLimitV22Key, "true");
       }
       const manualPause = await this.readPaperState("paper-runner-explicitly-paused") === "true";
@@ -4466,7 +4466,7 @@ var EngineState = class {
             await this.writePaperState("bingx-vst-legacy-ledger-v1", JSON.stringify(archive));
           }
           const fresh = structuredClone(DEFAULT_STATE.paperLedger);
-          fresh.balance = startingBalance; fresh.equity = startingBalance; fresh.positions = []; fresh.closedTrades = []; fresh.setups = []; fresh.scannedSymbols = []; fresh.scanDiagnostics = []; fresh.lastScanAt = null; fresh.runnerEnabled = true; fresh.cursor = 0; fresh.dailyPnl = 0; fresh.dayKey = new Date().toISOString().slice(0, 10); fresh.maxOpenPositions = 20; fresh.capitalAdjustments = [{ id: resetId, at: new Date().toISOString(), targetUsdt: startingBalance, balanceBefore: Number(old?.balance) || 0, amountUsdt: startingBalance - (Number(old?.balance) || 0), balanceAfter: startingBalance, status: "NEW_INTERNAL_PAPER_ACCOUNT" }];
+          fresh.balance = startingBalance; fresh.equity = startingBalance; fresh.positions = []; fresh.closedTrades = []; fresh.setups = []; fresh.scannedSymbols = []; fresh.scanDiagnostics = []; fresh.lastScanAt = null; fresh.runnerEnabled = true; fresh.cursor = 0; fresh.dailyPnl = 0; fresh.dayKey = new Date().toISOString().slice(0, 10); fresh.maxOpenPositions = 10; fresh.capitalAdjustments = [{ id: resetId, at: new Date().toISOString(), targetUsdt: startingBalance, balanceBefore: Number(old?.balance) || 0, amountUsdt: startingBalance - (Number(old?.balance) || 0), balanceAfter: startingBalance, status: "NEW_INTERNAL_PAPER_ACCOUNT" }];
           engine.paperLedger = fresh; engine.paperBalanceUsdt = startingBalance; engine.positions = []; engine.closedTrades = []; engine.lastScanAt = null; engine.lastScannedSymbol = null; engine.runnerEnabled = true; engine.internalPaperAccount = { resetId, initializedAt: new Date().toISOString(), initialBalanceUsdt: startingBalance, currency: "USDT", source: "INTERNAL_PAPER_ONLY", legacyLedgerArchived: !!old };
           await this.writePaperState("internal-paper-entry-queue-v1", "[]");
         }
@@ -4488,7 +4488,7 @@ var EngineState = class {
         return Response.json({ ok: false, error: "Invalid JSON body." }, { status: 400 });
       }
       const requested = Number(body.maxOpenPositions);
-      if (!Number.isInteger(requested) || requested < 0 || requested > 20) return Response.json({ ok: false, error: "maxOpenPositions must be an integer from 0 to 20." }, { status: 400 });
+      if (!Number.isInteger(requested) || requested < 0 || requested > 10) return Response.json({ ok: false, error: "maxOpenPositions must be an integer from 0 to 10." }, { status: 400 });
       const engine = await this.readEngineState();
       const ledger = engine.paperLedger ?? structuredClone(DEFAULT_STATE.paperLedger);
       ledger.maxOpenPositions = requested;
@@ -7183,7 +7183,7 @@ async function loadBingXDemoStatus(env) {
       activityRanking: null,
       activityRankingBySymbol: {},
       marketContextSnapshot: null,
-      maxOpenPositions: Math.min(20, Math.max(0, Number(ledger?.maxOpenPositions ?? 20))),
+      maxOpenPositions: Math.min(10, Math.max(0, Number(ledger?.maxOpenPositions ?? 10))),
       runnerEnabled: paperStatusResult.status ? paperStatusResult.status.runnerEnabled === true : engine?.runnerEnabled === true,
       automationStopped: AUTOMATION_STOP,
       manualResumeRequired: AUTOMATION_STOP,
