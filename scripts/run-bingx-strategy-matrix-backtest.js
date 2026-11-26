@@ -162,7 +162,7 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
       if(!seen){seen=new Set();seenByModel.set(key,seen);}
       if(seen.has(candidate.id))continue;
       seen.add(candidate.id);
-      const future=entryRows.slice(i+1,i+1+6);
+      const future=entryRows.slice(i+1,i+1+6).filter(c=>c.timestamp<endTime);
       const confirmation=advanceEntryConfirmation(candidate,future,{maxWaitBars:6});
       if(confirmation.status!=="CONFIRMED"){counter.entryConfirmationFailed++;continue;}
       const entry=confirmation.entry,stop=candidate.stop,risk=Math.abs(entry-stop);
@@ -216,8 +216,6 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
         mfeR:Number(favorable/risk.toFixed?risk: risk),netR,
         regime:regimeAt(sliced,signal.timestamp)
       };
-      trade.maeR=Number((adverse/risk).toFixed(4));
-      trade.mfeR=Number((favorable/risk).toFixed(4));
       if(!tradesByModel.has(key))tradesByModel.set(key,[]);
       tradesByModel.get(key).push(trade);
       counter.executed++;
@@ -250,10 +248,8 @@ for(let i=0;i<selectedPairs.length;i++) {
   const pair=selectedPairs[i];
   process.stdout.write("FETCH "+(i+1)+"/"+TARGET_SYMBOLS+" "+pair.symbol+"\n");
   try {
-    const [scalpData,swingData]=await Promise.all([
-      fetchEngineDataset({provider,symbol:pair.symbol,engine:"scalp",startTime,endTime}),
-      fetchEngineDataset({provider,symbol:pair.symbol,engine:"swing",startTime,endTime})
-    ]);
+    const scalpData=await fetchEngineDataset({provider,symbol:pair.symbol,engine:"scalp",startTime,endTime});
+    const swingData=await fetchEngineDataset({provider,symbol:pair.symbol,engine:"swing",startTime,endTime});
     const fundingRates=await provider.getFundingRates({symbol:pair.symbol,startTime,endTime,limit:100});
     if(!fundingRates.length)throw new Error("PUBLIC_HISTORICAL_FUNDING_DATA_MISSING");
     datasets.set(pair.symbol,{pair,scalpData,swingData,fundingRates});
