@@ -404,6 +404,12 @@ function summarizeAnalyticsGroup(key, trades) {
   const pnlTrades = trades.filter((t) => t.pnlUsdt !== null);
   const provisionalTrades = trades.filter((t) => t.provisionalPnlUsdt !== null);
   const provisionalNetPnlUsdt = provisionalTrades.reduce((sum, t) => sum + (t.provisionalPnlUsdt ?? 0), 0);
+  const reportedTrades = trades.filter((t) => t.reportedPnlUsdt !== null);
+  const reportedNetPnlUsdt = reportedTrades.reduce((sum, t) => sum + (t.reportedPnlUsdt ?? 0), 0);
+  const provisionalWins = provisionalTrades.filter((t) => t.provisionalPnlUsdt > 1e-8).length;
+  const provisionalLosses = provisionalTrades.filter((t) => t.provisionalPnlUsdt < -1e-8).length;
+  const returnTrades = trades.filter((t) => t.returnPct !== null);
+  const averageReturnPct = returnTrades.length ? round(returnTrades.reduce((sum, t) => sum + t.returnPct, 0) / returnTrades.length, 4) : null;
   const wins = pnlTrades.filter((t) => t.pnlUsdt > 1e-8);
   const losses = pnlTrades.filter((t) => t.pnlUsdt < -1e-8);
   const breakeven = pnlTrades.length - wins.length - losses.length;
@@ -416,7 +422,7 @@ function summarizeAnalyticsGroup(key, trades) {
   const fundingPaidUsdt = fundingTrades.reduce((sum, t) => sum + (t.fundingPaidUsdt ?? 0), 0);
   const slippageTrades = trades.filter((t) => t.slippagePaidUsdt !== null);
   const slippagePaidUsdt = slippageTrades.reduce((sum, t) => sum + (t.slippagePaidUsdt ?? 0), 0);
-  return { key, trades: trades.length, tradesWithProvisionalPnl: provisionalTrades.length, provisionalNetPnlUsdt: round(provisionalNetPnlUsdt, 8), wins: wins.length, losses: losses.length, breakeven, winRatePct: pnlTrades.length ? round(wins.length / pnlTrades.length * 100, 2) : null, netPnlUsdt: round(netPnlUsdt, 8), expectancyUsdt: pnlTrades.length ? round(netPnlUsdt / pnlTrades.length, 8) : null, grossWinsUsdt: round(grossWinsUsdt, 8), grossLossesUsdt: round(grossLossesUsdt, 8), profitFactor: grossLossesUsdt > 0 ? round(grossWinsUsdt / grossLossesUsdt, 4) : null, feesKnownUsdt: round(feesKnownUsdt, 8), tradesWithKnownFees: feeTrades.length, fundingPaidUsdt: round(fundingPaidUsdt, 8), tradesWithKnownFunding: fundingTrades.length, slippagePaidUsdt: round(slippagePaidUsdt, 8), tradesWithKnownSlippage: slippageTrades.length };
+  return { key, trades: trades.length, tradesWithProvisionalPnl: provisionalTrades.length, provisionalNetPnlUsdt: round(provisionalNetPnlUsdt, 8), reportedTrades: reportedTrades.length, reportedNetPnlUsdt: round(reportedNetPnlUsdt, 8), provisionalWins, provisionalLosses, averageReturnPct, wins: wins.length, losses: losses.length, breakeven, winRatePct: pnlTrades.length ? round(wins.length / pnlTrades.length * 100, 2) : null, netPnlUsdt: round(netPnlUsdt, 8), expectancyUsdt: pnlTrades.length ? round(netPnlUsdt / pnlTrades.length, 8) : null, grossWinsUsdt: round(grossWinsUsdt, 8), grossLossesUsdt: round(grossLossesUsdt, 8), profitFactor: grossLossesUsdt > 0 ? round(grossWinsUsdt / grossLossesUsdt, 4) : null, feesKnownUsdt: round(feesKnownUsdt, 8), tradesWithKnownFees: feeTrades.length, fundingPaidUsdt: round(fundingPaidUsdt, 8), tradesWithKnownFunding: fundingTrades.length, slippagePaidUsdt: round(slippagePaidUsdt, 8), tradesWithKnownSlippage: slippageTrades.length };
 }
 __name(summarizeAnalyticsGroup, "summarizeAnalyticsGroup");
 function summarizeClosedTradeAnalytics(input) {
@@ -454,6 +460,18 @@ function summarizeClosedTradeAnalytics(input) {
       setupTimeframe: typeof p.setupTimeframe === "string" ? p.setupTimeframe : "UNKNOWN",
       pnlStatus,
       pnlAccountingStatus: typeof p.pnlAccountingStatus === "string" ? p.pnlAccountingStatus : "UNKNOWN",
+      reportedPnlUsdt: rawPnl,
+      entryPrice: analyticsNumber(p.entry),
+      exitPrice: analyticsNumber(p.exitPrice),
+      quantity: analyticsNumber(p.initialQty ?? p.qty),
+      leverage: analyticsNumber(p.leverage),
+      marginUsdt: analyticsNumber(p.initialMarginUsdt ?? p.marginUsdt ?? p.allocationUsdt),
+      returnPct: analyticsNumber(p.returnPct),
+      grossPnlUsdt: analyticsNumber(p.grossPnlUsdt ?? p.grossRealizedPnlUsdt),
+      entryFeeUsdt: entryFee,
+      exitFeesUsdt: exitFees,
+      fundingDataStatus: typeof p.fundingDataStatus === "string" ? p.fundingDataStatus : "UNKNOWN",
+      manualCloseClassification: typeof p.manualCloseClassification === "string" ? p.manualCloseClassification : null,
       openedAt: analyticsNumber(p.openedAt),
       closedAt: analyticsNumber(p.closedAt),
       pnlUsdt: pnl,
@@ -499,6 +517,9 @@ function summarizeClosedTradeAnalytics(input) {
     byBtcContext: group((t) => t.btcContextStatus),
     totalNetPnlUsdt: round(pnlTrades.reduce((sum, t) => sum + (t.pnlUsdt ?? 0), 0), 8),
     totalProvisionalPnlUsdt: round(trades.reduce((sum, t) => sum + (t.provisionalPnlUsdt ?? 0), 0), 8),
+    totalReportedPnlUsdt: round(trades.reduce((sum, t) => sum + (t.reportedPnlUsdt ?? 0), 0), 8),
+    provisionalWins: trades.filter((t) => t.pnlStatus === "PROVISIONAL" && t.provisionalPnlUsdt > 1e-8).length,
+    provisionalLosses: trades.filter((t) => t.pnlStatus === "PROVISIONAL" && t.provisionalPnlUsdt < -1e-8).length,
     totalKnownFeesUsdt: round(feeTrades.reduce((sum, t) => sum + (t.feesPaidUsdt ?? 0), 0), 8),
     overall,
     byModel: group((t) => t.model),
