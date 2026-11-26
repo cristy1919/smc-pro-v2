@@ -71,7 +71,7 @@ test("walk-forward backtest produces separate trade ledger and refuses missing 9
   const report=runHistoricalBacktest({engine:"swing",symbol:"BTC-USDT",timeframes,periodDays:[30],maxHoldBars:5,fundingRates,evaluate:({timeframes:tf})=>{
     if(emitted)return [];
     emitted=true;
-    const last=tf["4h"].at(-1); fundingRates.push({fundingTime:last.timestamp+30*60*1000,fundingRate:0.0001});
+    const last=tf["4h"].at(-1); fundingRates.push({fundingTime:last.timestamp+4*hour+30*60*1000,fundingRate:0.0001});
     return [{id:"one-trade",engine:"swing",symbol:"BTC-USDT",direction:"BULLISH",setupId:"W01_HTF_OB_REVERSAL",state:"QUALIFIED",score:85,createdAt:last.timestamp,entry:100.8,stop:99,target:107.1,zoneBounds:{low:100,high:101},hardFilters:{validStop:true,minimumRR:true}}];
   }});
   assert.equal(report.periods.length,1);
