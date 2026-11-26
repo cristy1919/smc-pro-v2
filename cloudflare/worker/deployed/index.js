@@ -4600,8 +4600,9 @@ var EngineState = class {
       const stablePositionId = String(position.positionId ?? position.id);
       const closeEvent = { event: "MANUAL_CLOSE", closeEventId, positionId: stablePositionId, at: closedAt, qty: closeQty, executionPrice: exitPrice, markPrice: exitPrice, closeReason: "MANUAL_CLOSE", grossPnlUsdt: gross, netPnlUsdt: pnl, marginUsdt: allocatedMargin, returnPct: allocatedMargin > 0 ? Number((pnl / allocatedMargin * 100).toFixed(8)) : null, feesPaidUsdt: Number((allocatedEntryFee + allocatedPriorExitFees + exitFee).toFixed(8)), entryFeeAllocatedUsdt: allocatedEntryFee, exitFeeUsdt: exitFee, fundingPaidUsdt: allocatedFunding, slippagePaidUsdt: Number((allocatedPriorSlippage + exitSlippage).toFixed(8)) };
       position.executionEvents = [...(Array.isArray(position.executionEvents) ? position.executionEvents : []), closeEvent];
+      position.grossRealizedPnlUsdt = Number(((Number(position.grossRealizedPnlUsdt) || 0) + gross).toFixed(8));
       const priorManualEvents = position.executionEvents.filter(e => e.event === "MANUAL_CLOSE" && e.closeEventId !== closeEventId);
-      const manualCloseEvents = [...priorManualEvents, closeEvent];
+      const manualCloseEvents = position.executionEvents.filter(e => Number(e.qty) > 0 && Number(e.executionPrice) > 0);
       const totalManuallyClosedQty = Number(manualCloseEvents.reduce((sum, e) => sum + (Number(e.qty) || 0), 0).toFixed(8));
       const weightedManualExitPrice = totalManuallyClosedQty > 0 ? Number((manualCloseEvents.reduce((sum, e) => sum + (Number(e.executionPrice) || 0) * (Number(e.qty) || 0), 0) / totalManuallyClosedQty).toFixed(8)) : exitPrice;
       const closed = { ...position, positionId: stablePositionId, closeEventId, qty: closeQty, initialQty: closeQty, entryFeeUsdt: allocatedEntryFee, exitFeesUsdt: Number((allocatedPriorExitFees + exitFee).toFixed(8)), feesPaidUsdt: Number((allocatedEntryFee + allocatedPriorExitFees + exitFee).toFixed(8)), slippagePaidUsdt: Number((allocatedPriorSlippage + exitSlippage).toFixed(8)), fundingPaidUsdt: allocatedFunding, realizedPnlUsdt: Number((allocatedPriorRealized + gross - exitFee - exitSlippage).toFixed(8)), initialRiskUsdt: allocatedInitialRisk, riskUsdt: Number((Number(position.riskUsdt || initialRiskTotal) * allocation).toFixed(8)), initialMarginUsdt: allocatedMargin, marginUsdt: allocatedMargin, allocationUsdt: allocatedMargin, closedAt, exitPrice, pnlUsdt: pnl, closeReason: "MANUAL_CLOSE", manualCloseClassification: ["TP","SL"].includes(body.closeClassification) ? body.closeClassification : "MANUAL", closeSource: "MANUAL_API_REQUEST", closeRequestId: requestId, manualConfirmedAt: new Date(closeRequestedAt).toISOString(), status: "CLOSED" };
@@ -4615,7 +4616,7 @@ var EngineState = class {
       if (fraction === 1 || closeQty >= position.qty) {
         closed.pnlUsdt = Number((pnl + priorManualEvents.reduce((sum,e)=>sum + (Number(e.netPnlUsdt)||0),0)).toFixed(8));
         closed.netPnlUsdt = closed.pnlUsdt;
-        closed.grossPnlUsdt = Number((gross + priorManualEvents.reduce((sum,e)=>sum + (Number(e.grossPnlUsdt)||0),0)).toFixed(8));
+        closed.grossPnlUsdt = Number((Number(position.grossRealizedPnlUsdt) || 0).toFixed(8));
         closed.grossRealizedPnlUsdt = closed.grossPnlUsdt;
         closed.qty = totalManuallyClosedQty; closed.initialQty = totalManuallyClosedQty;
         closed.exitPrice = weightedManualExitPrice; closed.averageExitPrice = weightedManualExitPrice; closed.lastExitPrice = exitPrice;
