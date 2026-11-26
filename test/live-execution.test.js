@@ -42,14 +42,14 @@ test("normal setup enforces isolated margin and 20x-50x leverage", () => {
 });
 
 test("reduced-risk setup enforces 0.5R while keeping leverage within 20x-50x", () => {
-  const result = validateLiveCandidate(baseCandidate({ leverage: 10 }), {
+  const result = validateLiveCandidate(baseCandidate({ leverage: 20 }), {
     equity: 10000, availableMargin: 5000, openPositions: [], contract,
     markPrice: 100000, riskMultiple: 0.5, explicitConfirmation: true, idempotencyKey: "swing-btc-20261126"
   });
   assert.equal(result.eligible, true);
   assert.equal(result.leverage, 20);
   assert.equal(result.riskBudget, 100);
-  const invalid = validateLiveCandidate(baseCandidate({ leverage: 20 }), {
+  const invalid = validateLiveCandidate(baseCandidate({ leverage: 10 }), {
     equity: 10000, availableMargin: 5000, openPositions: [], contract,
     markPrice: 100000, riskMultiple: 0.5, explicitConfirmation: true, idempotencyKey: "swing-btc-20261126"
   });
