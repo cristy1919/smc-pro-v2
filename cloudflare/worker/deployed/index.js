@@ -815,58 +815,105 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
   }
 }
 __name(evaluatePattern, "evaluatePattern");
-function makeSetup(engine, id, symbol, side, entryRows, setupRows, st, z, htfTrend, btcBias, reason, history, marketRegime, liquiditySweep) {
+function normalizeBiasSide(value) {
+  const v = String(value ?? "").toUpperCase();
+  return v === "BULLISH" || v === "LONG" || v === "UP" ? "LONG" : v === "BEARISH" || v === "SHORT" || v === "DOWN" ? "SHORT" : null;
+}
+function oppositeSide(side) { return side === "LONG" ? "SHORT" : side === "SHORT" ? "LONG" : null; }
+function dominancePointsForSide(symbol, side, dominance, weight) {
+  if (!dominance) return 0;
+  const btc = normalizeBiasSide(dominance.btcDomDirection);
+  const alt = normalizeBiasSide(dominance.altDomDirection);
+  const usdt = normalizeBiasSide(dominance.usdtDomDirection);
+  const support = [];
+  if (btc) support.push(symbol === "BTC-USDT" ? btc : oppositeSide(btc));
+  if (alt && symbol !== "BTC-USDT") support.push(alt);
+  if (usdt) support.push(oppositeSide(usdt));
+  if (!support.length) return 0;
+  return Math.round(support.filter((x) => x === side).length / support.length * weight);
+}
+function makeSetup(engine, id, symbol, side, entryRows, setupRows, st, z, htfTrend, btcBias, reason, history, marketRegime, liquiditySweep, btcWeeklyBias = "UNAVAILABLE", btcDailyBias = "UNAVAILABLE", dominanceContext = null) {
   const c = last(entryRows), w = setupRows.slice(-12), lo = Math.min(...w.map((x) => x.low)), hi = Math.max(...w.map((x) => x.high));
   const stop = side === "LONG" ? Math.min(lo, z?.bottom ?? lo) : Math.max(hi, z?.top ?? hi);
   if (!Number.isFinite(stop) || stop <= 0 || (side === "LONG" ? stop >= c.close : stop <= c.close)) return null;
-  const risk = Math.abs(c.close - stop), weights = ENGINE_CONFIG[engine].scoreWeights, ev = st.events.at(-1), htfAligned = htfTrend === side, btcSide = btcBias === "BULLISH" ? "LONG" : btcBias === "BEARISH" ? "SHORT" : null, btcOpposing = btcSide !== null && btcSide !== side, htfOpposing = htfTrend !== "NEUTRAL" && !htfAligned, countertrend = htfOpposing || btcOpposing, btcContextStatus = btcBias === "UNAVAILABLE" ? "UNAVAILABLE" : btcBias === "NEUTRAL" ? "MIXED" : btcOpposing ? "OPPOSING" : "ALIGNED", confidenceStats = calibrateHistoricalConfidence({ engine, symbol, setupId: id, side, marketRegime, htfAligned }, history, c.time);
-  const zoneQuality = z ? z.kind === "FVG" || z.kind === "BREAKER" || z.kind === "ORDER_BLOCK" || z.kind === "OTE" ? 1 : z.kind === "SUPPLY_DEMAND" ? 0.9 : 0.8 : 0, points = { htf: htfTrend === side ? btcOpposing ? Math.round(weights.htf * 0.6) : weights.htf : htfTrend === "NEUTRAL" ? Math.round(weights.htf * 0.7) : Math.round(weights.htf * 0.35), liquidity: liquiditySweep ? weights.liquidity : 0, marketStructure: ev?.side === side ? ev.displacement ? weights.marketStructure : Math.round(weights.marketStructure * 0.65) : 0, zone: Math.round(weights.zone * zoneQuality), entryConfirmation: weights.entryConfirmation, volume: volumePoints(entryRows, weights.volume) };
-  const score = Object.values(points).reduce((a, b) => a + b, 0), band = scoreBand(score), tf = engine === "SCALP" ? "5m" : "1h", etf = engine === "SCALP" ? "5m" : "15m", riskMultiplier = countertrend || !htfAligned || score < 80 ? 0.5 : 1, status = countertrend ? score >= 84 ? "READY" : score >= 70 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED" : score >= 70 ? "READY" : score >= 65 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED", tp1 = c.close + (side === "LONG" ? 1 : -1) * risk, tp2 = c.close + (side === "LONG" ? 2 : -2) * risk, tp3 = c.close + (side === "LONG" ? 3.5 : -3.5) * risk;
-  return { symbol, side, model: id, tradeStyle: engine, entryTimeframe: etf, setupTimeframe: tf, setupCandleTime: c.time, score, scoreBreakdown: points, entry: c.close, stopLoss: stop, takeProfit: tp3, tp1, tp2, tp3, riskReward: 3.5, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, reason: id + ": " + reason + "; " + band + "; BTC " + btcContextStatus, candleTime: c.time, status, riskMultiplier, btcContextStatus, confirmations: [id, "CLOSED_CANDLE_CONFIRMATION", ...z ? [z.kind] : [], ...ev ? [ev.type] : []], audit: { engine, setupId: id, scoreBand: band, riskPercent: riskMultiplier * 2, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, marketRegime, htfAligned, htfTrend, btcBias, countertrend, structureTrend: st.trend, structureEvent: ev ?? null, zone: z ?? null, closedCandleOnly: true, volume: c.volume === void 0 ? "UNAVAILABLE" : "AVAILABLE", funding: latestFundingSnapshots.has(symbol) ? "AVAILABLE" : "UNAVAILABLE", fundingRate: latestFundingSnapshots.get(symbol)?.rate ?? null, fundingNextTime: latestFundingSnapshots.get(symbol)?.nextFundingTime ?? null, openInterest: "UNAVAILABLE", btcDominance: "UNAVAILABLE", altcoinDominance: "UNAVAILABLE", usdtDominance: "UNAVAILABLE", aggressorFlow: "UNAVAILABLE" } };
+  const risk = Math.abs(c.close - stop), weights = ENGINE_CONFIG[engine].scoreWeights, ev = st.events.at(-1), htfAligned = htfTrend === side;
+  const weeklySide = normalizeBiasSide(btcWeeklyBias), dailySide = normalizeBiasSide(btcDailyBias);
+  const btcOpposing = [weeklySide, dailySide].some((value) => value !== null && value !== side);
+  const htfOpposing = htfTrend !== "NEUTRAL" && !htfAligned, countertrend = htfOpposing || btcOpposing;
+  const btcContextStatus = weeklySide === null && dailySide === null ? "UNAVAILABLE" : btcOpposing ? "OPPOSING" : weeklySide === side && dailySide === side ? "ALIGNED" : "MIXED";
+  const dominanceRegime = dominanceContext ? [dominanceContext.btcDomDirection ?? "UNAVAILABLE", dominanceContext.altDomDirection ?? "UNAVAILABLE", dominanceContext.usdtDomDirection ?? "UNAVAILABLE"].join("|") : "UNAVAILABLE";
+  const confidenceStats = calibrateHistoricalConfidence({ engine, symbol, setupId: id, side, marketRegime, htfAligned, setupTimeframe: setupRows === entryRows ? "UNSPECIFIED" : "4h", btcWeeklyBias, btcDailyBias, dominanceRegime }, history, c.time);
+  const zoneQuality = z ? z.kind === "FVG" || z.kind === "BREAKER" || z.kind === "ORDER_BLOCK" || z.kind === "OTE" ? 1 : z.kind === "SUPPLY_DEMAND" ? 0.9 : 0.8 : 0;
+  const points = {
+    htf: htfTrend === side ? weights.htf : htfTrend === "NEUTRAL" ? Math.round(weights.htf * 0.5) : 0,
+    btcWeekly: weeklySide === side ? weights.btcWeekly : weeklySide === null ? 0 : 0,
+    btcDaily: dailySide === side ? weights.btcDaily : dailySide === null ? 0 : 0,
+    dominance: dominancePointsForSide(symbol, side, dominanceContext, weights.dominance),
+    liquidity: liquiditySweep ? weights.liquidity : 0,
+    marketStructure: ev?.side === side ? ev.displacement ? weights.marketStructure : Math.round(weights.marketStructure * 0.65) : 0,
+    zone: Math.round(weights.zone * zoneQuality),
+    entryConfirmation: weights.entryConfirmation,
+    volume: volumePoints(entryRows, weights.volume)
+  };
+  const score = Object.values(points).reduce((a, b) => a + b, 0), band = scoreBand(score);
+  const riskMultiplier = countertrend || !htfAligned || score < 80 ? 0.5 : 1;
+  const status = countertrend ? score >= 84 ? "READY" : score >= 70 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED" : score >= 70 ? "READY" : score >= 65 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED";
+  const tp1 = c.close + (side === "LONG" ? 1 : -1) * risk, tp2 = c.close + (side === "LONG" ? 2 : -2) * risk, tp3 = c.close + (side === "LONG" ? 3.5 : -3.5) * risk;
+  const dominanceAvailable = !!dominanceContext && [dominanceContext.btcDomDirection, dominanceContext.altDomDirection, dominanceContext.usdtDomDirection].some((x) => x && x !== "UNAVAILABLE");
+  return { symbol, side, model: id, tradeStyle: engine, entryTimeframe: setupRows === entryRows ? (setupRows[0]?.timeframe ?? "4h") : "4h", setupTimeframe: setupRows[0]?.timeframe ?? "4h", setupCandleTime: c.time, score, scoreBreakdown: points, entry: c.close, stopLoss: stop, takeProfit: tp3, tp1, tp2, tp3, riskReward: 3.5, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, reason: id + ": " + reason + "; " + band + "; BTC W " + (btcWeeklyBias ?? "UNAVAILABLE") + " / D " + (btcDailyBias ?? "UNAVAILABLE"), candleTime: c.time, status, riskMultiplier, btcContextStatus, confirmations: [id, "CLOSED_CANDLE_CONFIRMATION", ...z ? [z.kind] : [], ...ev ? [ev.type] : []], audit: { engine, setupId: id, scoreBand: band, riskPercent: riskMultiplier * 2, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, marketRegime, htfAligned, htfTrend, btcBias, btcWeeklyBias: btcWeeklyBias ?? "UNAVAILABLE", btcDailyBias: btcDailyBias ?? "UNAVAILABLE", dominanceRegime, countertrend, structureTrend: st.trend, structureEvent: ev ?? null, zone: z ?? null, closedCandleOnly: true, volume: c.volume === void 0 ? "UNAVAILABLE" : "AVAILABLE", funding: latestFundingSnapshots.has(symbol) ? "AVAILABLE" : "UNAVAILABLE", fundingRate: latestFundingSnapshots.get(symbol)?.rate ?? null, fundingNextTime: latestFundingSnapshots.get(symbol)?.nextFundingTime ?? null, openInterest: "UNAVAILABLE", btcDominance: dominanceContext?.btcDomPct ?? "UNAVAILABLE", altcoinDominance: dominanceContext?.altDomPct ?? "UNAVAILABLE", usdtDominance: dominanceContext?.usdtDomPct ?? "UNAVAILABLE", dominanceDataStatus: dominanceAvailable ? "AVAILABLE" : "UNAVAILABLE", aggressorFlow: "UNAVAILABLE" } };
 }
 __name(makeSetup, "makeSetup");
-function requiresHtfDirectionalAlignment(id) {
-  return id === "S02_BREAKER_RETEST" || id === "S03_BOS_DISPLACEMENT" || id === "W04_BREAKER_RETEST" || id === "W08_BOS_CONTINUATION";
-}
+function requiresHtfDirectionalAlignment(id) { return false; }
 __name(requiresHtfDirectionalAlignment, "requiresHtfDirectionalAlignment");
-function evaluateEngine(engine, symbol, input, btcBias = "UNAVAILABLE", history = []) {
-  const directionTf = engine === "SCALP" ? "1h" : "1d", zoneTf = engine === "SCALP" ? "15m" : "4h", setupTf = engine === "SCALP" ? "5m" : "1h", entryTf = engine === "SCALP" ? "5m" : "15m";
-  const frames = [.../* @__PURE__ */ new Set([directionTf, zoneTf, setupTf, entryTf])], unavailable = frames.filter((tf) => !valid(input[tf]) || input[tf].length < (tf === "1d" ? 60 : 20));
+function evaluateEngine(engine, symbol, input, btcBias = "UNAVAILABLE", history = [], setupTfOverride = "4h", btcWeeklyBias = "UNAVAILABLE", btcDailyBias = "UNAVAILABLE", dominanceContext = null) {
+  if (engine !== "SWING" || !["4h", "1d"].includes(setupTfOverride)) return { engine, symbol, setups: [], diagnostics: [], structure: {}, zones: [], unavailable: ["SCALP_ENGINE_REMOVED_OR_FORBIDDEN_TIMEFRAME"] };
+  const directionTf = "1d", zoneTf = "4h", setupTf = setupTfOverride, entryTf = setupTf;
+  const frames = [...new Set([directionTf, zoneTf, setupTf])], unavailable = frames.filter((tf) => !valid(input[tf]) || input[tf].length < (tf === "1d" ? 60 : 20));
   const structure = {}, allZones = [];
   for (const tf of frames) {
     const rows = input[tf];
-    if (valid(rows)) {
-      structure[tf] = analyzeMarketStructure(rows);
-      allZones.push(...zones(rows, tf));
-    }
+    if (valid(rows)) { structure[tf] = analyzeMarketStructure(rows); allZones.push(...zones(rows, tf)); }
   }
   const setups = [], diagnostics = [];
   if (unavailable.length) return { engine, symbol, setups, diagnostics, structure, zones: allZones, unavailable };
   const direction = structure[directionTf].trend, setupRows = input[setupTf], entryRows = input[entryTf], z = allZones.filter((x) => x.sourceTimeframe === zoneTf || x.sourceTimeframe === setupTf), ids = ENGINE_CONFIG[engine].setups;
+  const recentVolume = last(entryRows)?.volume, baseVolume = median(entryRows.slice(-21, -1).map((x) => Number(x.volume)));
+  const relativeVolume = Number.isFinite(recentVolume) && baseVolume > 0 ? recentVolume / baseVolume : NaN;
+  if (!Number.isFinite(relativeVolume) || relativeVolume < 0.8) return { engine, symbol, setups, diagnostics: [{ reason: "LOW_OR_UNAVAILABLE_RELATIVE_VOLUME" }], structure, zones: allZones, unavailable: [] };
   for (const side of ["LONG", "SHORT"]) for (const id of ids) {
-    const sig = evaluatePattern(id, side, setupRows, structure[setupTf], z, engine === "SWING" ? structure[zoneTf] : void 0, engine === "SWING" ? input[zoneTf] : void 0, engine === "SWING" ? input["1d"] : void 0);
+    const sig = evaluatePattern(id, side, setupRows, structure[setupTf], z, structure[zoneTf], input[zoneTf], input["1d"]);
     if (!sig.ok) continue;
-    if (requiresHtfDirectionalAlignment(id) && direction !== side) {
-      diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: direction === "NEUTRAL" ? "HTF_DIRECTION_UNCLEAR" : "HTF_DIRECTION_OPPOSING" });
-      continue;
+    const weeklySide = normalizeBiasSide(btcWeeklyBias), dailySide = normalizeBiasSide(btcDailyBias);
+    const btcOpposing = [weeklySide, dailySide].some((value) => value !== null && value !== side);
+    const htfOpposing = direction !== "NEUTRAL" && direction !== side;
+    const countertrend = btcOpposing || htfOpposing;
+    if (countertrend) {
+      const shift = [...structure[setupTf].events].reverse().find((event) => event.side === side && (event.type === "CHoCH" || event.type === "MSS") && event.displacement && event.candleIndex >= setupRows.length - 4);
+      const zoneKind = sig.zone?.kind;
+      const structuralZone = ["FVG", "BREAKER", "ORDER_BLOCK", "MITIGATION"].includes(zoneKind);
+      if (sig.liquiditySweep !== true || !shift || !structuralZone || !isEntryConfirmed(last(entryRows), side, sig.zone, true)) {
+        diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: "COUNTERTREND_EXTRA_FILTERS_NOT_CONFIRMED" });
+        continue;
+      }
     }
-    const retestRequired = (/* @__PURE__ */ new Set(["S01_SWEEP_MSS_FVG", "S02_BREAKER_RETEST", "S04_RANGE_DEVIATION", "S06_OB_REACTION", "W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W07_OTE"])).has(id);
+    const retestRequired = new Set(["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W07_OTE"]).has(id);
     if (!isEntryConfirmed(last(entryRows), side, sig.zone, retestRequired)) {
       diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: retestRequired ? "ENTRY_RETEST_NOT_CONFIRMED" : "ENTRY_CLOSE_NOT_CONFIRMED" });
       continue;
     }
     const observedRegime = classifyMarketRegime(structure[directionTf], input[directionTf], allZones.filter((x) => x.sourceTimeframe === directionTf));
-    const candidate = makeSetup(engine, id, symbol, side, entryRows, setupRows, structure[setupTf], sig.zone, direction, btcBias, sig.reason, history, observedRegime, sig.liquiditySweep === true);
-    if (!candidate) {
-      diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: "INVALID_STRUCTURAL_STOP" });
-      continue;
-    }
+    const candidate = makeSetup(engine, id, symbol, side, entryRows, setupRows, structure[setupTf], sig.zone, direction, btcBias, sig.reason, history, observedRegime, sig.liquiditySweep === true, btcWeeklyBias, btcDailyBias, dominanceContext);
+    if (!candidate) { diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: "INVALID_STRUCTURAL_STOP" }); continue; }
+    candidate.setupTimeframe = setupTf;
+    candidate.entryTimeframe = setupTf;
+    candidate.audit.setupTimeframe = setupTf;
     setups.push(candidate);
     diagnostics.push({ setupId: id, side, score: candidate.score, band: scoreBand(candidate.score), reason: sig.reason });
   }
   return { engine, symbol, setups, diagnostics, structure, zones: allZones, unavailable };
 }
 __name(evaluateEngine, "evaluateEngine");
+
 
 // src/bingx-demo.ts
 var MIN_LEVERAGE = 20;
