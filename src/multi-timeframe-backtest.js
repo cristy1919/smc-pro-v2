@@ -22,7 +22,7 @@ function summarize(engine,symbol,days,trades,skipped){
   const totalR=trades.reduce((s,t)=>s+t.netR,0);
   return {engine,symbol,periodDays:days,startingEquityIndex:1,endingEquityIndex:Number(equityIndex.toFixed(6)),trades:trades.length,wins:wins.length,losses:losses.length,winRate:trades.length?wins.length/trades.length:0,profitFactor:grossLoss?grossWin/grossLoss:grossWin?null:0,expectancyR:trades.length?totalR/trades.length:0,totalR,maxDrawdownPct:maxDrawdown*100,skipped,feesIncluded:true,confidence:trades.length<30?"INSUFFICIENT_DATA":"SAMPLE_AVAILABLE"};
 }
-export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars,maxWaitBars=6,entryTimeframe,setupIdFilter,directionFilter}){
+export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodDays=[30,60,90],feeRate=0.0005,slippageRate=0.0002,fundingRate=0,fundingRates=[],maxHoldBars,maxWaitBars=6,entryTimeframe,setupIdFilter,directionFilter,startTime,endTime,candidateFilter}){
   if(!["scalp","swing"].includes(engine))throw new Error("INVALID_ENGINE");
   if(typeof evaluate!=="function")throw new TypeError("evaluate callback is required");
   const entryTf=engine==="scalp"?"5m":(entryTimeframe??"15m");
@@ -37,7 +37,7 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
   const reports=[];
   for(const days of periodDays){
     if(![30,60,90].includes(days))throw new Error("PERIOD_MUST_BE_30_60_OR_90_DAYS");
-    const cutoff=entryRows.at(-1).timestamp-days*DAY;
+    const cutoff=Number.isFinite(startTime)?startTime:entryRows.at(-1).timestamp-days*DAY;\n    const boundary=Number.isFinite(endTime)?endTime:Infinity;
     if(entryRows[0].timestamp>cutoff)throw new Error("INSUFFICIENT_PERIOD_HISTORY_"+days+"D");
     const pointers=Object.fromEntries(Object.keys(timeframes).map(tf=>[tf,-1]));
     const trades=[],seen=new Set();let skipped=0,lastExit=-Infinity;
@@ -48,13 +48,13 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
         while(p+1<rows.length&&rows[p+1].timestamp+TF_MS[tf]<=asOf)p++;
         pointers[tf]=p;
       }
-      if(signal.timestamp<cutoff||signal.timestamp<=lastExit)continue;
+      if(signal.timestamp<cutoff||signal.timestamp>=boundary||signal.timestamp<=lastExit)continue;
       const sliced={};
       for(const [tf,rows] of Object.entries(timeframes))sliced[tf]=rows.slice(Math.max(0,pointers[tf]-399),pointers[tf]+1);
       if(Object.values(sliced).some(rows=>rows.length<25)){skipped++;continue;}
       let candidates;
       try{candidates=evaluate({symbol,timeframes:sliced,entryTimeframe:entryTf});}catch{skipped++;continue;}
-      const candidate=candidates.find(c=>c.state==="QUALIFIED"&&c.score>=80&&c.hardFilters?.validStop&&c.hardFilters?.minimumRR&&(!setupIdFilter||c.setupId===setupIdFilter)&&(!directionFilter||c.direction===directionFilter));
+      const candidate=candidates.find(c=>c.state==="QUALIFIED"&&c.score>=80&&c.hardFilters?.validStop&&c.hardFilters?.minimumRR&&(!setupIdFilter||c.setupId===setupIdFilter)&&(!directionFilter||c.direction===directionFilter)&&(!candidateFilter||candidateFilter(c)));
       if(!candidate||seen.has(candidate.id))continue;
       seen.add(candidate.id);
       const future=entryRows.slice(i+1,i+1+maxWaitBars);
@@ -63,21 +63,21 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
       const entry=confirmation.entry,stop=candidate.stop,risk=Math.abs(entry-stop);
       if(!(risk>0)||(candidate.direction==="BULLISH"&&stop>=entry)||(candidate.direction==="BEARISH"&&stop<=entry)){skipped++;continue;}
       const target=candidate.direction==="BULLISH"?entry+risk*3.5:entry-risk*3.5;
-      const after=entryRows.filter(c=>c.timestamp>confirmation.confirmedAt).slice(0,holdBars);
+      const after=entryRows.filter(c=>c.timestamp>confirmation.confirmedAt&&c.timestamp<boundary).slice(0,holdBars);
       if(!after.length){skipped++;continue;}
-      let exit=after.at(-1).close,exitAt=after.at(-1).timestamp,exitReason=after.length===holdBars?"MAX_OBSERVATION_HORIZON":"DATA_END";
+      let exit=after.at(-1).close,exitAt=after.at(-1).timestamp,exitReason=after.length===holdBars?"MAX_OBSERVATION_HORIZON":Number.isFinite(boundary)?"SEGMENT_END":"DATA_END";
       for(const c of after){
         const stopHit=candidate.direction==="BULLISH"?c.low<=stop:c.high>=stop;
         const targetHit=candidate.direction==="BULLISH"?c.high>=target:c.low<=target;
         if(stopHit){exit=stop;exitAt=c.timestamp;exitReason="STOP";break;}
         if(targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET";break;}
       }
-      const grossR=(candidate.direction==="BULLISH"?exit-entry:entry-exit)/risk;
+      const observed=after.filter(c=>c.timestamp<=exitAt);\n      const favorableMove=observed.reduce((m,c)=>Math.max(m,candidate.direction==="BULLISH"?c.high-entry:entry-c.low),0);\n      const adverseMove=observed.reduce((m,c)=>Math.max(m,candidate.direction==="BULLISH"?entry-c.low:c.high-entry),0);\n      const grossR=(candidate.direction==="BULLISH"?exit-entry:entry-exit)/risk;
       const feeSlippageR=(2*feeRate+2*slippageRate)*entry/risk;
       const settlements=Array.isArray(fundingRates)?fundingRates.filter(x=>x.fundingTime>confirmation.confirmedAt&&x.fundingTime<=exitAt):[];
       const fundingR=settlements.reduce((sum,x)=>sum+x.fundingRate*(candidate.direction==="BULLISH"?1:-1),0)*entry/risk;
       const costR=feeSlippageR+fundingR,netR=grossR-costR;
-      trades.push({candidateId:candidate.id,setupId:candidate.setupId,direction:candidate.direction,signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,target,exit,exitAt,exitReason,grossR,estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,netR});
+      trades.push({candidateId:candidate.id,setupId:candidate.setupId,direction:candidate.direction,timeframe:entryTf,score:candidate.score,band:candidate.band,factors:candidate.factors,evidence:candidate.evidence,zoneBounds:candidate.zoneBounds,rewardRisk:candidate.rewardRisk,signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,target,exit,exitAt,exitReason,grossR,estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,maeR:Number((adverseMove/risk).toFixed(4)),mfeR:Number((favorableMove/risk).toFixed(4)),netR});
       lastExit=exitAt;
     }
     reports.push({summary:summarize(engine,symbol,days,trades,skipped),trades});
