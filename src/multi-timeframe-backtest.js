@@ -37,7 +37,8 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
   const reports=[];
   for(const days of periodDays){
     if(![30,60,90].includes(days))throw new Error("PERIOD_MUST_BE_30_60_OR_90_DAYS");
-    const cutoff=Number.isFinite(startTime)?startTime:entryRows.at(-1).timestamp-days*DAY;\n    const boundary=Number.isFinite(endTime)?endTime:Infinity;
+    const cutoff=Number.isFinite(startTime)?startTime:entryRows.at(-1).timestamp-days*DAY;
+    const boundary=Number.isFinite(endTime)?endTime:Infinity;
     if(entryRows[0].timestamp>cutoff)throw new Error("INSUFFICIENT_PERIOD_HISTORY_"+days+"D");
     const pointers=Object.fromEntries(Object.keys(timeframes).map(tf=>[tf,-1]));
     const trades=[],seen=new Set();let skipped=0,lastExit=-Infinity;
@@ -72,7 +73,10 @@ export function runHistoricalBacktest({engine,symbol,timeframes,evaluate,periodD
         if(stopHit){exit=stop;exitAt=c.timestamp;exitReason="STOP";break;}
         if(targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET";break;}
       }
-      const observed=after.filter(c=>c.timestamp<=exitAt);\n      const favorableMove=observed.reduce((m,c)=>Math.max(m,candidate.direction==="BULLISH"?c.high-entry:entry-c.low),0);\n      const adverseMove=observed.reduce((m,c)=>Math.max(m,candidate.direction==="BULLISH"?entry-c.low:c.high-entry),0);\n      const grossR=(candidate.direction==="BULLISH"?exit-entry:entry-exit)/risk;
+      const observed=after.filter(c=>c.timestamp<=exitAt);
+      const favorableMove=observed.reduce((m,c)=>Math.max(m,candidate.direction==="BULLISH"?c.high-entry:entry-c.low),0);
+      const adverseMove=observed.reduce((m,c)=>Math.max(m,candidate.direction==="BULLISH"?entry-c.low:c.high-entry),0);
+      const grossR=(candidate.direction==="BULLISH"?exit-entry:entry-exit)/risk;
       const feeSlippageR=(2*feeRate+2*slippageRate)*entry/risk;
       const settlements=Array.isArray(fundingRates)?fundingRates.filter(x=>x.fundingTime>confirmation.confirmedAt&&x.fundingTime<=exitAt):[];
       const fundingR=settlements.reduce((sum,x)=>sum+x.fundingRate*(candidate.direction==="BULLISH"?1:-1),0)*entry/risk;
