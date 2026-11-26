@@ -6483,6 +6483,30 @@ async function fetchGlobalDominanceSnapshot(env) {
   };
 }
 __name(fetchGlobalDominanceSnapshot, "fetchGlobalDominanceSnapshot");
+function deriveDominanceDirections(snapshot) {
+  const history = Array.isArray(snapshot?.history) ? snapshot.history.filter((x) => x && typeof x.date === "string") : [];
+  if (history.length < 8) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: snapshot?.btc ?? null, altDomPct: snapshot?.altcoin ?? null, usdtDomPct: snapshot?.usdt ?? null, measuredAt: snapshot?.measuredAt ?? null, available: false };
+  const latestPoint = history.at(-1), cutoff = Date.parse(latestPoint.date) - 6 * 864e5;
+  const baseline = [...history].reverse().find((x) => Date.parse(x.date) <= cutoff) ?? history[Math.max(0, history.length - 8)];
+  const trend = (key) => {
+    const current = Number(latestPoint[key]), prior = Number(baseline?.[key]);
+    if (!Number.isFinite(current) || !Number.isFinite(prior)) return "UNAVAILABLE";
+    const delta = current - prior;
+    return delta >= 0.15 ? "BULLISH" : delta <= -0.15 ? "BEARISH" : "NEUTRAL";
+  };
+  return {
+    btcDomDirection: trend("btcDomPct"),
+    altDomDirection: trend("altDomPct"),
+    usdtDomDirection: trend("usdtDomPct"),
+    btcDomPct: snapshot?.btc ?? latestPoint.btcDomPct ?? null,
+    altDomPct: snapshot?.altcoin ?? latestPoint.altDomPct ?? null,
+    usdtDomPct: snapshot?.usdt ?? latestPoint.usdtDomPct ?? null,
+    measuredAt: snapshot?.measuredAt ?? null,
+    available: true
+  };
+}
+__name(deriveDominanceDirections, "deriveDominanceDirections");
+
 async function collectDailyDominanceHistory(env) {
   const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
   try {
