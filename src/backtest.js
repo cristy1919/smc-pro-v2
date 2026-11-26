@@ -1,6 +1,6 @@
 import { validateCandles } from "./market-data.js";
 const mean=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
-export function runBacktest({candles,signalAt,initialEquity,riskFraction=.02,feeRate=.0005,slippageRate=.0002,fundingRatePerBar=0,maxOpenPositions=10,engine="scalp"}) {
+export function runBacktest({candles,signalAt,initialEquity,riskFraction=.02,feeRate=.0005,slippageRate=.0002,fundingRatePerBar=0,maxOpenPositions=10,engine="swing"}) {
  validateCandles(candles);if(typeof signalAt!=="function")throw new TypeError("signalAt callback required");
  if(!(Number.isFinite(initialEquity)&&initialEquity>0&&riskFraction>0&&riskFraction<=.02)||!Number.isInteger(maxOpenPositions)||maxOpenPositions<1)throw new RangeError("invalid equity/risk/position cap");
  let equity=initialEquity,peak=equity,maxDrawdown=0,maxDrawdownAbs=0;const positions=[],trades=[],equityCurve=[{index:0,equity}];
@@ -18,4 +18,4 @@ export function runBacktest({candles,signalAt,initialEquity,riskFraction=.02,fee
 }
 export function splitBacktestWindows(candles){validateCandles(candles);const end=candles.at(-1).timestamp;return Object.fromEntries([30,60,90].map(days=>[days,candles.filter(c=>c.timestamp>=end-days*86400000)]));}
 
-export function runBacktestPeriods({candles,signalAt,...options}){const windows=splitBacktestWindows(candles);return Object.fromEntries(Object.entries(windows).map(([days,rows])=>[days,rows.length<2?{engine:options.engine??"scalp",days:Number(days),status:"INSUFFICIENT_DATA",candleCount:rows.length}: {...runBacktest({...options,candles:rows,signalAt}),days:Number(days),status:"COMPLETED",candleCount:rows.length}]));}
+export function runBacktestPeriods({candles,signalAt,...options}){const windows=splitBacktestWindows(candles);return Object.fromEntries(Object.entries(windows).map(([days,rows])=>[days,rows.length<2?{engine:options.engine??"swing",days:Number(days),status:"INSUFFICIENT_DATA",candleCount:rows.length}: {...runBacktest({...options,candles:rows,signalAt}),days:Number(days),status:"COMPLETED",candleCount:rows.length}]));}
