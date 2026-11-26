@@ -8,7 +8,8 @@ export function scoreSetup(engine, factors, hardFilters = {}) {
   const totalWeight = available.reduce((s, k) => s + w[k], 0);
   if (!totalWeight) return { score: 0, band: "INSUFFICIENT_DATA", confidence: "INSUFFICIENT_DATA", factorCoveragePct: 0 };
   const score = Math.round(available.reduce((s, k) => s + factors[k] * w[k], 0) / totalWeight);
-  const rejected = REQUIRED_FILTERS.some(k => hardFilters[k] !== true);
+  const supplied = Object.keys(hardFilters).length > 0;
+  const rejected = supplied && REQUIRED_FILTERS.some(k => hardFilters[k] !== true);
   const band = rejected ? "REJECTED" : score < 60 ? "RED" : score < 65 ? "WAIT" : score < 70 ? "WATCH" : score < 84 ? "QUALIFIED" : "HIGH_QUALITY";
   return { score, band, confidence: "INSUFFICIENT_DATA", factorCoveragePct: Math.round(totalWeight) };
 }
