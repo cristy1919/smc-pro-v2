@@ -7,10 +7,8 @@ const symbol=String(process.env.SYMBOL??"BTC-USDT").toUpperCase();
 if(!/^[A-Z0-9]+-USDT$/.test(symbol))throw new Error("SYMBOL must be a USDT-M perpetual such as BTC-USDT");
 const now=Date.now(),startTime=now-90*86400000;
 const provider=new BingXPublicKlineProvider();
-const [scalpData,swingData]=await Promise.all([
-  fetchEngineDataset({provider,symbol,engine:"scalp",startTime,endTime:now}),
-  fetchEngineDataset({provider,symbol,engine:"swing",startTime,endTime:now})
-]);
+const scalpData=await fetchEngineDataset({provider,symbol,engine:"scalp",startTime,endTime:now});
+const swingData=await fetchEngineDataset({provider,symbol,engine:"swing",startTime,endTime:now});
 const fundingRates=await provider.getFundingRates({symbol,startTime,endTime:now,limit:100});
 if(!fundingRates.length)throw new Error("PUBLIC_HISTORICAL_FUNDING_DATA_MISSING; refusing to substitute a guessed funding rate");
 const feeRate=Number(process.env.FEE_RATE??0.0005);
