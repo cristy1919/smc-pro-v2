@@ -1,13 +1,17 @@
 import { writeFile } from "node:fs/promises";
-import { BingXPublicKlineProvider, fetchEngineDataset } from "../src/bingx-market-data.js";
+import { BingXPublicKlineProvider, fetchEngineDataset, INTERVAL_MS } from "../src/bingx-market-data.js";
 import { evaluateSwing } from "../src/setup-evaluator.js";
 import { runHistoricalBacktest } from "../src/multi-timeframe-backtest.js";
+import { RISK_CONFIG } from "../src/config.js";
 
 const BASE_URL = "https://open-api.bingx.com";
 const DAY = 86400000;
 const TARGET_SYMBOLS = 50;
 const WINDOW_DAYS = 90;
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const SEGMENT_DAYS = 30;
+const ENTRY_TFS = ["15m", "1h"];
+const FEE_RATE = 0.0005;
+const SLIPPAGE_RATE = 0.0002;
 
 async function publicData(path) {
   const response = await fetch(new URL(path, BASE_URL));
@@ -27,13 +31,13 @@ async function selectTopSymbols() {
     .filter(c => c && c.status === 1 && String(c.apiStateOpen).toLowerCase() === "true")
     .map(c => String(c.symbol || "").toUpperCase())
     .filter(s => /^[A-Z0-9]+-USDT$/.test(s)));
-  return tickers
-    .filter(t => active.has(String(t.symbol || "").toUpperCase()))
+  return tickers.filter(t => active.has(String(t.symbol || "").toUpperCase()))
     .map(t => {
       const bid = Number(t.bidPrice), ask = Number(t.askPrice), quoteVolume = Number(t.quoteVolume);
       const mid = (bid + ask) / 2;
-      const spreadPct = mid > 0 ? ((ask - bid) / mid) * 100 : Infinity;
-      return { symbol: String(t.symbol).toUpperCase(), quoteVolume, spreadPct, lastPrice: Number(t.lastPrice) };
+      return { symbol: String(t.symbol).toUpperCase(), quoteVolume,
+        spreadPct: mid > 0 ? ((ask - bid) / mid) * 100 : Infinity,
+        lastPrice: Number(t.lastPrice) };
     })
     .filter(t => Number.isFinite(t.quoteVolume) && t.quoteVolume > 0 &&
       Number.isFinite(t.lastPrice) && t.lastPrice > 0 &&
@@ -41,107 +45,233 @@ async function selectTopSymbols() {
     .sort((a, b) => b.quoteVolume - a.quoteVolume);
 }
 
-const now = Date.now();
-const startTime = now - WINDOW_DAYS * DAY;
+function pf(trades) {
+  const wins = trades.filter(t => t.netR > 0).reduce((s, t) => s + t.netR, 0);
+  const losses = Math.abs(trades.filter(t => t.netR <= 0).reduce((s, t) => s + t.netR, 0));
+  return losses ? wins / losses : wins ? null : 0;
+}
+function metrics(trades) {
+  const wins = trades.filter(t => t.netR > 0);
+  const losses = trades.filter(t => t.netR <= 0);
+  const totalR = trades.reduce((s, t) => s + t.netR, 0);
+  let equity = 1, peak = 1, maxDrawdown = 0;
+  for (const t of [...trades].sort((a, b) => a.entryAt - b.entryAt)) {
+    equity *= 1 + t.netR * RISK_CONFIG.riskUnitFraction;
+    peak = Math.max(peak, equity);
+    maxDrawdown = Math.max(maxDrawdown, (peak - equity) / peak);
+  }
+  return {
+    trades: trades.length, wins: wins.length, losses: losses.length,
+    winRate: trades.length ? wins.length / trades.length : 0,
+    profitFactor: pf(trades), totalR, expectancyR: trades.length ? totalR / trades.length : 0,
+    maxDrawdownPct: maxDrawdown * 100,
+    averageMAER: trades.length ? trades.reduce((s, t) => s + t.maeR, 0) / trades.length : 0,
+    averageMFER: trades.length ? trades.reduce((s, t) => s + t.mfeR, 0) / trades.length : 0,
+    totalEstimatedCostR: trades.reduce((s, t) => s + t.estimatedCostR, 0),
+    confidence: trades.length < 30 ? "INSUFFICIENT_DATA" : "SAMPLE_AVAILABLE"
+  };
+}
+function groupBy(trades, keyFn) {
+  const groups = new Map();
+  for (const trade of trades) {
+    const key = keyFn(trade);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(trade);
+  }
+  return [...groups.entries()].map(([key, rows]) => ({ key, ...metrics(rows) }))
+    .sort((a, b) => b.totalR - a.totalR);
+}
+function evidenceValue(trade, prefix) {
+  return (trade.evidence || []).find(x => x.startsWith(prefix)) || prefix + "UNKNOWN";
+}
+function lossDiagnosis(trades) {
+  const losing = trades.filter(t => t.netR <= 0);
+  return {
+    byExitReason: groupBy(losing, t => t.exitReason),
+    bySetup: groupBy(losing, t => t.setupId),
+    byDirection: groupBy(losing, t => t.direction),
+    byHTFBias: groupBy(losing, t => evidenceValue(t, "HTF_")),
+    byStructureContext: groupBy(losing, t => evidenceValue(t, "STRUCTURE_")),
+    byZone: groupBy(losing, t => t.zoneBounds?.type || "NO_ZONE"),
+    byScoreBand: groupBy(losing, t => t.score >= 90 ? "90-100" : t.score >= 85 ? "85-89" : "80-84"),
+    byEntryTimeframe: groupBy(losing, t => t.timeframe),
+    highCostLosses: losing.filter(t => t.estimatedCostR >= Math.abs(t.grossR) * 0.5)
+      .map(t => ({ symbol: t.symbol, setupId: t.setupId, timeframe: t.timeframe, grossR: t.grossR, costR: t.estimatedCostR, netR: t.netR })),
+    adverseExcursionLosses: losing.filter(t => t.maeR >= 0.8)
+      .map(t => ({ symbol: t.symbol, setupId: t.setupId, timeframe: t.timeframe, maeR: t.maeR, mfeR: t.mfeR, netR: t.netR }))
+  };
+}
+function learnRules(completedTrades, priorRules, learnedAfterSegment) {
+  const rules = [...priorRules];
+  const bySetupDirection = groupBy(completedTrades, t => t.setupId + "|" + t.direction);
+  for (const row of bySetupDirection) {
+    const rows = completedTrades.filter(t => t.setupId + "|" + t.direction === row.key);
+    if (rows.length >= 5 && row.profitFactor !== null && row.profitFactor < 0.35 && row.expectancyR < 0) {
+      const [setupId, direction] = row.key.split("|");
+      const rule = {
+        id: "BLOCK_SETUP_DIRECTION:" + row.key,
+        type: "SETUP_DIRECTION",
+        setupId, direction,
+        learnedAfterSegment,
+        sampleSize: rows.length, profitFactor: row.profitFactor, expectancyR: row.expectancyR,
+        reason: "Önceki dönemde en az 5 işlem, PF < 0.35 ve negatif beklenti"
+      };
+      if (!rules.some(x => x.id === rule.id)) rules.push(rule);
+    }
+  }
+  const bySetupBias = groupBy(completedTrades, t => [t.setupId, t.direction, evidenceValue(t, "HTF_")].join("|"));
+  for (const row of bySetupBias) {
+    const rows = completedTrades.filter(t => [t.setupId, t.direction, evidenceValue(t, "HTF_")].join("|") === row.key);
+    if (rows.length >= 3 && row.profitFactor !== null && row.profitFactor < 0.5 && row.expectancyR < 0) {
+      const [setupId, direction, htfBias] = row.key.split("|");
+      const rule = {
+        id: "BLOCK_SETUP_DIRECTION_HTF:" + row.key,
+        type: "SETUP_DIRECTION_HTF",
+        setupId, direction, htfBias,
+        learnedAfterSegment,
+        sampleSize: rows.length, profitFactor: row.profitFactor, expectancyR: row.expectancyR,
+        reason: "Önceki dönemde aynı HTF bağlamında en az 3 işlem, PF < 0.50 ve negatif beklenti"
+      };
+      if (!rules.some(x => x.id === rule.id)) rules.push(rule);
+    }
+  }
+  return rules;
+}
+function candidateAllowed(candidate, rules) {
+  const htfBias = (candidate.evidence || []).find(x => x.startsWith("HTF_")) || "HTF_UNKNOWN";
+  return !rules.some(rule =>
+    rule.setupId === candidate.setupId &&
+    rule.direction === candidate.direction &&
+    (rule.type === "SETUP_DIRECTION" ||
+      (rule.type === "SETUP_DIRECTION_HTF" && rule.htfBias === htfBias))
+  );
+}
+function candleSlice(timeframes, endTime) {
+  return Object.fromEntries(Object.entries(timeframes).map(([tf, rows]) => [
+    tf, rows.filter(c => c.timestamp + INTERVAL_MS[tf] <= endTime)
+  ]));
+}
+function combineReports(reports, key) {
+  return reports.flatMap(r => r[key] || []);
+}
+
+const endTime = Date.now();
+const startTime = endTime - WINDOW_DAYS * DAY;
 const provider = new BingXPublicKlineProvider({ minRequestIntervalMs: 1050 });
 const universe = await selectTopSymbols();
 if (universe.length < TARGET_SYMBOLS) {
   throw new Error("INSUFFICIENT_LIQUID_USDT_PERPETUALS: expected at least " + TARGET_SYMBOLS + ", found " + universe.length);
 }
-
-const results = [];
-const failures = [];
-for (let index = 0; index < universe.length && results.length < TARGET_SYMBOLS; index++) {
-  const selected = universe[index];
-  process.stdout.write("[" + (results.length + 1) + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " fetching 90d Swing data\n");
+const selectedPairs = universe.slice(0, TARGET_SYMBOLS);
+const datasets = new Map();
+const pairFailures = [];
+for (let i = 0; i < selectedPairs.length; i++) {
+  const pair = selectedPairs[i];
+  process.stdout.write("FETCH " + (i + 1) + "/" + TARGET_SYMBOLS + " " + pair.symbol + "\n");
   try {
-    const timeframes = await fetchEngineDataset({
-      provider, symbol: selected.symbol, engine: "swing", startTime, endTime: now
-    });
-    const fundingRates = await provider.getFundingRates({
-      symbol: selected.symbol, startTime, endTime: now, limit: 100
-    });
+    const timeframes = await fetchEngineDataset({ provider, symbol: pair.symbol, engine: "swing", startTime, endTime });
+    const fundingRates = await provider.getFundingRates({ symbol: pair.symbol, startTime, endTime, limit: 100 });
     if (!fundingRates.length) throw new Error("PUBLIC_HISTORICAL_FUNDING_DATA_MISSING");
-    const common = {
-      symbol: selected.symbol, periodDays: [WINDOW_DAYS], fundingRates,
-      feeRate: 0.0005, slippageRate: 0.0002
-    };
-    const entry15m = runHistoricalBacktest({
-      ...common, engine: "swing", timeframes, evaluate: evaluateSwing, entryTimeframe: "15m"
-    });
-    const entry1h = runHistoricalBacktest({
-      ...common, engine: "swing", timeframes, evaluate: evaluateSwing, entryTimeframe: "1h"
-    });
-    results.push({
-      symbol: selected.symbol,
-      selection: { quoteVolume24h: selected.quoteVolume, spreadPct: selected.spreadPct },
-      fundingRecords: fundingRates.length,
-      dataRanges: Object.fromEntries(Object.entries(timeframes).map(([tf, rows]) => [
-        tf, { candles: rows.length, start: rows[0]?.timestamp ?? null, end: rows.at(-1)?.timestamp ?? null }
-      ])),
-      entry15m: entry15m.periods[0],
-      entry1h: entry1h.periods[0],
-      trades15m: entry15m.tradesByPeriod[WINDOW_DAYS],
-      trades1h: entry1h.tradesByPeriod[WINDOW_DAYS],
-      assumptions: { entry15m: entry15m.assumptions, entry1h: entry1h.assumptions }
-    });
-    process.stdout.write("[" + results.length + "/" + TARGET_SYMBOLS + "] " + selected.symbol + " complete\n");
+    datasets.set(pair.symbol, { pair, timeframes, fundingRates });
   } catch (error) {
-    failures.push({ symbol: selected.symbol, error: String(error?.message || error) });
-    process.stderr.write(selected.symbol + " FAILED: " + String(error?.message || error) + "\n");
+    pairFailures.push({ symbol: pair.symbol, stage: "DATA_FETCH", error: String(error?.message || error) });
   }
 }
+if (datasets.size !== TARGET_SYMBOLS) {
+  throw new Error("DATASET_COLLECTION_INCOMPLETE: " + datasets.size + "/" + TARGET_SYMBOLS + " complete. Failures: " + JSON.stringify(pairFailures));
+}
 
-const aggregate = (field) => {
-  const rows = results.map(x => x[field]);
-  const trades = rows.reduce((sum, x) => sum + x.trades, 0);
-  const wins = rows.reduce((sum, x) => sum + x.wins, 0);
-  const grossWins = rows.reduce((sum, x) => sum + (x.profitFactor === null ? 0 : x.profitFactor * Math.abs(x.totalR - x.expectancyR * x.trades < 0 ? x.totalR : 0)), 0);
-  const totalR = rows.reduce((sum, x) => sum + x.totalR, 0);
-  const weightedDrawdown = rows.length ? rows.reduce((sum, x) => sum + x.maxDrawdownPct, 0) / rows.length : 0;
-  const grossWinR = results.flatMap(x => x[field === "entry15m" ? "trades15m" : "trades1h"]).filter(t => t.netR > 0).reduce((s, t) => s + t.netR, 0);
-  const grossLossR = Math.abs(results.flatMap(x => x[field === "entry15m" ? "trades15m" : "trades1h"]).filter(t => t.netR <= 0).reduce((s, t) => s + t.netR, 0));
-  return {
-    pairsCompleted: results.length, totalTrades: trades, wins, losses: trades - wins,
-    winRate: trades ? wins / trades : 0,
-    profitFactor: grossLossR ? grossWinR / grossLossR : grossWinR ? null : 0,
-    expectancyR: trades ? totalR / trades : 0, totalR,
-    averagePerPairMaxDrawdownPct: Number(weightedDrawdown.toFixed(4)),
-    confidence: trades < 30 ? "INSUFFICIENT_DATA" : "SAMPLE_AVAILABLE"
+const segments = [];
+let learnedRules = [];
+for (let segmentIndex = 0; segmentIndex < 3; segmentIndex++) {
+  const segmentStart = startTime + segmentIndex * SEGMENT_DAYS * DAY;
+  const segmentEnd = segmentStart + SEGMENT_DAYS * DAY;
+  const segmentTrades = { "15m": [], "1h": [] };
+  const perPair = [];
+  process.stdout.write("SEGMENT " + (segmentIndex + 1) + "/3 start; activeRules=" + learnedRules.length + "\n");
+  for (const [symbol, data] of datasets) {
+    const sliced = candleSlice(data.timeframes, segmentEnd);
+    const pairRow = { symbol, entry15m: null, entry1h: null };
+    for (const entryTimeframe of ENTRY_TFS) {
+      const report = runHistoricalBacktest({
+        engine: "swing", symbol, timeframes: sliced, evaluate: evaluateSwing,
+        periodDays: [30], feeRate: FEE_RATE, slippageRate: SLIPPAGE_RATE,
+        fundingRates: data.fundingRates, entryTimeframe,
+        startTime: segmentStart, endTime: segmentEnd,
+        candidateFilter: candidate => candidateAllowed(candidate, learnedRules)
+      });
+      const trades = report.tradesByPeriod[30].map(t => ({ ...t, symbol }));
+      segmentTrades[entryTimeframe].push(...trades);
+      pairRow[entryTimeframe === "15m" ? "entry15m" : "entry1h"] = {
+        ...report.periods[0], diagnostics: lossDiagnosis(trades), trades
+      };
+    }
+    perPair.push(pairRow);
+    process.stdout.write("SEGMENT " + (segmentIndex + 1) + " " + symbol + " complete\n");
+  }
+  const allSegmentTrades = [...segmentTrades["15m"], ...segmentTrades["1h"]];
+  const segmentReport = {
+    segment: segmentIndex + 1,
+    start: new Date(segmentStart).toISOString(),
+    end: new Date(segmentEnd).toISOString(),
+    appliedLearningRules: [...learnedRules],
+    entry15m: { metrics: metrics(segmentTrades["15m"]), setupBreakdown: groupBy(segmentTrades["15m"], t => t.setupId), directionBreakdown: groupBy(segmentTrades["15m"], t => t.direction), lossDiagnosis: lossDiagnosis(segmentTrades["15m"]), trades: segmentTrades["15m"] },
+    entry1h: { metrics: metrics(segmentTrades["1h"]), setupBreakdown: groupBy(segmentTrades["1h"], t => t.setupId), directionBreakdown: groupBy(segmentTrades["1h"], t => t.direction), lossDiagnosis: lossDiagnosis(segmentTrades["1h"]), trades: segmentTrades["1h"] },
+    combined: { metrics: metrics(allSegmentTrades), byPair: groupBy(allSegmentTrades, t => t.symbol), bySetup: groupBy(allSegmentTrades, t => t.setupId), byTimeframe: groupBy(allSegmentTrades, t => t.timeframe) },
+    pairs: perPair,
+    learning: { rulesLearnedFromThisSegment: [], ruleMethod: "Only rules supported by repeated negative out-of-sample outcomes are applied to the NEXT 30-day segment; no same-segment filtering." }
   };
-};
+  const nextRules = learnRules(allSegmentTrades, learnedRules, segmentIndex + 1);
+  segmentReport.learning.rulesLearnedFromThisSegment = nextRules.filter(r => !learnedRules.some(old => old.id === r.id));
+  segments.push(segmentReport);
+  learnedRules = nextRules;
+  process.stdout.write("SEGMENT " + (segmentIndex + 1) + " complete; newRules=" + segmentReport.learning.rulesLearnedFromThisSegment.length + "\n");
+}
 
+const all15m = combineReports(segments, "entry15m");
+const all1h = combineReports(segments, "entry1h");
+const allTrades = [...all15m.flatMap(x => x.trades), ...all1h.flatMap(x => x.trades)];
 const output = {
   metadata: {
     generatedAt: new Date().toISOString(),
     exchange: "BingX USDT-M perpetuals",
-    engine: "SWING_ONLY",
-    requestedPairs: TARGET_SYMBOLS,
-    completedPairs: results.length,
-    failedPairs: failures.length,
-    dataWindowDays: WINDOW_DAYS,
-    source: "BingX public market-data endpoints",
+    engine: "SWING_ONLY_WALK_FORWARD_LEARNING",
+    requestedPairs: TARGET_SYMBOLS, completedPairs: datasets.size,
+    dataWindowDays: WINDOW_DAYS, segments: 3, segmentDays: SEGMENT_DAYS,
     symbolSelection: "Top 50 by 24h quoteVolume among active/open USDT perpetuals with observed bid/ask spread <= 0.5%",
-    timeframes: ["1d", "4h", "1h", "15m"],
-    entryComparisons: ["15m", "1h"],
-    costAssumptions: { feeRatePerSide: 0.0005, slippageRatePerSide: 0.0002 },
+    timeframes: { bias: "1d", structuralZones: "4h", confirmation: "1h", entryComparisons: ["15m", "1h"] },
+    costs: { feeRatePerSide: FEE_RATE, slippageRatePerSide: SLIPPAGE_RATE },
+    riskUnitFraction: RISK_CONFIG.riskUnitFraction,
+    learningPolicy: "Strict chronological walk-forward: segment 1 diagnoses; its learned filters apply to segment 2; cumulative segment 1+2 learning applies to segment 3. No same-segment learning or future leakage.",
+    learningThresholds: {
+      setupDirection: "At least 5 trades, PF < 0.35, negative expectancy",
+      setupDirectionAndHtf: "At least 3 trades, PF < 0.50, negative expectancy"
+    },
     limitations: [
-      "Public historical market data only; no API credentials, private account reads, or orders",
-      "Per-trade maximum observation horizon remains 30 days; the 90 days is the historical sample window",
-      "Normalized equity index only; no USDT starting balance is assumed",
-      "No partial TP1/50% close or break-even stop management",
-      "No leverage, liquidation, historical spread/depth or market-impact simulation",
-      "Stop is assumed to execute first when stop and target are both touched in one candle",
-      "Funding uses actual returned historical settlement records only; missing funding data fails that pair"
+      "Only public BingX market data; no private account data or orders",
+      "Each 30-day segment is isolated; open trades are force-closed at the segment boundary",
+      "The 15m and 1h entry comparisons are separate simulations and must not be added as if they were one portfolio",
+      "No historical leverage/liquidation, depth, spread evolution or market-impact simulation",
+      "No partial TP1 close or break-even management",
+      "Stop-first assumption if stop and target are touched in the same candle",
+      "Funding applied only from returned historical settlement records",
+      "Normalized R and equity metrics are not actual VST or USDT returns"
     ]
   },
-  aggregate: { entry15m: aggregate("entry15m"), entry1h: aggregate("entry1h") },
-  pairs: results,
-  failures
+  universe: selectedPairs.map(x => ({ symbol: x.symbol, quoteVolume24h: x.quoteVolume, observedSpreadPct: x.spreadPct })),
+  dataFailures: pairFailures,
+  segments,
+  total90d: {
+    entry15m: { metrics: metrics(all15m.flatMap(x => x.trades)), setupBreakdown: groupBy(all15m.flatMap(x => x.trades), t => t.setupId), lossDiagnosis: lossDiagnosis(all15m.flatMap(x => x.trades)), trades: all15m.flatMap(x => x.trades) },
+    entry1h: { metrics: metrics(all1h.flatMap(x => x.trades)), setupBreakdown: groupBy(all1h.flatMap(x => x.trades), t => t.setupId), lossDiagnosis: lossDiagnosis(all1h.flatMap(x => x.trades)), trades: all1h.flatMap(x => x.trades) },
+    combined: { metrics: metrics(allTrades), byPair: groupBy(allTrades, t => t.symbol), bySetup: groupBy(allTrades, t => t.setupId), byDirection: groupBy(allTrades, t => t.direction), byEntryTimeframe: groupBy(allTrades, t => t.timeframe), lossDiagnosis: lossDiagnosis(allTrades) }
+  },
+  finalLearnedRules: learnedRules
 };
-
-await writeFile("swing-50-pairs-90d-report.json", JSON.stringify(output, null, 2) + "\n", { encoding: "utf8" });
-process.stdout.write(JSON.stringify({ metadata: output.metadata, aggregate: output.aggregate, failures }, null, 2) + "\n");
-if (results.length !== TARGET_SYMBOLS) {
-  throw new Error("SWING_BACKTEST_INCOMPLETE: completed " + results.length + " of " + TARGET_SYMBOLS + " pairs; report artifact retained for diagnosis");
-}
+await writeFile("swing-50-pairs-90d-walk-forward-report.json", JSON.stringify(output, null, 2) + "\n", { encoding: "utf8" });
+process.stdout.write(JSON.stringify({
+  completedPairs: datasets.size,
+  segments: segments.map(s => ({ segment: s.segment, entry15m: s.entry15m.metrics, entry1h: s.entry1h.metrics, rulesLearned: s.learning.rulesLearnedFromThisSegment.length })),
+  total90d: { entry15m: output.total90d.entry15m.metrics, entry1h: output.total90d.entry1h.metrics, combined: output.total90d.combined.metrics },
+  finalLearnedRules: learnedRules.length
+}, null, 2) + "\n");
