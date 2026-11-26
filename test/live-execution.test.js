@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { getLiveReadiness, getLiveManagementReadiness, validateLiveCandidate, BingXLiveExecutionAdapter } from "../src/live-execution.js";
 
 const baseCandidate = (overrides = {}) => ({
-  id: "scalp-setup-001", engine: "scalp", symbol: "BTC-USDT", direction: "BULLISH",
+  id: "swing-setup-001", engine: "swing", setupTimeframe: "4h", symbol: "BTC-USDT", direction: "BULLISH",
   status: "QUALIFIED", entryEligible: true, entryConfirmation: { status: "CONFIRMED" },
   stopLoss: 99000, takeProfit: 103500, marginMode: "ISOLATED", leverage: 20, ...overrides
 });
@@ -33,7 +33,7 @@ test("live credentials must be independently provisioned", () => {
 test("normal setup enforces isolated margin and 20x-50x leverage", () => {
   const result = validateLiveCandidate(baseCandidate(), {
     equity: 10000, availableMargin: 5000, openPositions: [], contract,
-    markPrice: 100000, riskMultiple: 1, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261125"
+    markPrice: 100000, riskMultiple: 1, explicitConfirmation: true, idempotencyKey: "swing-btc-20261126"
   });
   assert.equal(result.eligible, true);
   assert.equal(result.marginMode, "ISOLATED");
@@ -44,20 +44,20 @@ test("normal setup enforces isolated margin and 20x-50x leverage", () => {
 test("reduced-risk setup enforces 0.5R and 5x-10x leverage", () => {
   const result = validateLiveCandidate(baseCandidate({ leverage: 10 }), {
     equity: 10000, availableMargin: 5000, openPositions: [], contract,
-    markPrice: 100000, riskMultiple: 0.5, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261125"
+    markPrice: 100000, riskMultiple: 0.5, explicitConfirmation: true, idempotencyKey: "swing-btc-20261126"
   });
   assert.equal(result.eligible, true);
   assert.equal(result.riskBudget, 100);
   const invalid = validateLiveCandidate(baseCandidate({ leverage: 20 }), {
     equity: 10000, availableMargin: 5000, openPositions: [], contract,
-    markPrice: 100000, riskMultiple: 0.5, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261125"
+    markPrice: 100000, riskMultiple: 0.5, explicitConfirmation: true, idempotencyKey: "swing-btc-20261126"
   });
   assert.ok(invalid.reasons.includes("LEVERAGE_OUTSIDE_POLICY"));
 });
 
 test("ten-position cap, duplicates, and invalid quantity metadata fail closed", () => {
   const common = { equity: 10000, availableMargin: 5000, contract, markPrice: 100000,
-    riskMultiple: 1, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261125" };
+    riskMultiple: 1, explicitConfirmation: true, idempotencyKey: "swing-btc-20261126" };
   const full = validateLiveCandidate(baseCandidate(), { ...common, openPositions: Array.from({length:10},()=>({state:"OPEN"})) });
   assert.ok(full.reasons.includes("MAX_OPEN_POSITIONS"));
   const duplicate = validateLiveCandidate(baseCandidate(), { ...common, openPositions: [{state:"OPEN",engine:"scalp",symbol:"BTC-USDT",side:"LONG"}] });
@@ -74,7 +74,7 @@ test("disabled live flag blocks before any exchange request", async () => {
     store: {}
   });
   await assert.rejects(
-    adapter.submit(baseCandidate(), { confirmation: { confirmedByUser: true, token: "control", confirmedAt: Date.now() }, idempotencyKey: "scalp-btc-20261125" }),
+    adapter.submit(baseCandidate(), { confirmation: { confirmedByUser: true, token: "control", confirmedAt: Date.now() }, idempotencyKey: "swing-btc-20261126" }),
     /LIVE_EXECUTION_LOCKED/
   );
   assert.equal(called, false);
@@ -215,8 +215,8 @@ test("structural live trailing tightens short stops without moving them away fro
 import { runLiveSetupQueue } from "../src/live-runner.js";
 
 const readyScannerSetup = (overrides={}) => ({
-  model:"S01_SWEEP_MSS_FVG", symbol:"BTC-USDT", side:"LONG", tradeStyle:"SCALP",
-  setupCandleTime:900000, candleTime:900000, status:"READY", entry:100,
+  model:"W01_HTF_OB_REVERSAL", symbol:"BTC-USDT", side:"LONG", tradeStyle:"SWING",
+  setupTimeframe:"4h", entryTimeframe:"4h", setupCandleTime:900000, candleTime:900000, status:"READY", entry:100,
   stopLoss:98, takeProfit:107, tp1:102, tp2:104, score:88, riskMultiplier:0.5,
   confirmations:["CLOSED_CANDLE_CONFIRMATION"], audit:{zone:{bottom:99,top:101},countertrend:true},
   ...overrides
@@ -231,7 +231,7 @@ test("activated live runner uses current READY scanner setup only when mark is i
   const adapter={submit:async(candidate,options)=>{submitted={candidate,options};return {ok:true};}};
   const result=await runLiveSetupQueue({env,setups:[readyScannerSetup()],client,store,adapter,clock:()=>1000000});
   assert.equal(result.results[0].action,"LIVE_ENTRY_OPENED");
-  assert.equal(submitted.candidate.engine,"scalp");
+  assert.equal(submitted.candidate.engine,"swing");
   assert.equal(submitted.candidate.riskMultiplier,0.5);
   assert.equal(submitted.candidate.leverage>=5 && submitted.candidate.leverage<=10,true);
   assert.equal(submitted.options.confirmation.activationId,"activation-123456");
@@ -296,13 +296,13 @@ test("live adapter accepts a durable user activation for automated scanner entri
   };
   const adapter=new BingXLiveExecutionAdapter({env,client,store,clock:()=>1700000000000});
   const result=await adapter.submit(baseCandidate(),{
-    idempotencyKey:"scalp-btc-20261125",
+    idempotencyKey:"swing-btc-20261126",
     confirmation:{confirmedByUser:true,token:"control",activationId:"activation-123456"}
   });
   assert.equal(result.ok,true);
   assert.equal(saved.mode,"BINGX_LIVE");
   assert.equal(saved.marginMode,"ISOLATED");
-  assert.equal(saved.engine,"scalp");
+  assert.equal(saved.engine,"swing");
   assert.equal(slotReleased,true);
 });
 
