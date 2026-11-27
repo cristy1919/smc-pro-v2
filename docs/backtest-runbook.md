@@ -19,12 +19,12 @@ Use a dedicated BingX Demo/VST API key with read-only account permission. Do not
 4. Run workflow.
 5. Download the `backtest-report.json` artifact.
 
-The script reads the VST USDT equity from the VST host, then fetches public BingX USDT-M candles and historical funding settlements. It does not submit, amend or cancel orders.
+The script runs the independent Scalp (S01–S06) and Swing (W01–W08) evaluators, reads VST USDT equity from the VST host, then fetches public BingX USDT-M candles and historical funding settlements. It does not submit, amend or cancel orders.
 
 ## Data and assumptions
 
-- Scalp timeframes: 1H / 15M / 5M.
-- Swing timeframes: 1D / 4H / 1H.
+- Scalp timeframes: 1H directional bias / 15M liquidity and zones / 5M setup and entry.
+- Swing timeframes: 1D directional bias / 4H structure and zones / 1H confirmation / 15M or 1H entry.
 - 1M and 3M are rejected.
 - Forming candles are excluded.
 - 1H history uses the same 30-day warmup window across engines; lower Scalp frames use 2-day warmup; Swing 1D/4H also use 30-day warmup.
