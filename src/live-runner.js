@@ -26,12 +26,13 @@ export async function runLiveSetupQueue({ env, setups = [], client, store, adapt
       const status = String(setup?.status ?? "").toUpperCase();
       const confirmed = setup?.entryConfirmed === true ||
         (Array.isArray(setup?.confirmations) && setup.confirmations.includes("CLOSED_CANDLE_CONFIRMATION"));
-      if (engine !== "swing" || !["4h", "1d"].includes(String(setup?.setupTimeframe ?? "").toLowerCase()) || !["LONG", "SHORT"].includes(side) ||
-          status !== "READY" || !confirmed) continue;
+      const setupTimeframe = String(setup?.setupTimeframe ?? "").toLowerCase();
+      const timeframeAllowed = engine === "scalp" ? setupTimeframe === "5m" : engine === "swing" ? setupTimeframe === "1h" : false;
+      if (!timeframeAllowed || !["LONG", "SHORT"].includes(side) || status !== "READY" || !confirmed) continue;
 
       const symbol = String(setup.symbol ?? "");
       const candleTime = Number(setup.setupCandleTime ?? setup.candleTime);
-      const intervalMs = String(setup.setupTimeframe).toLowerCase() === "1d" ? 86400000 : 14400000;
+      const intervalMs = engine === "scalp" ? 300000 : 3600000;
       if (!positive(candleTime) || candleTime > clock() + 60000 || clock() - candleTime > intervalMs * 2) {
         results.push({ setupId: scannerSetupIdentity(setup), action: "WAIT_STALE_SETUP" });
         continue;
