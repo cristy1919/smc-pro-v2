@@ -105,3 +105,10 @@ No production parameters or Cloudflare resources were changed by this audit. The
 - Updated the strategy matrix eligibility threshold to QUALIFIED / score >= 70, aligned with the approved score bands, and expanded Swing matrix evaluation to 1H / 15M entry frames.
 - Added regression coverage for Scalp evaluator availability, Scalp timeframes, engine score weights, missing-factor penalties, Swing entry frames, and shared market-data fetches.
 - These changes are committed to `research/scalp-engine-recovery-2026-11-27`. GitHub Actions was deliberately not run to conserve quota; therefore the code has not yet passed an executed CI run. No production Worker, Paper account, Durable Object ledger, open position, or trading setting was changed. The existing `runHistoricalBacktest` utility remains Swing-only; the combined Scalp + Swing matrix is the dedicated research runner.
+
+### Historical data limitations
+
+- The combined matrix uses one shared fetch of 1D/4H/1H/15M/5M candles per symbol, so the common 1H and 15M datasets are not downloaded twice.
+- Relative volume is calculated at each entry timestamp from the current closed candle and the preceding 20 closed candles only. It does not use future bars.
+- Historical quote-volume and bid/ask spread are not provided by the selected historical kline endpoint. Both fields are marked `UNAVAILABLE`; the backtest does not invent them. The 50-pair universe is selected using the current quote-volume/spread snapshot, so universe survivorship/selection bias remains.
+- Historical mode uses the causal relative-volume filter; it does not pretend that a current spread measurement was historically available. Fixed slippage remains an explicit assumption. A later production promotion requires separate historical liquidity/spread validation.
