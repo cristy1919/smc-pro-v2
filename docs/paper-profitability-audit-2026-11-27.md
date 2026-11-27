@@ -5,8 +5,8 @@
 - Source of the execution snapshot: Cloudflare Worker `smcprov2`, Paper ledger key `engine-state`.
 - Closed-trade window: 2026-11-25 09:12:22 UTC through 2026-11-27 13:54:32 UTC.
 - 177 closed trades were present. Only 143 had `pnlAccountingStatus=VERIFIED`; 34 were `UNSPECIFIED` and are excluded from the primary performance table.
-- Net PnL per verified trade is calculated as `pnlUsdt - fundingPaidUsdt`. `pnlUsdt` already reflects recorded entry/exit fees and slippage in the deployed ledger accounting path. Funding is deducted separately here.
-- This is a short, roughly 53-hour paper sample, not evidence of durable profitability.
+- Net PnL per verified trade is provisionally calculated as `pnlUsdt - fundingPaidUsdt`. The inspected ledger records did not consistently expose separate entry-fee, exit-fee, or slippage fields, so fee/slippage inclusion cannot be independently reconciled from every closed-trade record. Treat the PnL and PF comparisons as provisional until ledger accounting is reconciled against the canonical balance transaction events.
+- This is a short, roughly 53-hour paper sample, not evidence of durable profitability. The ledger contains historical Scalp-labeled trades, but the inspected deployed Worker bundle currently defines only the Swing engine and rejects Scalp as removed/unsupported. Therefore the Scalp rows describe historical ledger records, not proof that the currently deployed Scalp engine is active.
 - No Worker, Durable Object, KV, balance, open position, or trading setting was modified during this audit. No order was submitted.
 
 ## Verified engine performance
@@ -60,16 +60,18 @@ Among the 143 verified trades, 85 have `marketRegime=UNAVAILABLE`. Regime-specif
 
 ## Deployed Worker implementation findings
 
-1. The deployed Worker contains the independent Scalp and Swing engine configuration, including the intended timeframes and setup IDs. The current GitHub main branch does not represent this deployed implementation:
+1. The deployed Worker bundle and repository both show Swing-only production execution:
+   - The deployed `ENGINE_CONFIG` defines only `SWING`.
+   - The deployed evaluator rejects any engine other than `SWING` and returns `SCALP_ENGINE_REMOVED_OR_FORBIDDEN_TIMEFRAME`.
+   - The deployed active-strategy allowlist filters only Swing models.
    - `src/setup-evaluator.js` throws `SCALP_ENGINE_REMOVED`.
    - `src/scoring.js` only defines Swing weights.
    - `src/risk-controller.js` rejects non-Swing candidates.
-   - The deployed Worker bundle contains `ENGINE_CONFIG.SCALP` / `ENGINE_CONFIG.SWING` and the combined evaluator.
-2. The deployed Worker response path calls `filterActiveSwingSetups(ledger.setups)`, and its diagnostics/telemetry filters retain only active Swing model IDs. This can hide Scalp candidates and Scalp diagnostics from the dashboard/API even though the scanner code evaluates both engines.
+2. The deployed Worker response path calls `filterActiveSwingSetups(ledger.setups)`, and its diagnostics/telemetry filters retain only active Swing model IDs. The Scalp dashboard tab is therefore not evidence of a running Scalp evaluator.
 3. The deployed `makeSetup` calculation awards the full entry-confirmation weight once the boolean confirmation gate passes. That factor therefore adds little ranking information between already-confirmed candidates. The remaining score factors should be checked against verified net outcomes.
 4. The deployed risk multiplier uses countertrend, HTF alignment and score threshold; it does not require the empirical confidence result to be sufficiently sampled before assigning normal risk. This differs from the desired evidence-led risk policy.
 5. The repository matrix backtest imports `evaluateScalp`, but the repository implementation throws `SCALP_ENGINE_REMOVED`; its catch-and-skip path means the Scalp matrix cannot be considered a valid Scalp backtest.
-6. The repository matrix script's MAE/MFE expression `Number(adverse/risk.toFixed?risk: risk)` (and the corresponding favorable expression) is malformed and does not calculate excursion in R. MAE/MFE results from that path must not be trusted until corrected and tested.
+6. The repository matrix script's MAE/MFE expression was malformed and did not calculate excursion in R. The research branch replaces it with a shared validated `calculateExcursionsR` helper and unit tests for normalization, rounding, and invalid risk/movement inputs. The tests have been added but not run in GitHub Actions to conserve quota.
 
 ## Required validation before any production change
 
@@ -82,7 +84,7 @@ Among the 143 verified trades, 85 have `marketRegime=UNAVAILABLE`. Regime-specif
 
 ## Current decision
 
-No production parameters are changed by this audit. The first validation priorities are:
+No production parameters are changed by this audit. The research branch has only corrected the MAE/MFE calculation path and made the combined matrix fail closed before network access while Scalp evaluation is unavailable. The first validation priorities are:
 - Keep the existing W05 Range Deviation SHORT quarantine.
 - Test a W07 OTE quarantine variant.
 - Test a Swing bearish-regime filter.
