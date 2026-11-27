@@ -3373,7 +3373,7 @@ var EngineState = class {
     if ((this.paperValueVersions.get(key) ?? 0) === versionAtReadStart) {
       const encoded = value === null ? "__NULL__" : type === "json" ? JSON.stringify(value) ?? "__UNDEFINED__" : String(value);
       this.lastPaperValues.set(key, encoded);
-      this.paperReadCache.set(key, { expiresAt: Date.now() + 1500, value });
+      this.paperReadCache.set(key, { expiresAt: Date.now() + (key === "engine-state" ? 6e4 : 1500), value });
       if (this.paperReadCache.size > 100) {
         for (const [cacheKey, entry] of this.paperReadCache) if (entry.expiresAt <= Date.now()) this.paperReadCache.delete(cacheKey);
         while (this.paperReadCache.size > 100) this.paperReadCache.delete(this.paperReadCache.keys().next().value);
@@ -3395,7 +3395,7 @@ var EngineState = class {
         console.error(this.isKvQuotaFailure(error) ? "Paper state KV quota reached; Durable Object state fallback active" : "Paper state KV write failed; Durable Object state fallback active", String(error).slice(0, 180));
       }
     }
-    this.lastPaperValues.set(key, value); this.paperReadCache.set(key, { expiresAt: Date.now() + 1500, value: key === "engine-state" ? JSON.parse(value) : value });
+    this.lastPaperValues.set(key, value); this.paperReadCache.set(key, { expiresAt: Date.now() + (key === "engine-state" ? 6e4 : 1500), value: key === "engine-state" ? JSON.parse(value) : value });
   }
   updateQuotaTelemetry(ledger) {
     const quotaNow = Date.now();
@@ -3653,7 +3653,7 @@ var EngineState = class {
           const value = await this.readStorage("engine-state");
           if ((this.paperValueVersions.get("engine-state") ?? 0) === versionAtReadStart && value !== void 0) {
             this.lastPaperValues.set("engine-state", JSON.stringify(value) ?? "__UNDEFINED__");
-            this.paperReadCache.set("engine-state", { expiresAt: Date.now() + 1500, value });
+            this.paperReadCache.set("engine-state", { expiresAt: Date.now() + 6e4, value });
           }
           return value;
         })();
@@ -3715,7 +3715,7 @@ var EngineState = class {
   async saveEngineState(engine) {
     if (engine?.paperLedger && Array.isArray(engine.paperLedger.scanDiagnostics)) engine.paperLedger.scanDiagnostics = filterActiveSwingDiagnostics(engine.paperLedger.scanDiagnostics);
     const serialized = JSON.stringify(engine);
-    if (this.kvWriteFallbackActive === true) { await this.writeStorage("engine-state", engine); return; }
+    if (this.kvWriteFallbackActive === true) { await this.writePaperState("engine-state", serialized); return; }
     await this.writePaperState("engine-state", serialized);
   }
   async initializeSqlSchema() {
