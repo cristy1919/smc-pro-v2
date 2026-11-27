@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { BingXPublicKlineProvider, fetchEngineDataset, INTERVAL_MS } from "../src/bingx-market-data.js";
-import { evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
+import { SCALP_ENGINE_AVAILABLE, evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
 import { advanceEntryConfirmation } from "../src/entry-confirmation.js";
 import { RISK_CONFIG } from "../src/config.js";
 import { selectCryptoPerpetualUniverse } from "../src/backtest-universe.js";
@@ -38,13 +38,8 @@ if (!Number.isFinite(FEE_RATE) || FEE_RATE < 0 || !Number.isFinite(SLIPPAGE_RATE
 
 // Fail before any BingX market-data requests: the repository Scalp evaluator is intentionally removed.
 // A matrix report that silently skips every Scalp signal would be misleading.
-try {
-  evaluateScalp({});
-} catch (error) {
-  if (String(error?.message ?? error).includes("SCALP_ENGINE_REMOVED")) {
-    throw new Error("BACKTEST_BLOCKED_SCALP_EVALUATOR_UNAVAILABLE: restore and test the independent Scalp evaluator before running the combined matrix");
-  }
-  throw error;
+if (!SCALP_ENGINE_AVAILABLE) {
+  throw new Error("BACKTEST_BLOCKED_SCALP_EVALUATOR_UNAVAILABLE: restore and test the independent Scalp evaluator before running the combined matrix");
 }
 
 async function publicData(path) {
