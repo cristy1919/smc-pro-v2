@@ -6,7 +6,7 @@
 - Closed-trade window: 2026-11-25 09:12:22 UTC through 2026-11-27 13:54:32 UTC.
 - 177 closed trades were present. Only 143 had `pnlAccountingStatus=VERIFIED`; 34 were `UNSPECIFIED` and are excluded from the primary performance table.
 - Net PnL per verified trade is provisionally calculated as `pnlUsdt - fundingPaidUsdt`. The inspected ledger records did not consistently expose separate entry-fee, exit-fee, or slippage fields, so fee/slippage inclusion cannot be independently reconciled from every closed-trade record. Treat the PnL and PF comparisons as provisional until ledger accounting is reconciled against the canonical balance transaction events.
-- This is a short, roughly 53-hour paper sample, not evidence of durable profitability. A fresh read of the live Cloudflare smcprov2 script confirms that its active bundle contains independent SCALP and SWING engines, the six S01–S06 Scalp models, 1H/15M/5M timeframes, and separate engine scoring weights. The earlier conclusion that the live Worker was Swing-only was incorrect. The checked-in GitHub cloudflare/worker/deployed/index.js and src/setup-evaluator.js are stale Swing-only artifacts and do not match the live Cloudflare bundle.
+- This is a short, roughly 53-hour paper sample, not evidence of durable profitability. A fresh read of the live Cloudflare smcprov2 script confirms that its active bundle contains independent SCALP and SWING engines, the six S01–S06 Scalp models, 1H/15M/5M timeframes, and separate engine scoring weights. The earlier conclusion that the live Worker was Swing-only was incorrect. The default-branch GitHub cloudflare/worker/deployed/index.js and src/setup-evaluator.js are stale Swing-only artifacts and do not match the live Cloudflare bundle; an isolated research branch now restores an independent Scalp evaluator.
 - No Worker, Durable Object, KV, balance, open position, or trading setting was modified during this audit. No order was submitted.
 
 ## Verified engine performance
@@ -88,7 +88,7 @@ Among the 143 verified trades, 85 have `marketRegime=UNAVAILABLE`. Regime-specif
 
 ## Current decision
 
-No production parameters or Cloudflare resources were changed by this audit. The research branch has corrected the MAE/MFE calculation path, but its Scalp evaluator remains unavailable. The live Worker already runs Scalp + Swing; the immediate engineering task is to recover its exact Scalp/Swing implementation into the GitHub source and restore parity without deploying or changing the Paper ledger. The first validation priorities are:
+No production parameters or Cloudflare resources were changed by this audit. The live Worker already runs Scalp + Swing. The isolated research branch now has a recovered, independently callable Scalp evaluator, separate engine score weights, restored engine plans, aligned entry timeframes, and a shared-candle matrix path. This is a recovery from the earlier repository implementation, not yet a byte-for-byte extraction of the deployed Worker; parity, regression tests, and backtest behavior still require validation before any production promotion. The first validation priorities are:
 - Keep the existing W05 Range Deviation SHORT quarantine.
 - Test a W07 OTE quarantine variant.
 - Test a Swing bearish-regime filter.
