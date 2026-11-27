@@ -1,9 +1,6 @@
 name: BingX 20-pair 30-day Scalp + Swing matrix backtest
 
 on:
-  push:
-    branches:
-      - research/scalp-engine-recovery-2026-11-27
   workflow_dispatch:
 
 concurrency:
