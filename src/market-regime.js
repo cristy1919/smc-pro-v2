@@ -162,12 +162,12 @@ export function detectMarketRegimeTimeline(candles, options = {}) {
   };
 }
 
-export function regimeAtTimestamp(result, timestamp) {
+export function regimeAtTimestamp(result, timestamp, { candleDurationMs = 0 } = {}) {
   if (!result || !Array.isArray(result.timeline) || !Number.isFinite(timestamp)) return null;
   let low = 0, high = result.timeline.length - 1, found = -1;
   while (low <= high) {
     const mid = (low + high) >> 1;
-    if (result.timeline[mid].timestamp <= timestamp) { found = mid; low = mid + 1; }
+    if (result.timeline[mid].timestamp + candleDurationMs <= timestamp) { found = mid; low = mid + 1; }
     else high = mid - 1;
   }
   return found >= 0 ? result.timeline[found] : null;
