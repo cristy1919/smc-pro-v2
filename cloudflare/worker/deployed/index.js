@@ -3756,22 +3756,31 @@ var EngineState = class {
     // The global stop is immutable for this deployed build. Enforce its storage
     // side effects once per Durable Object isolate, not on every dashboard poll.
     if (this.emergencyStopEnforced === true) return;
-    const existing = await this.readEngineState();
-    const engine = structuredClone(existing);
-    const previousLedger = engine.paperLedger;
-    const ledger = previousLedger ?? structuredClone(DEFAULT_STATE.paperLedger);
-    const needsEngineSave = !existing || engine.runnerEnabled !== false || !previousLedger || previousLedger.runnerEnabled !== false;
-    engine.runnerEnabled = false;
-    ledger.runnerEnabled = false;
-    engine.paperLedger = ledger;
-    if (needsEngineSave) await this.saveEngineState(engine);
-    const runnerConfigured = await this.readPaperState("runner-configured");
-    if (runnerConfigured !== "true") await this.writePaperState("runner-configured", "true");
-    const processingEnabled = await this.readStorage("history-processing-enabled");
-    if (processingEnabled !== false) await this.writeStorage("history-processing-enabled", false);
-    const alarm = await this.state.storage.getAlarm();
-    if (alarm !== null) await this.deleteDurableAlarm();
-    this.emergencyStopEnforced = true;
+    // Coalesce concurrent dashboard requests so they share the same storage reads.
+    if (this.emergencyStopPromise) return this.emergencyStopPromise;
+    this.emergencyStopPromise = (async () => {
+      const existing = await this.readEngineState();
+      const engine = structuredClone(existing);
+      const previousLedger = engine.paperLedger;
+      const ledger = previousLedger ?? structuredClone(DEFAULT_STATE.paperLedger);
+      const needsEngineSave = !existing || engine.runnerEnabled !== false || !previousLedger || previousLedger.runnerEnabled !== false;
+      engine.runnerEnabled = false;
+      ledger.runnerEnabled = false;
+      engine.paperLedger = ledger;
+      if (needsEngineSave) await this.saveEngineState(engine);
+      const runnerConfigured = await this.readPaperState("runner-configured");
+      if (runnerConfigured !== "true") await this.writePaperState("runner-configured", "true");
+      const processingEnabled = await this.readStorage("history-processing-enabled");
+      if (processingEnabled !== false) await this.writeStorage("history-processing-enabled", false);
+      const alarm = await this.state.storage.getAlarm();
+      if (alarm !== null) await this.deleteDurableAlarm();
+      this.emergencyStopEnforced = true;
+    })();
+    try {
+      await this.emergencyStopPromise;
+    } finally {
+      this.emergencyStopPromise = null;
+    }
   }
   async fetch(request) {
     this.usageCounters.requests++;
