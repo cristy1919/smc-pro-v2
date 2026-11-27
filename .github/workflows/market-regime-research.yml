@@ -1,0 +1,45 @@
+name: BingX market structure and regime-aware Scalp Swing research
+
+on:
+  push:
+    branches:
+      - research/market-regime-30pairs-90d-2026-11-28
+  workflow_dispatch:
+
+concurrency:
+  group: bingx-market-regime-research
+  cancel-in-progress: false
+
+jobs:
+  regime-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/market-regime-30pairs-90d-2026-11-28
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run repository and market-regime tests
+        run: npm test
+      - name: Syntax-check regime engine and research runner
+        run: |
+          node --check src/market-regime.js
+          node --check scripts/run-bingx-market-regime-backtest.js
+      - name: Run 30-pair 90-day Scalp and Swing regime-aware research
+        env:
+          FEE_RATE: "0.0005"
+          SLIPPAGE_RATE: "0.0002"
+        run: node scripts/run-bingx-market-regime-backtest.js
+      - name: Upload market-regime research report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bingx-market-regime-30-pairs-90d
+          path: bingx-market-regime-30-pairs-90d-report.json
+          if-no-files-found: error
+          retention-days: 30
