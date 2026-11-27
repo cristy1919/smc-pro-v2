@@ -70,12 +70,12 @@ Existing resources were inspected in place. No new repository, Worker, Durable O
 
 ## Operational readiness update — 2026-11-27
 
-- Active main Worker: `smcprov2`, version 2056, 100% deployment. Dashboard Worker: `smcprov2-dashboard`, version 65, 100% deployment.
+- Active main Worker: `smcprov2`, version 2057, 100% deployment. Dashboard Worker: `smcprov2-dashboard`, version 65, 100% deployment.
 - Execution remains Stage 1 Internal Paper. VST Demo and Live flags remain disabled; no exchange API credentials were added.
 - BTC context now fetches closed BTC-USDT 4H and 1D candles directly (up to 300 each), persists the history, and reconstructs BTC structural direction at each historical trade's opening time for the trade analytics endpoint.
 - Altcoin breadth uses fresh per-symbol 4H/1D structural states. It is `UNAVAILABLE` until at least 60% of the eligible universe is covered; new setup audit records the breadth snapshot and coverage.
 - The Statistics panel displays current BTC structure, BTC candle counts, altcoin breadth coverage and historical BTC alignment.
 - VST Demo order validation checks the inclusive 1R–4R range before market/limit orders and again after actual fills. Live validation supports Scalp 5m and Swing 1h setup timeframes, with independent engine routing and the same 1R–4R limits.
 - GitHub Actions last verified 126 tests passing, 0 failing.
-- The 2056 upload also fixes a setup-audit initialization-order error found in the scan route. Durable Object code adoption is deferred until approximately 2026-11-27 12:40:39 UTC; live BTC candle counts remain unverified until a successful post-adoption scan reports nonzero 4H/1D counts.
+- Worker 2056 fixed a setup-audit initialization-order error. Worker 2057 additionally fixes the final ledger merge so BTC 4H/1D history, BTC telemetry, per-symbol structural state and altcoin breadth are persisted rather than discarded. Durable Object adoption of 2057 is pending its deferred rollout window (approximately 2026-11-27 12:51:54 UTC); BTC candle counts and breadth coverage must be re-verified after that scan.
 - See [execution-mode runbook](execution-mode-runbook.md) for the staged Internal Paper → VST Demo → Live transition and credential names.
