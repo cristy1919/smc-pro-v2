@@ -262,8 +262,10 @@ for(let i=0;i<selectedPairs.length;i++) {
   const pair=selectedPairs[i];
   process.stdout.write("FETCH "+(i+1)+"/"+TARGET_SYMBOLS+" "+pair.symbol+"\n");
   try {
-    const scalpData=await fetchEngineDataset({provider,symbol:pair.symbol,engine:"scalp",startTime,endTime});
-    const swingData=await fetchEngineDataset({provider,symbol:pair.symbol,engine:"swing",startTime,endTime});
+    // One shared candle fetch per symbol/timeframe; both engines consume the same immutable slices.
+    const sharedData=await fetchEngineDataset({provider,symbol:pair.symbol,engine:"combined",startTime,endTime});
+    const scalpData=sharedData;
+    const swingData=sharedData;
     const fundingRates=await provider.getFundingRates({symbol:pair.symbol,startTime,endTime,limit:100});
     if(!fundingRates.length)throw new Error("PUBLIC_HISTORICAL_FUNDING_DATA_MISSING");
     datasets.set(pair.symbol,{pair,scalpData,swingData,fundingRates});
