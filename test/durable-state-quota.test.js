@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   DurableStateRepository,
   MAX_OPEN_POSITION_ROWS,
@@ -123,4 +124,13 @@ test("open-position reads have a fixed upper bound", async () => {
   assert.deepEqual(await repository.listOpenPositions(), []);
   assert.match(call.query, /LIMIT \?/);
   assert.deepEqual(call.bindings, [MAX_OPEN_POSITION_ROWS]);
+});
+
+test("deployed Worker source keeps the seven-pair subrequest guard", async () => {
+  const source = await readFile(
+    new URL("../cloudflare/worker/deployed/index.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /var PAPER_SCAN_BATCH_NORMAL = 7;/);
+  assert.match(source, /return trackSqlCursor\(result, this\.usageCounters, isRead\);/);
 });
