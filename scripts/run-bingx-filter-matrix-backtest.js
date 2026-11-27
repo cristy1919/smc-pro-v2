@@ -172,7 +172,8 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
   let skipped=0;
   const getCounter=(key)=>{if(!counters.has(key))counters.set(key,emptyCounter());return counters.get(key);};
   for(let i=30;i<entryRows.length-1;i++) {
-    const signal=entryRows[i],asOf=signal.timestamp+INTERVAL_MS[entryTimeframe];\n    const relativeVolume=calculateRelativeVolume(entryRows,i);
+    const signal=entryRows[i],asOf=signal.timestamp+INTERVAL_MS[entryTimeframe];
+    const relativeVolume=calculateRelativeVolume(entryRows,i);
     if(signal.timestamp<startTime || signal.timestamp>=endTime)continue;
     for(const [tf,rows] of Object.entries(timeframes)) {
       let p=pointers[tf];
@@ -352,10 +353,10 @@ for(let segmentIndex=0;segmentIndex<WINDOW_DAYS/SEGMENT_DAYS;segmentIndex++) {
   for(const composite of modelKeys) {
     const [variantId,key]=composite.split("::");
     const [engine,timeframe,setupId,direction]=key.split("|");
-    const trades=segmentTradesByModel.get(key)||[];
+    const trades=segmentTradesByModel.get(composite)||[];
     models.push({
       variantId,engine,timeframe,setupId,direction,metrics:summarize(trades),
-      counters:segmentCounters.get(key)||emptyCounter(),
+      counters:segmentCounters.get(composite)||emptyCounter(),
       breakdowns:buildBreakdowns(trades),lossDiagnostics:lossDiagnostics(trades),trades
     });
   }
@@ -385,7 +386,8 @@ for(const key of allKeys) {
 finalModels.sort((a,b)=>a.engine.localeCompare(b.engine)||a.timeframe.localeCompare(b.timeframe)||a.setupId.localeCompare(b.setupId)||a.direction.localeCompare(b.direction));
 const output={
   metadata:{
-    generatedAt:new Date().toISOString(),exchange:"BingX USDT-M perpetual public market data",\n    filterVariants:FILTER_VARIANTS,filterExecution:"Each filter variant is evaluated at signal qualification and maintains independent seen-candidate, cooldown, and position state. Market candles/funding are fetched once and shared across variants.",
+    generatedAt:new Date().toISOString(),exchange:"BingX USDT-M perpetual public market data",
+    filterVariants:FILTER_VARIANTS,filterExecution:"Each filter variant is evaluated at signal qualification and maintains independent seen-candidate, cooldown, and position state. Market candles/funding are fetched once and shared across variants.",
     requestedPairs:TARGET_SYMBOLS,completedPairs:datasets.size,windowDays:WINDOW_DAYS,segmentDays:SEGMENT_DAYS,segments:segmentReports.length,universeSelection:"Top 20 eligible crypto USDT-M perpetuals by current 24h quote volume, with BTC-USDT included; present-day selection bias applies",
     engineCoverage:{scalp:{setups:SETUPS.scalp,entryTimeframes:["5m"],contextTimeframes:["1h","15m"]},swing:{setups:SETUPS.swing,entryTimeframes:["15m","1h"],contextTimeframes:["1d","4h","1h"]}},
     testedDirections:DIRECTIONS,
