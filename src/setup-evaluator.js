@@ -81,9 +81,9 @@ export const SCALP_ENGINE_AVAILABLE = true;
 export function evaluateScalp(input) { return evaluateRecoveredScalp(input); }
 export function evaluateSwing(input) {
  if(!input||typeof input.symbol!=="string"||!input.symbol.trim())throw new TypeError("symbol is required");
- const setupTimeframe=input.setupTimeframe??"4h";
- if(!["4h","1d"].includes(setupTimeframe))throw new Error("FORBIDDEN_SETUP_TIMEFRAME_"+setupTimeframe);
- for(const tf of ["1d","4h"]){if(!Array.isArray(input.timeframes?.[tf]))throw new Error("MISSING_TIMEFRAME_"+tf);validateCandles(input.timeframes[tf]);if(input.timeframes[tf].length<30)throw new Error("INSUFFICIENT_CANDLES_"+tf);}
+ const setupTimeframe=input.entryTimeframe??input.setupTimeframe??"1h";
+ if(!["15m","1h"].includes(setupTimeframe))throw new Error("FORBIDDEN_SETUP_TIMEFRAME_"+setupTimeframe);
+ for(const tf of [...new Set(["1d","4h",setupTimeframe])]){if(!Array.isArray(input.timeframes?.[tf]))throw new Error("MISSING_TIMEFRAME_"+tf);validateCandles(input.timeframes[tf]);if(input.timeframes[tf].length<30)throw new Error("INSUFFICIENT_CANDLES_"+tf);}
  if(!marketIsLiquid(input))return [];
  const daily=features(input.timeframes["1d"]),fourHour=features(input.timeframes["4h"]),candles=input.timeframes[setupTimeframe],f=features(candles),price=candles.at(-1).close;
  const btc=btcContextScore("BULLISH",input.marketContext),btcBear=btcContextScore("BEARISH",input.marketContext);
