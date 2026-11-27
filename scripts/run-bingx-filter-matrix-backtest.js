@@ -11,11 +11,12 @@ const BASE_URL = "https://open-api.bingx.com";
 const DAY = 86400000;
 const TARGET_SYMBOLS = 20;
 const WINDOW_DAYS = 30;
-const SEGMENT_DAYS = 30;
+const SEGMENT_DAYS = 15;
 const FEE_RATE = Number(process.env.FEE_RATE ?? 0.0005);
 const SLIPPAGE_RATE = Number(process.env.SLIPPAGE_RATE ?? 0.0002);
 const MAX_COST_TO_RISK = 0.20;
 const MIN_STOP_DISTANCE_PCT = 0.007;
+const FIXED_SYMBOLS = ["BTC-USDT","ETH-USDT","SOL-USDT","ZEC-USDT","NEAR-USDT","ZRO-USDT","XRP-USDT","1000PEPE-USDT","HYPE-USDT","DYDX-USDT","BOME-USDT","LDO-USDT","STX-USDT","IMX-USDT","CRV-USDT","AAVE-USDT","ETHFI-USDT","LINK-USDT","BANANA-USDT","AVAX-USDT"];
 const SETUPS = {
   scalp: ["S01_SWEEP_MSS_FVG","S02_BREAKER_RETEST","S03_BOS_DISPLACEMENT","S04_RANGE_DEVIATION","S05_FAILED_BREAKOUT","S06_OB_REACTION"],
   swing: ["W01_HTF_OB_REVERSAL","W02_SUPPLY_DEMAND_REVERSAL","W03_SWEEP_CHOCH","W04_BREAKER_RETEST","W05_RANGE_DEVIATION","W06_CRT","W07_OTE","W08_BOS_CONTINUATION"]
@@ -280,9 +281,8 @@ function lossDiagnostics(trades) {
 const endTime=Date.now();
 const startTime=endTime-WINDOW_DAYS*DAY;
 const provider=new BingXPublicKlineProvider({minRequestIntervalMs:1050});
-const universe=await selectTopSymbols();
-if(universe.length!==TARGET_SYMBOLS)throw new Error("INCOMPLETE_SYMBOL_UNIVERSE");
-const selectedPairs=universe;
+const selectedPairs=FIXED_SYMBOLS.map(symbol=>({symbol,quoteVolume:null,spreadPct:null}));
+if(selectedPairs.length!==TARGET_SYMBOLS)throw new Error("INCOMPLETE_FIXED_SYMBOL_UNIVERSE");
 const datasets=new Map(),dataFailures=[];
 for(let i=0;i<selectedPairs.length;i++) {
   const pair=selectedPairs[i];
@@ -388,14 +388,14 @@ const output={
   metadata:{
     generatedAt:new Date().toISOString(),exchange:"BingX USDT-M perpetual public market data",
     filterVariants:FILTER_VARIANTS,filterExecution:"Each filter variant is evaluated at signal qualification and maintains independent seen-candidate, cooldown, and position state. Market candles/funding are fetched once and shared across variants.",
-    requestedPairs:TARGET_SYMBOLS,completedPairs:datasets.size,windowDays:WINDOW_DAYS,segmentDays:SEGMENT_DAYS,segments:segmentReports.length,universeSelection:"Top 20 eligible crypto USDT-M perpetuals by current 24h quote volume, with BTC-USDT included; present-day selection bias applies",
+    requestedPairs:TARGET_SYMBOLS,completedPairs:datasets.size,windowDays:WINDOW_DAYS,segmentDays:SEGMENT_DAYS,segments:segmentReports.length,universeSelection:"Fixed 20-symbol sample copied exactly from the preceding baseline run; no current-volume reselection, enabling direct filter comparison.",
     engineCoverage:{scalp:{setups:SETUPS.scalp,entryTimeframes:["5m"],contextTimeframes:["1h","15m"]},swing:{setups:SETUPS.swing,entryTimeframes:["15m","1h"],contextTimeframes:["1d","4h","1h"]}},
     testedDirections:DIRECTIONS,
     costs:{feeRatePerSide:FEE_RATE,slippageRatePerSide:SLIPPAGE_RATE,maxCostToRisk:MAX_COST_TO_RISK,minStopDistancePct:MIN_STOP_DISTANCE_PCT,funding:"historical BingX settlement records only"},
     riskUnitFraction:RISK_CONFIG.riskUnitFraction,
     candidatePolicy:"Only candidates with QUALIFIED state, score >= 70, valid stop and minimum RR are eligible; entry confirmation required.",
     simulation:"Each setup+direction+entry timeframe is simulated as an independent stream. This isolates model edge; these streams are NOT a combined portfolio and overlapping trades across models/pairs are not netted.",
-    walkForward:"Chronological, non-overlapping 30-day segments. Each segment is reported separately; no filters are learned from the same segment and no future segment data is used to alter earlier trades.",
+    walkForward:"Chronological, non-overlapping 15-day segments inside the same 30-day window. Each filter keeps independent state; no filters are learned from the same segment and no future segment data is used to alter earlier trades.",
     limitations:[
       "No historical order-book depth or time-varying spread; actual spread and market impact are unavailable from the OHLCV source.",
       "No historical leverage tiers or liquidation simulation; isolated margin/liquidation risk is not inferred.",
