@@ -255,6 +255,25 @@ test("activated live runner uses current READY scanner setup only when mark is i
   assert.match(submitted.options.idempotencyKey,/^smc-[a-f0-9]{32}$/);
 });
 
+test("activated live runner accepts Scalp 5m setups independently of Swing 1h", async () => {
+  let submitted = null;
+  const env={LIVE_TRADING_ENABLED:"true",BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",
+    BINGX_API_KEY:"demo",BINGX_API_SECRET:"demo-secret",LIVE_CONTROL_TOKEN:"control"};
+  const setup=readyScannerSetup({
+    model:"S01_SWEEP_MSS_FVG", tradeStyle:"SCALP", setupTimeframe:"5m", entryTimeframe:"5m",
+    setupCandleTime:950000, candleTime:950000
+  });
+  const result=await runLiveSetupQueue({
+    env,setups:[setup],client:{getMarkPrice:async()=>100},
+    store:{getActivation:async()=>({active:true,id:"activation-scalp-123",confirmedByUser:true})},
+    adapter:{submit:async(candidate,options)=>{submitted={candidate,options};return {ok:true};}},
+    clock:()=>1000000
+  });
+  assert.equal(result.results[0].action,"LIVE_ENTRY_OPENED");
+  assert.equal(submitted.candidate.engine,"scalp");
+  assert.equal(submitted.candidate.setupTimeframe,"5m");
+});
+
 test("activated live runner leaves out-of-zone setups waiting", async () => {
   let submitted=0;
   const env={LIVE_TRADING_ENABLED:"true",BINGX_LIVE_API_KEY:"live",BINGX_LIVE_API_SECRET:"live-secret",
