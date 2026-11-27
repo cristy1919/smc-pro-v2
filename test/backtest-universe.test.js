@@ -25,6 +25,6 @@ test("selects exactly BTC plus the highest-volume 19 crypto alts and rejects an 
   assert.equal(selected.length,20);
   assert.equal(selected[0].symbol,"BTC-USDT");
   assert.equal(selected.some(x=>x.symbol==="NCCOGOLD2USD-USDT"),false);
-  assert.equal(new Set(selected.map(x=>x.symbol)).size,50);
+  assert.equal(new Set(selected.map(x=>x.symbol)).size,20);
   assert.throws(()=>selectCryptoPerpetualUniverse(contracts.slice(0,10),tickers.slice(0,10),20),/INSUFFICIENT_CRYPTO_PERPETUALS/);
 });
