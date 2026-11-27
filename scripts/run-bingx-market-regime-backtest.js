@@ -185,8 +185,8 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
     let candidates;
     try{candidates=evaluate({symbol,timeframes:sliced,entryTimeframe,historicalBacktest:true,volumeData:{relativeVolume}});}
     catch {for(const state of states.values())state.skipped++;continue;}
-    const pairRegime=regimeAtTimestamp(pairRegimeTimeline,signal.timestamp);
-    const btcRegime=regimeAtTimestamp(btcDailyRegimeTimeline,signal.timestamp);
+    const pairRegime=regimeAtTimestamp(pairRegimeTimeline,signal.timestamp,{candleDurationMs:INTERVAL_MS["1h"]});
+    const btcRegime=regimeAtTimestamp(btcDailyRegimeTimeline,signal.timestamp,{candleDurationMs:INTERVAL_MS["1d"]});
     const signalRegime=pairRegime?.regime ?? "UNAVAILABLE";
     const btcDailyRegime=btcRegime?.regime ?? "UNAVAILABLE";
     for(const candidate of candidates) {
