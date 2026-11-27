@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { getLiveReadiness, getLiveManagementReadiness, validateLiveCandidate, BingXLiveExecutionAdapter } from "../src/live-execution.js";
 
 const baseCandidate = (overrides = {}) => ({
-  id: "swing-setup-001", engine: "swing", setupTimeframe: "4h", symbol: "BTC-USDT", direction: "BULLISH",
+  id: "swing-setup-001", engine: "swing", setupTimeframe: "1h", symbol: "BTC-USDT", direction: "BULLISH",
   status: "QUALIFIED", entryEligible: true, entryConfirmation: { status: "CONFIRMED" },
   stopLoss: 99000, takeProfit: 103500, marginMode: "ISOLATED", leverage: 20, ...overrides
 });
@@ -31,7 +31,7 @@ test("live credentials must be independently provisioned", () => {
 });
 
 
-test("Scalp live readiness accepts only 5m/15m setups under the same risk controls", () => {
+test("Scalp live readiness accepts only 5m setups under the same risk controls", () => {
   const candidate = baseCandidate({ engine: "scalp", setupTimeframe: "5m", entryTimeframe: "5m" });
   const result = validateLiveCandidate(candidate, {
     equity: 10000, availableMargin: 5000, openPositions: [], contract,
