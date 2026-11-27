@@ -3497,6 +3497,32 @@ var EngineState = class {
     try { return await work(); } finally { release(); }
   }
   async readStorage(key) {
+    // The large engine-state record is read by several status paths. Cache it
+    // briefly per isolate and coalesce concurrent reads; every write invalidates it.
+    const cacheable = key === "engine-state" || key === "paper-state:engine-state";
+    if (!cacheable) return this.readStorageUncached(key);
+    this.storageReadCache ??= new Map();
+    this.storageReadInflight ??= new Map();
+    const cached = this.storageReadCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      this.usageCounters.storageCacheHits = (this.usageCounters.storageCacheHits ?? 0) + 1;
+      return cached.value;
+    }
+    const pending = this.storageReadInflight.get(key);
+    if (pending) {
+      this.usageCounters.storageReadCoalesced = (this.usageCounters.storageReadCoalesced ?? 0) + 1;
+      return pending;
+    }
+    const read = this.readStorageUncached(key).then((value) => {
+      this.storageReadCache.set(key, { value, expiresAt: Date.now() + 2000 });
+      return value;
+    }).finally(() => {
+      if (this.storageReadInflight.get(key) === read) this.storageReadInflight.delete(key);
+    });
+    this.storageReadInflight.set(key, read);
+    return read;
+  }
+  async readStorageUncached(key) {
     this.usageCounters.reads++;
     let value;
     const chunkable = key === "engine-state" || key === "paper-state:engine-state";
@@ -3525,6 +3551,7 @@ var EngineState = class {
   async writeStorage(key, value) {
     const encoded = JSON.stringify(value) ?? "__UNDEFINED__";
     if (this.lastStorageValues.get(key) === encoded) { this.usageCounters.deduplicatedWrites++; return; }
+    if (key === "engine-state" || key === "paper-state:engine-state") this.storageReadCache?.delete(key);
     this.usageCounters.writes++;
     const chunkable = key === "engine-state" || key === "paper-state:engine-state";
     if (chunkable) {
