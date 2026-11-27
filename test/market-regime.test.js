@@ -40,7 +40,7 @@ test("regimeAtTimestamp returns the latest already-known closed-candle state", (
   const result = detectMarketRegimeTimeline(candlesFromCloses(Array.from({ length: 80 }, (_, i) => 50 + Math.sin(i) * 2)));
   const row = regimeAtTimestamp(result, result.timeline[30].timestamp + 60000, { candleDurationMs: 60000 });
   assert.equal(row.timestamp, result.timeline[30].timestamp);
-  assert.equal(regimeAtTimestamp(result, result.timeline[30].timestamp + 1, { candleDurationMs: 60000 }), null);
+  assert.equal(regimeAtTimestamp(result, result.timeline[30].timestamp + 1, { candleDurationMs: 60000 }).timestamp, result.timeline[29].timestamp);
   assert.equal(regimeAtTimestamp(result, 0), null);
 });
 
