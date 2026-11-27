@@ -3,6 +3,7 @@ import { detectFairValueGaps, detectLiquidityPools, detectLiquiditySweeps } from
 import { detectOrderBlocks, detectBreakers, detectSupplyDemand, detectRollingRanges, detectRangeDeviations, detectOTE, detectCRT, detectMitigations } from "./advanced-zones.js";
 import { validateCandles } from "./market-data.js";
 import { scoreSetup } from "./scoring.js";
+import { evaluateScalp as evaluateRecoveredScalp } from "./scalp-evaluator.js";
 import { MIN_QUOTE_VOLUME_24H_USDT, MIN_RELATIVE_VOLUME, MAX_SPREAD_PCT, RISK_CONFIG } from "./config.js";
 
 const SETUP_IDS = { ob:"W01_HTF_OB_REVERSAL", supply:"W02_SUPPLY_DEMAND_REVERSAL", sweep:"W03_SWEEP_CHOCH", breaker:"W04_BREAKER_RETEST", range:"W05_RANGE_DEVIATION", crt:"W06_CRT", ote:"W07_OTE", bos:"W08_BOS_CONTINUATION" };
@@ -75,8 +76,8 @@ function makeCandidate({symbol,direction,setupId,candles,timeframe,daily,fourHou
  const state=Object.values(hardFilters).every(Boolean)&&scored.score>=70?"QUALIFIED":"WATCH";
  return {id:["swing",symbol,setupId,timeframe,last.timestamp].join(":"),engine:"swing",symbol,direction,setupId,state,timeframe,setupTimeframe:timeframe,entryTimeframe:timeframe,entry,stop,target,stopLoss:stop,takeProfit:target,zoneBounds:zone?{low:zone.low,high:zone.high,type:zone.type}:null,rewardRisk:Number(rr.toFixed(2)),score:scored.score,band:scored.band,confidence:"INSUFFICIENT_DATA",factors,factorCoveragePct:scored.factorCoveragePct,hardFilters,entryConfirmation:{status:"PENDING",maxWaitBars:3,method:zone?"ZONE_RETEST_CLOSE":"CLOSED_CANDLE_CONFIRMATION"},evidence:[setupId,...evidence,"BTC_WEEKLY_"+btc.weekly,"BTC_DAILY_"+btc.daily,"BTC_DOM_"+dominance.btc,"ALT_DOM_"+dominance.altcoin,"USDT_DOM_"+dominance.usdt,...(countertrend?["COUNTERTREND_EXTRA_CONFIRMATION"]:[])],createdAt:last.timestamp,dataStatus:{btcWeekly:btc.weekly==="NEUTRAL"?"UNAVAILABLE":"AVAILABLE",btcDaily:btc.daily==="NEUTRAL"?"UNAVAILABLE":"AVAILABLE",dominance:[dominance.btc,dominance.altcoin,dominance.usdt].every(x=>x!=="NEUTRAL")?"AVAILABLE":"UNAVAILABLE",relativeVolume:"AVAILABLE",quoteVolume24h:"AVAILABLE"},marketRegime:f.ranges.at(-1)?.regime??"UNCLASSIFIED",countertrend};
 }
-export const SCALP_ENGINE_AVAILABLE = false;
-export function evaluateScalp() { throw new Error("SCALP_ENGINE_REMOVED"); }
+export const SCALP_ENGINE_AVAILABLE = true;
+export function evaluateScalp(input) { return evaluateRecoveredScalp(input); }
 export function evaluateSwing(input) {
  if(!input||typeof input.symbol!=="string"||!input.symbol.trim())throw new TypeError("symbol is required");
  const setupTimeframe=input.setupTimeframe??"4h";
