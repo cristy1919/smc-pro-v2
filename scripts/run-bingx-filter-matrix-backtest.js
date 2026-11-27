@@ -63,15 +63,15 @@ function modelKey(engine,timeframe,setupId,direction) {
 }
 const FILTER_VARIANTS = [
   {id:"F0_BASELINE",label:"Baseline",minRelativeVolume:null,minScore:70,maxCostR:0.20,regimeAwareContinuation:false},
-  {id:"F1_RVOL50",label:"Relative volume >= 50",minRelativeVolume:50,minScore:70,maxCostR:0.20,regimeAwareContinuation:false},
-  {id:"F2_RVOL60",label:"Relative volume >= 60",minRelativeVolume:60,minScore:70,maxCostR:0.20,regimeAwareContinuation:false},
-  {id:"F3_RVOL70",label:"Relative volume >= 70",minRelativeVolume:70,minScore:70,maxCostR:0.20,regimeAwareContinuation:false},
+  {id:"F1_RVOL150",label:"Relative volume >= 1.5x (50% above baseline)",minRelativeVolume:1.5,minScore:70,maxCostR:0.20,regimeAwareContinuation:false},
+  {id:"F2_RVOL160",label:"Relative volume >= 1.6x (60% above baseline)",minRelativeVolume:1.6,minScore:70,maxCostR:0.20,regimeAwareContinuation:false},
+  {id:"F3_RVOL170",label:"Relative volume >= 1.7x (70% above baseline)",minRelativeVolume:1.7,minScore:70,maxCostR:0.20,regimeAwareContinuation:false},
   {id:"F4_SCORE80",label:"Score >= 80",minRelativeVolume:null,minScore:80,maxCostR:0.20,regimeAwareContinuation:false},
   {id:"F5_COST10",label:"Projected cost / risk <= 0.10R",minRelativeVolume:null,minScore:70,maxCostR:0.10,regimeAwareContinuation:false},
-  {id:"F6_RVOL60_SCORE75",label:"Relative volume >= 60 and score >= 75",minRelativeVolume:60,minScore:75,maxCostR:0.20,regimeAwareContinuation:false},
+  {id:"F6_RVOL160_SCORE75",label:"Relative volume >= 1.6x and score >= 75",minRelativeVolume:1.6,minScore:75,maxCostR:0.20,regimeAwareContinuation:false},
   {id:"F7_REGIME_CONTINUATION",label:"Trend alignment for continuation setups only",minRelativeVolume:null,minScore:70,maxCostR:0.20,regimeAwareContinuation:true},
-  {id:"F8_RVOL60_SCORE75_COST15",label:"RVOL >= 60, score >= 75, cost <= 0.15R",minRelativeVolume:60,minScore:75,maxCostR:0.15,regimeAwareContinuation:false},
-  {id:"F9_RVOL60_SCORE80_COST10",label:"RVOL >= 60, score >= 80, cost <= 0.10R",minRelativeVolume:60,minScore:80,maxCostR:0.10,regimeAwareContinuation:false}
+  {id:"F8_RVOL160_SCORE75_COST15",label:"RVOL >= 1.6x, score >= 75, cost <= 0.15R",minRelativeVolume:1.6,minScore:75,maxCostR:0.15,regimeAwareContinuation:false},
+  {id:"F9_RVOL160_SCORE80_COST10",label:"RVOL >= 1.6x, score >= 80, cost <= 0.10R",minRelativeVolume:1.6,minScore:80,maxCostR:0.10,regimeAwareContinuation:false}
 ];
 const CONTINUATION_SETUPS = new Set(["S03_BOS_DISPLACEMENT","W08_BOS_CONTINUATION"]);
 function passesSignalFilter(candidate,variant,relativeVolume,regime) {
@@ -391,6 +391,7 @@ const output={
   metadata:{
     generatedAt:new Date().toISOString(),exchange:"BingX USDT-M perpetual public market data",
     filterVariants:FILTER_VARIANTS,filterExecution:"Each filter variant is evaluated at signal qualification and maintains independent seen-candidate, cooldown, and position state. Market candles/funding are fetched once and shared across variants.",
+    relativeVolumeUnits:"calculateRelativeVolume returns a ratio: 1.0 = average volume; 1.5 = 50% above average. Filter thresholds are expressed in ratio units.",
     requestedPairs:TARGET_SYMBOLS,completedPairs:datasets.size,windowDays:WINDOW_DAYS,segmentDays:SEGMENT_DAYS,segments:segmentReports.length,universeSelection:"Fixed 20-symbol sample copied exactly from the preceding baseline run; no current-volume reselection, enabling direct filter comparison.",
     engineCoverage:{scalp:{setups:SETUPS.scalp,entryTimeframes:["5m"],contextTimeframes:["1h","15m"]},swing:{setups:SETUPS.swing,entryTimeframes:["15m","1h"],contextTimeframes:["1d","4h","1h"]}},
     testedDirections:DIRECTIONS,
