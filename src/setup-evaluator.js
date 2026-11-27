@@ -70,10 +70,11 @@ function makeCandidate({symbol,direction,setupId,candles,timeframe,daily,fourHou
  const zoneScore=zone?100:45,entryScore=candleDir(last)===direction?candleQuality(last):20;
  const volumeScore=Math.max(0,Math.min(100,50+(input.volumeData.relativeVolume-1)*35));
  const liquidityScore=evidence.some(x=>/SWEEP|RANGE|CRT/.test(x))?100:35;
- const factors={btcContext:btc.score,dominance:dominance.score,liquidity:liquidityScore,structure:structureScore,zone:zoneScore,entry:entryScore,volume:volumeScore};
+ const htfScore=dailyEvent?.direction===direction?100:dailyEvent?.direction?20:50;
+ const factors={htf:htfScore,liquidity:liquidityScore,structure:structureScore,zone:zoneScore,entry:entryScore,volume:volumeScore};
  const hardFilters={validStop:true,rrAtLeastOne:rr>=RISK_CONFIG.minRewardRisk,rrAtMostFour:rr<=RISK_CONFIG.maxRewardRisk,liquid:marketIsLiquid(input),candlesValid:last.closed===true,directionConsistent:direction!=="NEUTRAL"};
  const scored=scoreSetup("swing",factors,hardFilters);
- const state=Object.values(hardFilters).every(Boolean)&&scored.score>=70?"QUALIFIED":"WATCH";
+ const state=scored.band==="REJECTED"?"REJECTED":scored.score>=70?"QUALIFIED":"WATCH";
  return {id:["swing",symbol,setupId,timeframe,last.timestamp].join(":"),engine:"swing",symbol,direction,setupId,state,timeframe,setupTimeframe:timeframe,entryTimeframe:timeframe,entry,stop,target,stopLoss:stop,takeProfit:target,zoneBounds:zone?{low:zone.low,high:zone.high,type:zone.type}:null,rewardRisk:Number(rr.toFixed(2)),score:scored.score,band:scored.band,confidence:"INSUFFICIENT_DATA",factors,factorCoveragePct:scored.factorCoveragePct,hardFilters,entryConfirmation:{status:"PENDING",maxWaitBars:3,method:zone?"ZONE_RETEST_CLOSE":"CLOSED_CANDLE_CONFIRMATION"},evidence:[setupId,...evidence,"BTC_WEEKLY_"+btc.weekly,"BTC_DAILY_"+btc.daily,"BTC_DOM_"+dominance.btc,"ALT_DOM_"+dominance.altcoin,"USDT_DOM_"+dominance.usdt,...(countertrend?["COUNTERTREND_EXTRA_CONFIRMATION"]:[])],createdAt:last.timestamp,dataStatus:{btcWeekly:btc.weekly==="NEUTRAL"?"UNAVAILABLE":"AVAILABLE",btcDaily:btc.daily==="NEUTRAL"?"UNAVAILABLE":"AVAILABLE",dominance:[dominance.btc,dominance.altcoin,dominance.usdt].every(x=>x!=="NEUTRAL")?"AVAILABLE":"UNAVAILABLE",relativeVolume:"AVAILABLE",quoteVolume24h:"AVAILABLE"},marketRegime:f.ranges.at(-1)?.regime??"UNCLASSIFIED",countertrend};
 }
 export const SCALP_ENGINE_AVAILABLE = true;
