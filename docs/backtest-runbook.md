@@ -2,14 +2,9 @@
 
 The manual GitHub Actions workflow `BingX all-strategy matrix 50-pair 90-day backtest` runs both independent engines (Scalp and Swing) over 30/60/90-day segments. Do not run it for every code edit; run once after local validation to conserve Actions quota.
 
-## Required repository secrets
+## Credentials
 
-Add these under GitHub repository Settings → Secrets and variables → Actions:
-
-- `BINGX_API_KEY`
-- `BINGX_SECRET_KEY`
-
-Use a dedicated BingX Demo/VST API key with read-only account permission. Do not paste credentials into chat, commits, workflow inputs or logs. The workflow fails before data retrieval if either secret is missing.
+The matrix uses public BingX market-data and historical funding endpoints. It does not require BingX API credentials or read VST account data.
 
 ## Run
 
@@ -25,7 +20,7 @@ The script runs the independent Scalp (S01–S06) and Swing (W01–W08) evaluato
 - Swing timeframes: 1D directional bias / 4H structure and zones / 1H confirmation / 15M or 1H entry.
 - 1M and 3M are rejected.
 - Forming candles are excluded.
-- 1H history uses the same 30-day warmup window across engines; lower Scalp frames use 2-day warmup; Swing 1D/4H also use 30-day warmup.
+- Warmup is fetched per timeframe: 1D/4H/1H use 45 days; 15M uses 14 days for Scalp and 7 days for Swing; 5M uses 3 days. Shared 1H/15M candles are fetched once per symbol.
 - Relative volume is calculated causally from each closed entry-timeframe candle versus the preceding 20 closed candles.
 - Historical quote-volume and bid/ask spread snapshots are not available in this dataset; they remain `UNAVAILABLE`, are not estimated, and are not applied as historical entry filters. Current quote-volume/spread are used only to select the present-day 50-pair research universe. This introduces universe-selection bias and must be disclosed in the report.
 - Fees default to 0.05% per side and slippage to 0.02% per side; both are assumptions unless replaced with verified account-specific rates.
