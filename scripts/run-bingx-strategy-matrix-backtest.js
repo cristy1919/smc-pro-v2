@@ -3,6 +3,7 @@ import { BingXPublicKlineProvider, fetchEngineDataset, INTERVAL_MS } from "../sr
 import { SCALP_ENGINE_AVAILABLE, evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
 import { advanceEntryConfirmation } from "../src/entry-confirmation.js";
 import { RISK_CONFIG } from "../src/config.js";
+import { calculateRelativeVolume } from "../src/market-data.js";
 import { selectCryptoPerpetualUniverse } from "../src/backtest-universe.js";
 import { calculateExcursionsR } from "../src/excursions.js";
 
@@ -133,13 +134,6 @@ function regimeAt(timeframes, timestamp) {
   if(Math.abs(change)<0.006)return vol>0.012?"RANGE_HIGH_VOL":"RANGE_LOW_VOL";
   return change>0?(vol>0.012?"UPTREND_HIGH_VOL":"UPTREND_LOW_VOL"):(vol>0.012?"DOWNTREND_HIGH_VOL":"DOWNTREND_LOW_VOL");
 }
-export function calculateHistoricalRelativeVolume(rows,index,lookback=20) {
-  if(index<lookback)return null;
-  const baseline=rows.slice(index-lookback,index).map(x=>x.volume).filter(Number.isFinite);
-  if(baseline.length!==lookback)return null;
-  const average=baseline.reduce((sum,x)=>sum+x,0)/baseline.length;
-  return average>0&&Number.isFinite(rows[index]?.volume)?rows[index].volume/average:null;
-}
 function candleSlice(timeframes,endTime) {
   return Object.fromEntries(Object.entries(timeframes).map(([tf,rows])=>[
     tf,rows.filter(c=>c.timestamp+INTERVAL_MS[tf]<=endTime)
@@ -167,7 +161,7 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
     for(const [tf,rows] of Object.entries(timeframes))sliced[tf]=rows.slice(Math.max(0,pointers[tf]-399),pointers[tf]+1);
     if(Object.values(sliced).some(rows=>rows.length<25)){skipped++;continue;}
     let candidates;
-    try{candidates=evaluate({symbol,timeframes:sliced,entryTimeframe,historicalBacktest:true,volumeData:{relativeVolume:calculateHistoricalRelativeVolume(entryRows,i)}});}
+    try{candidates=evaluate({symbol,timeframes:sliced,entryTimeframe,historicalBacktest:true,volumeData:{relativeVolume:calculateRelativeVolume(entryRows,i)}});}
     catch {skipped++;continue;}
     for(const candidate of candidates) {
       const key=modelKey(engine,entryTimeframe,candidate.setupId,candidate.direction);
