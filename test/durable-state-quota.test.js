@@ -134,3 +134,27 @@ test("deployed Worker source keeps the seven-pair subrequest guard", async () =>
   assert.match(source, /var PAPER_SCAN_BATCH_NORMAL = 7;/);
   assert.match(source, /return trackSqlCursor\(result, this\.usageCounters, isRead\);/);
 });
+
+
+test("fallback Paper ledger reads use a write-through cache and coalesce concurrent reads", async () => {
+  const source = await readFile(
+    new URL("../cloudflare/worker/deployed/index.js", import.meta.url),
+    "utf8",
+  );
+  const readStateAt = source.indexOf("async readEngineState()");
+  assert.notEqual(readStateAt, -1);
+  const fallbackAt = source.indexOf("if (this.kvWriteFallbackActive) {", readStateAt);
+  const fallbackEnd = source.indexOf("\n    }", fallbackAt);
+  assert.notEqual(fallbackAt, -1);
+  const fallback = source.slice(fallbackAt, fallbackEnd);
+
+  assert.match(fallback, /this\.paperReadCache\.get\("engine-state"\)/);
+  assert.match(fallback, /this\.engineStateReadInFlight/);
+  assert.match(fallback, /expiresAt: Date\.now\(\) \+ 6e4/);
+  assert.doesNotMatch(fallback, /const durable = await this\.readStorage\("engine-state"\)/);
+
+  const saveStateAt = source.indexOf("async saveEngineState(engine)");
+  const saveState = source.slice(saveStateAt, saveStateAt + 700);
+  assert.match(saveState, /writePaperState\("engine-state", serialized\)/);
+  assert.match(source, /key === "engine-state" \? 6e4 : 1500/);
+});
