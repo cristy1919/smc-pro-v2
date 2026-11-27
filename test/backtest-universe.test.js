@@ -18,13 +18,13 @@ test("accepts genuine crypto perpetual contracts and excludes TradFi and gold re
   assert.equal(isCryptoPerpetualContract({...contract("SOL-USDT"), status: 0}), false);
 });
 
-test("selects BTC plus the highest-volume 49 crypto alts and rejects an incomplete universe", () => {
+test("selects exactly BTC plus the highest-volume 19 crypto alts and rejects an incomplete universe", () => {
   const contracts = [contract("BTC-USDT"), ...Array.from({length:55},(_,i)=>contract("ALT"+i+"-USDT")), contract("NCCOGOLD2USD-USDT")];
   const tickers = contracts.map((c,i)=>ticker(c.symbol, i+1));
-  const selected = selectCryptoPerpetualUniverse(contracts,tickers,50);
-  assert.equal(selected.length,50);
+  const selected = selectCryptoPerpetualUniverse(contracts,tickers,20);
+  assert.equal(selected.length,20);
   assert.equal(selected[0].symbol,"BTC-USDT");
   assert.equal(selected.some(x=>x.symbol==="NCCOGOLD2USD-USDT"),false);
   assert.equal(new Set(selected.map(x=>x.symbol)).size,50);
-  assert.throws(()=>selectCryptoPerpetualUniverse(contracts.slice(0,10),tickers.slice(0,10),50),/INSUFFICIENT_CRYPTO_PERPETUALS/);
+  assert.throws(()=>selectCryptoPerpetualUniverse(contracts.slice(0,10),tickers.slice(0,10),20),/INSUFFICIENT_CRYPTO_PERPETUALS/);
 });
