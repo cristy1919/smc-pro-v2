@@ -36,7 +36,7 @@ if (!Number.isInteger(TARGET_SYMBOLS) || TARGET_SYMBOLS < 1 || TARGET_SYMBOLS > 
 if (![30,60,90].includes(WINDOW_DAYS) || WINDOW_DAYS % SEGMENT_DAYS !== 0) throw new Error("WINDOW_DAYS must be 30, 60 or 90");
 if (!Number.isFinite(FEE_RATE) || FEE_RATE < 0 || !Number.isFinite(SLIPPAGE_RATE) || SLIPPAGE_RATE < 0) throw new Error("INVALID_COST_ASSUMPTIONS");
 
-// Fail before any BingX market-data requests: the repository Scalp evaluator is intentionally removed.
+// Fail before any BingX market-data requests if the independent Scalp evaluator is not wired.
 // A matrix report that silently skips every Scalp signal would be misleading.
 if (!SCALP_ENGINE_AVAILABLE) {
   throw new Error("BACKTEST_BLOCKED_SCALP_EVALUATOR_UNAVAILABLE: restore and test the independent Scalp evaluator before running the combined matrix");
