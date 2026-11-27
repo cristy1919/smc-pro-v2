@@ -18,8 +18,8 @@ const normalizeCandidate = c => ({
   setupTimeframe: c.setupTimeframe ?? c.timeframe ?? null, entryTimeframe: c.entryTimeframe ?? null,
   structure: c.structure ?? c.structureType ?? null, createdAt: c.createdAt ?? null
 });
-const isWaiting = c => ["WAIT", "PENDING", "ENTRY_PENDING"].includes(String(c.status ?? "").toUpperCase());
-const isCandidate = c => ["READY", "QUALIFIED", "HIGH_QUALITY"].includes(String(c.status ?? "").toUpperCase());
+const isWaiting = c => ["WAIT", "PENDING", "ENTRY_PENDING"].includes(String(c.status ?? c.state ?? "").toUpperCase());
+const isCandidate = c => ["READY", "QUALIFIED", "HIGH_QUALITY"].includes(String(c.status ?? c.state ?? "").toUpperCase());
 const uniqueById = rows => [...new Map(rows.map((item, index) => [item.id ?? `${item.symbol ?? "setup"}:${item.setupId ?? item.model ?? index}`, item])).values()];
 
 export function buildDashboardSnapshot({
