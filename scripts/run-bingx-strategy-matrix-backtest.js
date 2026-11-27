@@ -107,7 +107,7 @@ function buildBreakdowns(trades) {
     byStructure:groupBy(trades,t=>evidenceTag(t,"STRUCTURE_")),
     byZone:groupBy(trades,t=>t.zoneBounds?.type||"NO_ZONE"),
     byTechnicalCombination:groupBy(trades,t=>(t.evidence||[]).join("+")||"NO_EVIDENCE"),
-    byScoreBand:groupBy(trades,t=>t.score>=90?"90-100":t.score>=85?"85-89":"80-84"),
+    byScoreBand:groupBy(trades,t=>t.score>=84?"84-100":t.score>=70?"70-83":t.score>=65?"65-69":t.score>=60?"60-64":"0-59"),
     byPair:groupBy(trades,t=>t.symbol),
     byRegime:groupBy(trades,t=>t.regime||"UNAVAILABLE")
   };
@@ -169,7 +169,7 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
       if(!candidate.hardFilters?.validStop || !candidate.hardFilters?.minimumRR || candidate.direction==="NEUTRAL") {
         counter.hardFilterRejected++;continue;
       }
-      if(candidate.state!=="QUALIFIED" || candidate.score<80) {counter.belowScore++;continue;}
+      if(candidate.state!=="QUALIFIED" || candidate.score<70) {counter.belowScore++;continue;}
       counter.qualifiedSignals++;
       if(signal.timestamp <= (lastExitByModel.get(key)??-Infinity))continue;
       let seen=seenByModel.get(key);
@@ -357,7 +357,7 @@ const output={
     testedDirections:DIRECTIONS,
     costs:{feeRatePerSide:FEE_RATE,slippageRatePerSide:SLIPPAGE_RATE,maxCostToRisk:MAX_COST_TO_RISK,minStopDistancePct:MIN_STOP_DISTANCE_PCT,funding:"historical BingX settlement records only"},
     riskUnitFraction:RISK_CONFIG.riskUnitFraction,
-    candidatePolicy:"Only candidates with QUALIFIED state, score >= 80, valid stop and minimum RR are eligible; entry confirmation required.",
+    candidatePolicy:"Only candidates with QUALIFIED state, score >= 70, valid stop and minimum RR are eligible; entry confirmation required.",
     simulation:"Each setup+direction+entry timeframe is simulated as an independent stream. This isolates model edge; these streams are NOT a combined portfolio and overlapping trades across models/pairs are not netted.",
     walkForward:"Chronological, non-overlapping 30-day segments. Each segment is reported separately; no filters are learned from the same segment and no future segment data is used to alter earlier trades.",
     limitations:[
