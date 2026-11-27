@@ -9,8 +9,8 @@ import { calculateExcursionsR } from "../src/excursions.js";
 
 const BASE_URL = "https://open-api.bingx.com";
 const DAY = 86400000;
-const TARGET_SYMBOLS = Number(process.env.TARGET_SYMBOLS ?? 20);
-const WINDOW_DAYS = Number(process.env.WINDOW_DAYS ?? 30);
+const TARGET_SYMBOLS = 20;
+const WINDOW_DAYS = 30;
 const SEGMENT_DAYS = 30;
 const FEE_RATE = Number(process.env.FEE_RATE ?? 0.0005);
 const SLIPPAGE_RATE = Number(process.env.SLIPPAGE_RATE ?? 0.0002);
