@@ -43,6 +43,12 @@ Use a separate live-only key pair:
 
 The live adapter is locked to `https://open-api.bingx.com`. The deployed code has live account/position/order checks, durable idempotency, entry-slot reservations, position reconciliation and explicit activation controls.
 
+After the VST stage has passed, the controlled Live transition must:
+- Add the separate `BINGX_LIVE_API_KEY` / `BINGX_LIVE_API_SECRET` pair and `LIVE_CONTROL_TOKEN` as Worker secrets.
+- Keep the existing Internal Paper ledger and scanner data path available with `BINGX_TRADING_MODE=paper`, but set `PAPER_TRADING_ONLY=false` so no internal paper orders are created.
+- Keep `DEMO_TRADING_ENABLED=false` and set `LIVE_TRADING_ENABLED=true` only after the readiness review.
+- Run the separate Live activation flow with fresh explicit confirmation.
+
 Adding live secrets alone must not submit orders. Live entry remains blocked unless all of these are true:
 
 1. `LIVE_TRADING_ENABLED=true` is deliberately set after the VST stage is accepted.
