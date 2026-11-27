@@ -4,7 +4,7 @@ export const ENGINE_CONFIG = Object.freeze({
 });
 export const RISK_CONFIG = Object.freeze({ riskUnitFraction: 0.02, reducedRiskFractionOfR: 0.5, maxOpenPositions: 10, minRewardRisk: 1, maxRewardRisk: 4, normalTargetR: 3.5, highTargetRequiresExtraConfirmation: true, minLeverage: 20, maxLeverage: 50 });
 export const DASHBOARD_TABS = Object.freeze(["Market Overview", "Açık İşlemler", "Scalp Scanner", "Swing Scanner", "Positions", "Statistics", "Candidates (İşlem Adayları)", "Trade History", "Diagnostics", "Grafik"]);
-export const SETUP_SCORE_MINIMUM = 60;
+export const SETUP_SCORE_MINIMUM = 70;
 export const MIN_QUOTE_VOLUME_24H_USDT = 5000000;
 export const MIN_RELATIVE_VOLUME = 0.8;
 export const MAX_SPREAD_PCT = 0.15;
