@@ -1,5 +1,5 @@
 export const SCORE_WEIGHTS = Object.freeze({ swing: { btcContext: 20, dominance: 10, liquidity: 15, structure: 20, zone: 15, entry: 10, volume: 10 } });
-const REQUIRED_FILTERS = ["validStop", "rrAtLeastOne", "liquid", "candlesValid", "directionConsistent"];
+const REQUIRED_FILTERS = ["validStop", "rrAtLeastOne", "rrAtMostFour", "liquid", "candlesValid", "directionConsistent"];
 export function scoreSetup(engine, factors, hardFilters = {}) {
   const w = SCORE_WEIGHTS[engine];
   if (!w) throw new Error(engine === "scalp" ? "SCALP_ENGINE_REMOVED" : "Unknown engine");
