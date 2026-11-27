@@ -84,6 +84,7 @@ export function validateLiveCandidate(candidate, {
   const rr = finitePositive(stop) && finitePositive(target) && finitePositive(entry)
     ? Math.abs(target - entry) / Math.abs(entry - stop) : 0;
   if (rr < RISK_CONFIG.minRewardRisk) reasons.push("MINIMUM_RR_NOT_MET");
+  if (rr > RISK_CONFIG.maxRewardRisk) reasons.push("MAXIMUM_RR_EXCEEDED");
   const risky = riskMultiple === 0.5;
   const minLeverage = RISK_CONFIG.minLeverage;
   const maxLeverage = RISK_CONFIG.maxLeverage;
