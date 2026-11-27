@@ -165,13 +165,14 @@ function candleSlice(timeframes,endTime) {
 
 // One chronological evaluator pass per symbol/engine/entry timeframe. Each setup+direction
 // has an independent trade stream so one candidate cannot hide another setup's result.
-function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,startTime,endTime,fundingRates,filterVariant}) {
+function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,startTime,endTime,fundingRates,filterVariants}) {
   const entryRows=timeframes[entryTimeframe];
   const holdBars=Math.ceil(30*DAY/INTERVAL_MS[entryTimeframe]);
   const pointers=Object.fromEntries(Object.keys(timeframes).map(tf=>[tf,-1]));
-  const tradesByModel=new Map(),counters=new Map(),lastExitByModel=new Map(),seenByModel=new Map();
-  let skipped=0;
-  const getCounter=(key)=>{if(!counters.has(key))counters.set(key,emptyCounter());return counters.get(key);};
+  const states=new Map(filterVariants.map(variant=>[variant.id,{
+    tradesByModel:new Map(),counters:new Map(),lastExitByModel:new Map(),seenByModel:new Map(),skipped:0
+  }]));
+  const getCounter=(state,key)=>{if(!state.counters.has(key))state.counters.set(key,emptyCounter());return state.counters.get(key);};
   for(let i=30;i<entryRows.length-1;i++) {
     const signal=entryRows[i],asOf=signal.timestamp+INTERVAL_MS[entryTimeframe];
     const relativeVolume=calculateRelativeVolume(entryRows,i);
@@ -183,87 +184,89 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
     }
     const sliced={};
     for(const [tf,rows] of Object.entries(timeframes))sliced[tf]=rows.slice(Math.max(0,pointers[tf]-399),pointers[tf]+1);
-    if(Object.values(sliced).some(rows=>rows.length<25)){skipped++;continue;}
+    if(Object.values(sliced).some(rows=>rows.length<25)){for(const state of states.values())state.skipped++;continue;}
     let candidates;
     try{candidates=evaluate({symbol,timeframes:sliced,entryTimeframe,historicalBacktest:true,volumeData:{relativeVolume}});}
-    catch {skipped++;continue;}
+    catch {for(const state of states.values())state.skipped++;continue;}
+    const signalRegime=regimeAt(sliced,signal.timestamp);
     for(const candidate of candidates) {
       const key=modelKey(engine,entryTimeframe,candidate.setupId,candidate.direction);
-      const counter=getCounter(key);
-      counter.signals++;
-      if(!candidate.hardFilters?.validStop || !candidate.hardFilters?.minimumRR || candidate.direction==="NEUTRAL") {
-        counter.hardFilterRejected++;continue;
-      }
-      if(candidate.state!=="QUALIFIED" || candidate.score<70) {counter.belowScore++;continue;}
-      counter.qualifiedSignals++;
-      const signalRegime=regimeAt(sliced,signal.timestamp);
-      if(!passesSignalFilter(candidate,filterVariant,relativeVolume,signalRegime)){counter.filterRejected++;continue;}
-      if(signal.timestamp <= (lastExitByModel.get(key)??-Infinity))continue;
-      let seen=seenByModel.get(key);
-      if(!seen){seen=new Set();seenByModel.set(key,seen);}
-      if(seen.has(candidate.id))continue;
-      seen.add(candidate.id);
-      const future=entryRows.slice(i+1,i+1+6).filter(c=>c.timestamp<endTime);
-      const confirmation=advanceEntryConfirmation(candidate,future,{maxWaitBars:6});
-      if(confirmation.status!=="CONFIRMED"){counter.entryConfirmationFailed++;continue;}
-      const entry=confirmation.entry,stop=candidate.stop,risk=Math.abs(entry-stop);
-      if(!(risk>0)||(candidate.direction==="BULLISH"&&stop>=entry)||(candidate.direction==="BEARISH"&&stop<=entry)){counter.hardFilterRejected++;continue;}
-      const stopDistancePct=risk/entry,projectedCostR=2*(FEE_RATE+SLIPPAGE_RATE)*entry/risk;
-      if(stopDistancePct<MIN_STOP_DISTANCE_PCT || projectedCostR>Math.min(MAX_COST_TO_RISK,filterVariant.maxCostR)){counter.costRejected++;continue;}
-      const sign=candidate.direction==="BULLISH"?1:-1,target=entry+sign*risk*3.5,tp1=entry+sign*risk;
-      const after=entryRows.filter(c=>c.timestamp>confirmation.confirmedAt && c.timestamp<endTime).slice(0,holdBars);
-      if(!after.length){skipped++;continue;}
-      let exit=after.at(-1).close,exitAt=after.at(-1).timestamp;
-      let exitReason=after.length===holdBars?"MAX_OBSERVATION_HORIZON":"SEGMENT_END";
-      let tp1Hit=false,tp1At=null,realizedGrossR=0,remainingFraction=1;
-      for(const c of after) {
-        const stopLevel=tp1Hit?entry:stop;
-        const stopHit=candidate.direction==="BULLISH"?c.low<=stopLevel:c.high>=stopLevel;
-        const tp1Touched=candidate.direction==="BULLISH"?c.high>=tp1:c.low<=tp1;
-        const targetHit=candidate.direction==="BULLISH"?c.high>=target:c.low<=target;
-        if(stopHit) {
-          exit=stopLevel;exitAt=c.timestamp;exitReason=tp1Hit?"BREAKEVEN_STOP":"STOP";
-          if(tp1Hit)realizedGrossR+=remainingFraction*sign*(exit-entry)/risk;
-          else realizedGrossR=sign*(exit-entry)/risk;
-          remainingFraction=0;break;
+      for(const variant of filterVariants) {
+        const state=states.get(variant.id),counter=getCounter(state,key);
+        counter.signals++;
+        if(!candidate.hardFilters?.validStop || !candidate.hardFilters?.minimumRR || candidate.direction==="NEUTRAL") {
+          counter.hardFilterRejected++;continue;
         }
-        if(!tp1Hit && tp1Touched) {
-          tp1Hit=true;tp1At=c.timestamp;realizedGrossR+=0.5;remainingFraction=0.5;
-          if(targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET_AFTER_TP1";realizedGrossR+=1.75;remainingFraction=0;break;}
-          continue;
+        if(candidate.state!=="QUALIFIED" || candidate.score<70) {counter.belowScore++;continue;}
+        counter.qualifiedSignals++;
+        if(!passesSignalFilter(candidate,variant,relativeVolume,signalRegime)){counter.filterRejected++;continue;}
+        if(signal.timestamp <= (state.lastExitByModel.get(key)??-Infinity))continue;
+        let seen=state.seenByModel.get(key);
+        if(!seen){seen=new Set();state.seenByModel.set(key,seen);}
+        if(seen.has(candidate.id))continue;
+        seen.add(candidate.id);
+        const future=entryRows.slice(i+1,i+1+6).filter(c=>c.timestamp<endTime);
+        const confirmation=advanceEntryConfirmation(candidate,future,{maxWaitBars:6});
+        if(confirmation.status!=="CONFIRMED"){counter.entryConfirmationFailed++;continue;}
+        const entry=confirmation.entry,stop=candidate.stop,risk=Math.abs(entry-stop);
+        if(!(risk>0)||(candidate.direction==="BULLISH"&&stop>=entry)||(candidate.direction==="BEARISH"&&stop<=entry)){counter.hardFilterRejected++;continue;}
+        const stopDistancePct=risk/entry,projectedCostR=2*(FEE_RATE+SLIPPAGE_RATE)*entry/risk;
+        if(stopDistancePct<MIN_STOP_DISTANCE_PCT || projectedCostR>Math.min(MAX_COST_TO_RISK,variant.maxCostR)){counter.costRejected++;continue;}
+        const sign=candidate.direction==="BULLISH"?1:-1,target=entry+sign*risk*3.5,tp1=entry+sign*risk;
+        const after=entryRows.filter(c=>c.timestamp>confirmation.confirmedAt && c.timestamp<endTime).slice(0,holdBars);
+        if(!after.length){state.skipped++;continue;}
+        let exit=after.at(-1).close,exitAt=after.at(-1).timestamp;
+        let exitReason=after.length===holdBars?"MAX_OBSERVATION_HORIZON":"SEGMENT_END";
+        let tp1Hit=false,tp1At=null,realizedGrossR=0,remainingFraction=1;
+        for(const c of after) {
+          const stopLevel=tp1Hit?entry:stop;
+          const stopHit=candidate.direction==="BULLISH"?c.low<=stopLevel:c.high>=stopLevel;
+          const tp1Touched=candidate.direction==="BULLISH"?c.high>=tp1:c.low<=tp1;
+          const targetHit=candidate.direction==="BULLISH"?c.high>=target:c.low<=target;
+          if(stopHit) {
+            exit=stopLevel;exitAt=c.timestamp;exitReason=tp1Hit?"BREAKEVEN_STOP":"STOP";
+            if(tp1Hit)realizedGrossR+=remainingFraction*sign*(exit-entry)/risk;
+            else realizedGrossR=sign*(exit-entry)/risk;
+            remainingFraction=0;break;
+          }
+          if(!tp1Hit && tp1Touched) {
+            tp1Hit=true;tp1At=c.timestamp;realizedGrossR+=0.5;remainingFraction=0.5;
+            if(targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET_AFTER_TP1";realizedGrossR+=1.75;remainingFraction=0;break;}
+            continue;
+          }
+          if(tp1Hit && targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET";realizedGrossR+=remainingFraction*3.5;remainingFraction=0;break;}
         }
-        if(tp1Hit && targetHit){exit=target;exitAt=c.timestamp;exitReason="TARGET";realizedGrossR+=remainingFraction*3.5;remainingFraction=0;break;}
+        if(remainingFraction>0)realizedGrossR+=remainingFraction*sign*(exit-entry)/risk;
+        const observed=after.filter(c=>c.timestamp<=exitAt);
+        const favorable=observed.reduce((v,c)=>Math.max(v,candidate.direction==="BULLISH"?c.high-entry:entry-c.low),0);
+        const adverse=observed.reduce((v,c)=>Math.max(v,candidate.direction==="BULLISH"?entry-c.low:c.high-entry),0);
+        const exitTurnover=tp1Hit?0.5*tp1+0.5*exit:exit;
+        const feeSlippageR=(FEE_RATE+SLIPPAGE_RATE)*(entry+exitTurnover)/risk;
+        const settlements=fundingRates.filter(x=>x.fundingTime>confirmation.confirmedAt && x.fundingTime<=exitAt);
+        const fundingR=settlements.reduce((sum,x)=>sum+x.fundingRate*sign*(tp1At&&x.fundingTime>tp1At?0.5:1),0)*entry/risk;
+        const costR=feeSlippageR+fundingR,netR=realizedGrossR-costR;
+        const evidence=candidate.evidence||[];
+        const {maeR,mfeR}=calculateExcursionsR({adverseMove:adverse,favorableMove:favorable,risk});
+        const trade={
+          symbol,engine,setupId:candidate.setupId,direction:candidate.direction,timeframe:entryTimeframe,
+          score:candidate.score,band:candidate.band,factors:candidate.factors||{},factorCoveragePct:candidate.factorCoveragePct,
+          evidence,technicalCombination:evidence.join("+"),htfBias:evidenceTag({evidence},"HTF_"),
+          structureContext:evidenceTag({evidence},"STRUCTURE_"),zoneType:candidate.zoneBounds?.type||"NO_ZONE",
+          zoneBounds:candidate.zoneBounds||null,rewardRisk:candidate.rewardRisk,
+          signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,tp1,tp1At,tp1Hit,
+          stopMovedToBreakeven:tp1Hit,target,exit,exitAt,exitReason,grossR:realizedGrossR,
+          estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,
+          stopDistancePct,projectedCostR,relativeVolume,maeR,mfeR,netR,
+          regime:signalRegime
+        };
+        if(!state.tradesByModel.has(key))state.tradesByModel.set(key,[]);
+        state.tradesByModel.get(key).push(trade);
+        counter.executed++;
+        state.lastExitByModel.set(key,exitAt);
       }
-      if(remainingFraction>0)realizedGrossR+=remainingFraction*sign*(exit-entry)/risk;
-      const observed=after.filter(c=>c.timestamp<=exitAt);
-      const favorable=observed.reduce((v,c)=>Math.max(v,candidate.direction==="BULLISH"?c.high-entry:entry-c.low),0);
-      const adverse=observed.reduce((v,c)=>Math.max(v,candidate.direction==="BULLISH"?entry-c.low:c.high-entry),0);
-      const exitTurnover=tp1Hit?0.5*tp1+0.5*exit:exit;
-      const feeSlippageR=(FEE_RATE+SLIPPAGE_RATE)*(entry+exitTurnover)/risk;
-      const settlements=fundingRates.filter(x=>x.fundingTime>confirmation.confirmedAt && x.fundingTime<=exitAt);
-      const fundingR=settlements.reduce((sum,x)=>sum+x.fundingRate*sign*(tp1At&&x.fundingTime>tp1At?0.5:1),0)*entry/risk;
-      const costR=feeSlippageR+fundingR,netR=realizedGrossR-costR;
-      const evidence=candidate.evidence||[];
-      const {maeR,mfeR}=calculateExcursionsR({adverseMove:adverse,favorableMove:favorable,risk});
-      const trade={
-        symbol,engine,setupId:candidate.setupId,direction:candidate.direction,timeframe:entryTimeframe,
-        score:candidate.score,band:candidate.band,factors:candidate.factors||{},factorCoveragePct:candidate.factorCoveragePct,
-        evidence,technicalCombination:evidence.join("+"),htfBias:evidenceTag({evidence},"HTF_"),
-        structureContext:evidenceTag({evidence},"STRUCTURE_"),zoneType:candidate.zoneBounds?.type||"NO_ZONE",
-        zoneBounds:candidate.zoneBounds||null,rewardRisk:candidate.rewardRisk,
-        signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,tp1,tp1At,tp1Hit,
-        stopMovedToBreakeven:tp1Hit,target,exit,exitAt,exitReason,grossR:realizedGrossR,
-        estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,
-        stopDistancePct,projectedCostR,relativeVolume,maeR,mfeR,netR,
-        regime:regimeAt(sliced,signal.timestamp)
-      };
-      if(!tradesByModel.has(key))tradesByModel.set(key,[]);
-      tradesByModel.get(key).push(trade);
-      counter.executed++;
-      lastExitByModel.set(key,exitAt);
     }
   }
-  return {tradesByModel,counters,skipped};
+  return new Map([...states.entries()].map(([id,state])=>[id,{...state}]));
 }
 function lossDiagnostics(trades) {
   const losing=trades.filter(t=>t.netR<=0);
@@ -322,20 +325,20 @@ for(let segmentIndex=0;segmentIndex<WINDOW_DAYS/SEGMENT_DAYS;segmentIndex++) {
       const source=engine.name==="scalp"?data.scalpData:data.swingData;
       for(const entryTimeframe of engine.entryTimeframes) {
         const sliced=candleSlice(source,segmentEnd);
-        for(const variant of FILTER_VARIANTS) {
-          const result=runStrategyMatrix({
-            engine:engine.name,symbol,timeframes:sliced,evaluate:engine.evaluate,
-            entryTimeframe,startTime:segmentStart,endTime:segmentEnd,fundingRates:data.fundingRates,filterVariant:variant
-          });
+        const variantResults=runStrategyMatrix({
+          engine:engine.name,symbol,timeframes:sliced,evaluate:engine.evaluate,
+          entryTimeframe,startTime:segmentStart,endTime:segmentEnd,fundingRates:data.fundingRates,filterVariants:FILTER_VARIANTS
+        });
+        for(const [variantId,result] of variantResults) {
           for(const [key,rows] of result.tradesByModel) {
-            const ck=compositeKey(variant.id,key);
+            const ck=compositeKey(variantId,key);
             if(!segmentTradesByModel.has(ck))segmentTradesByModel.set(ck,[]);
             segmentTradesByModel.get(ck).push(...rows);
             if(!allTradesByModel.has(ck))allTradesByModel.set(ck,[]);
             allTradesByModel.get(ck).push(...rows);
           }
           for(const [key,counter] of result.counters) {
-            const ck=compositeKey(variant.id,key);
+            const ck=compositeKey(variantId,key);
             const current=segmentCounters.get(ck)||emptyCounter();
             for(const field of Object.keys(current))current[field]+=counter[field]||0;
             segmentCounters.set(ck,current);
@@ -344,7 +347,7 @@ for(let segmentIndex=0;segmentIndex<WINDOW_DAYS/SEGMENT_DAYS;segmentIndex++) {
             allCounters.set(ck,total);
           }
         }
-        process.stdout.write("  "+symbol+" "+engine.name+" "+entryTimeframe+" all filter variants complete\n");
+        process.stdout.write("  "+symbol+" "+engine.name+" "+entryTimeframe+" all filter variants complete; skipped="+[...variantResults.values()][0].skipped+"\n");
       }
     }
   }
