@@ -6,7 +6,7 @@
 - Closed-trade window: 2026-11-25 09:12:22 UTC through 2026-11-27 13:54:32 UTC.
 - 177 closed trades were present. Only 143 had `pnlAccountingStatus=VERIFIED`; 34 were `UNSPECIFIED` and are excluded from the primary performance table.
 - Net PnL per verified trade is provisionally calculated as `pnlUsdt - fundingPaidUsdt`. The inspected ledger records did not consistently expose separate entry-fee, exit-fee, or slippage fields, so fee/slippage inclusion cannot be independently reconciled from every closed-trade record. Treat the PnL and PF comparisons as provisional until ledger accounting is reconciled against the canonical balance transaction events.
-- This is a short, roughly 53-hour paper sample, not evidence of durable profitability. The ledger contains historical Scalp-labeled trades, but the inspected deployed Worker bundle currently defines only the Swing engine and rejects Scalp as removed/unsupported. Therefore the Scalp rows describe historical ledger records, not proof that the currently deployed Scalp engine is active.
+- This is a short, roughly 53-hour paper sample, not evidence of durable profitability. A fresh read of the live Cloudflare smcprov2 script confirms that its active bundle contains independent SCALP and SWING engines, the six S01–S06 Scalp models, 1H/15M/5M timeframes, and separate engine scoring weights. The earlier conclusion that the live Worker was Swing-only was incorrect. The checked-in GitHub cloudflare/worker/deployed/index.js and src/setup-evaluator.js are stale Swing-only artifacts and do not match the live Cloudflare bundle.
 - No Worker, Durable Object, KV, balance, open position, or trading setting was modified during this audit. No order was submitted.
 
 ## Verified engine performance
@@ -58,25 +58,29 @@ The current score is not monotonically predictive of net profitability in this s
 
 Among the 143 verified trades, 85 have `marketRegime=UNAVAILABLE`. Regime-specific conclusions therefore have limited coverage. The verified Swing BEARISH cohort has 31 trades, 41.9% win rate, -67.35 USDT net PnL and PF 0.54. This is a strong filter candidate for 30/60/90-day validation, not an instruction to disable all Swing shorts.
 
-## Deployed Worker implementation findings
+## Deployed Worker and repository source reconciliation
 
-1. The deployed Worker bundle and repository both show Swing-only production execution:
-   - The deployed `ENGINE_CONFIG` defines only `SWING`.
-   - The deployed evaluator rejects any engine other than `SWING` and returns `SCALP_ENGINE_REMOVED_OR_FORBIDDEN_TIMEFRAME`.
-   - The deployed active-strategy allowlist filters only Swing models.
-   - `src/setup-evaluator.js` throws `SCALP_ENGINE_REMOVED`.
-   - `src/scoring.js` only defines Swing weights.
-   - `src/risk-controller.js` rejects non-Swing candidates.
-2. The deployed Worker response path calls `filterActiveSwingSetups(ledger.setups)`, and its diagnostics/telemetry filters retain only active Swing model IDs. The Scalp dashboard tab is therefore not evidence of a running Scalp evaluator.
-3. The deployed `makeSetup` calculation awards the full entry-confirmation weight once the boolean confirmation gate passes. That factor therefore adds little ranking information between already-confirmed candidates. The remaining score factors should be checked against verified net outcomes.
-4. The deployed risk multiplier uses countertrend, HTF alignment and score threshold; it does not require the empirical confidence result to be sufficiently sampled before assigning normal risk. This differs from the desired evidence-led risk policy.
-5. The repository matrix backtest imports `evaluateScalp`, but the repository implementation throws `SCALP_ENGINE_REMOVED`; its catch-and-skip path means the Scalp matrix cannot be considered a valid Scalp backtest.
-6. The repository matrix script's MAE/MFE expression was malformed and did not calculate excursion in R. The research branch replaces it with a shared validated `calculateExcursionsR` helper and unit tests for normalization, rounding, and invalid risk/movement inputs. The tests have been added but not run in GitHub Actions to conserve quota.
+1. **Live Cloudflare Worker (smcprov2) is Scalp + Swing.** A direct read of the current Worker script bundle confirms:
+   - evaluateEngine has separate SCALP and SWING paths.
+   - Scalp uses 1H direction, 15M liquidity/zones, and 5M setup/entry; Swing uses 1D direction, 4H zones, 1H setup, and 15M entry.
+   - The live bundle contains S01–S06 and W01–W08 pattern logic.
+   - The live bundle has separate Scalp/Swing score weights and the configured 0–59 / 60–64 / 65–69 / 70–83 / 84–100 score bands.
+   - Historical confidence is calculated separately by engine, setup, symbol, side, regime, and HTF alignment, with a 30-trade minimum sample.
+2. **GitHub source is inconsistent with the live Worker.** The default-branch src/setup-evaluator.js, src/scoring.js, src/engines.js, src/index.js and cloudflare/worker/deployed/index.js are Swing-only artifacts. The default-branch tests explicitly expect Scalp removal. The GitHub deployed bundle rejects Scalp, whereas the live Cloudflare Worker accepts Scalp. This is a source-of-truth and reproducible-build defect; do not deploy the default-branch bundle over the live Worker.
+3. The feature/smc-price-action-v1 and feature/price-action-ci-verified branches contain earlier reusable evaluateScalp / evaluateSwing implementations and the correct base weight split, but they are not byte-for-byte or behaviorally identical to the current live Worker implementation. They are recovery references, not an automatic safe replacement.
+4. The live Worker scoring implementation uses the configured weight budgets:
+   - Scalp: HTF 15, liquidity 20, market structure 20, zone 15, entry confirmation 20, volume 10.
+   - Swing: HTF 20, liquidity 15, market structure 20, zone 20, entry confirmation 15, volume 10.
+   - It computes a weighted points breakdown, keeps empirical confidence separate, and reduces risk for countertrend / non-aligned / lower-score setups.
+5. A live scoring review still needs to test the quality of factor discrimination. In the inspected Worker, entry-confirmation points are awarded at the full configured weight once the boolean entry-confirmation gate passes; this may provide little ranking separation among already-confirmed candidates. Volume points are derived from recent candle volume; missing volume receives no points and is labeled unavailable in the audit.
+6. The research branch src/setup-evaluator.js remains Swing-only, so its matrix runner cannot currently produce a valid Scalp backtest. The research branch's MAE/MFE calculation has been corrected to adverseMove / risk and favorableMove / risk, and its regression tests cover the calculation, but GitHub Actions has not been run.
+7. The deployed Worker and the checked-in build source must be reconciled before any Worker deployment. The live Worker is currently the only confirmed active source for the complete Scalp + Swing runtime; preserve it while recovering its source modules and tests.
 
 ## Required validation before any production change
 
-1. Reconcile the GitHub source with the actual deployed Worker source and establish one authoritative build path.
-2. Repair the backtest harness: restore the real Scalp evaluator, correct MAE/MFE, and test both engines independently.
+1. Recover the exact live Scalp + Swing engine source from the active Worker bundle into version-controlled source modules, preserving behavior and the current production deployment.
+2. Reconcile the default-branch Swing-only source and tests with the live Worker; remove the contradictory SCALP_ENGINE_REMOVED assumptions only after the recovered Scalp module is covered by tests.
+3. Repair the backtest harness so it imports the recovered Scalp evaluator and the current Swing evaluator; MAE/MFE is already corrected on this research branch, but both engines still need independent regression coverage.
 3. Run causal 30/60/90-day tests using the same pair sample for each comparison, closed candles only, historical funding, verified fee/slippage assumptions, stop-first same-candle handling, and no future leakage.
 4. Test directional model quarantines and regime filters as separate variants; report PF, expectancy, drawdown, MAE/MFE, sample count and out-of-sample stability.
 5. Test risk sizing separately: insufficient empirical sample should not automatically receive full risk. Do not increase the 2% equity risk unit or the 10-position cap.
@@ -84,7 +88,7 @@ Among the 143 verified trades, 85 have `marketRegime=UNAVAILABLE`. Regime-specif
 
 ## Current decision
 
-No production parameters are changed by this audit. The research branch has only corrected the MAE/MFE calculation path and made the combined matrix fail closed before network access while Scalp evaluation is unavailable. The first validation priorities are:
+No production parameters or Cloudflare resources were changed by this audit. The research branch has corrected the MAE/MFE calculation path, but its Scalp evaluator remains unavailable. The live Worker already runs Scalp + Swing; the immediate engineering task is to recover its exact Scalp/Swing implementation into the GitHub source and restore parity without deploying or changing the Paper ledger. The first validation priorities are:
 - Keep the existing W05 Range Deviation SHORT quarantine.
 - Test a W07 OTE quarantine variant.
 - Test a Swing bearish-regime filter.
