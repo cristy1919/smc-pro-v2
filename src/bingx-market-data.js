@@ -109,11 +109,11 @@ export class BingXPublicKlineProvider {
 
 export async function fetchEngineDataset({ provider, symbol, engine, startTime, endTime }) {
   if (!provider || typeof provider.getCandles !== "function") throw new TypeError("provider.getCandles is required");
-  const timeframes = engine === "scalp" ? ["1h","15m","5m"] : engine === "swing" ? ["1d","4h","1h","15m"] : null;
+  const timeframes = engine === "scalp" ? ["1h","15m","5m"] : engine === "swing" ? ["1d","4h","1h","15m"] : engine === "combined" ? ["1d","4h","1h","15m","5m"] : null;
   if (!timeframes) throw new Error("INVALID_ENGINE");
   const result = {};
   for (const timeframe of timeframes) {
-    const warmupDays = timeframe === "1d" || timeframe === "4h" || (engine === "scalp" && timeframe === "1h") ? 45 : timeframe === "1h" ? 30 : timeframe === "15m" ? (engine === "scalp" ? 14 : 7) : 3;
+    const warmupDays = timeframe === "1d" || timeframe === "4h" || timeframe === "1h" ? 45 : timeframe === "15m" ? (engine === "scalp" || engine === "combined" ? 14 : 7) : 3;
     const warmupMs = warmupDays * 86400000;
     const requestStart = Math.max(0, startTime - warmupMs);
     const intervalMs = INTERVAL_MS[timeframe];
