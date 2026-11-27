@@ -22,6 +22,8 @@ Runtime secret names used by the deployed Worker:
 - `BINGX_API_KEY`
 - `BINGX_API_SECRET`
 
+Note: the repository's separate read-only research/backtest workflow documents `BINGX_SECRET_KEY`; that is not the production Worker binding name. For the deployed VST order adapter, use `BINGX_API_SECRET`.
+
 After both secrets are installed, the controlled stage transition sets:
 
 - `BINGX_TRADING_MODE=demo`
