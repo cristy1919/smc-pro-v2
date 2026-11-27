@@ -233,7 +233,7 @@ import { runLiveSetupQueue } from "../src/live-runner.js";
 
 const readyScannerSetup = (overrides={}) => ({
   model:"W01_HTF_OB_REVERSAL", symbol:"BTC-USDT", side:"LONG", tradeStyle:"SWING",
-  setupTimeframe:"4h", entryTimeframe:"4h", setupCandleTime:900000, candleTime:900000, status:"READY", entry:100,
+  setupTimeframe:"1h", entryTimeframe:"15m", setupCandleTime:900000, candleTime:900000, status:"READY", entry:100,
   stopLoss:98, takeProfit:107, tp1:102, tp2:104, score:88, riskMultiplier:0.5,
   confirmations:["CLOSED_CANDLE_CONFIRMATION"], audit:{zone:{bottom:99,top:101},countertrend:true},
   ...overrides
