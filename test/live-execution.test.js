@@ -30,6 +30,22 @@ test("live credentials must be independently provisioned", () => {
   assert.ok(state.blockers.includes("LIVE_CREDENTIALS_SEPARATE_FROM_DEMO"));
 });
 
+
+test("Scalp live readiness accepts only 5m/15m setups under the same risk controls", () => {
+  const candidate = baseCandidate({ engine: "scalp", setupTimeframe: "5m", entryTimeframe: "5m" });
+  const result = validateLiveCandidate(candidate, {
+    equity: 10000, availableMargin: 5000, openPositions: [], contract,
+    markPrice: 100000, riskMultiple: 1, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261126"
+  });
+  assert.equal(result.eligible, true);
+  assert.equal(result.rewardRisk, 3.5);
+  const invalid = validateLiveCandidate({ ...candidate, setupTimeframe: "1m" }, {
+    equity: 10000, availableMargin: 5000, openPositions: [], contract,
+    markPrice: 100000, riskMultiple: 1, explicitConfirmation: true, idempotencyKey: "scalp-btc-20261126"
+  });
+  assert.ok(invalid.reasons.includes("FORBIDDEN_SETUP_TIMEFRAME"));
+});
+
 test("normal setup enforces isolated margin and 20x-50x leverage", () => {
   const result = validateLiveCandidate(baseCandidate(), {
     equity: 10000, availableMargin: 5000, openPositions: [], contract,
