@@ -6626,7 +6626,7 @@ async function getBingXMarkPrice(symbol, timeoutMs = 4500) {
   }
 }
 __name(getBingXMarkPrice, "getBingXMarkPrice");
-var PAPER_SCAN_BATCH_NORMAL = 25;
+var PAPER_SCAN_BATCH_NORMAL = 7;
 var PAPER_SCAN_INTERVAL_MS = 6e4;
 var latestFundingSnapshots = new Map();
 var VST_ENTRY_QUEUE_MAX = 1e3;
