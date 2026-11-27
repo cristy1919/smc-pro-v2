@@ -9,14 +9,14 @@ import { calculateExcursionsR } from "../src/excursions.js";
 
 const BASE_URL = "https://open-api.bingx.com";
 const DAY = 86400000;
-const TARGET_SYMBOLS = 20;
-const WINDOW_DAYS = 30;
+const TARGET_SYMBOLS = 30;
+const WINDOW_DAYS = 60;
 const SEGMENT_DAYS = 15;
 const FEE_RATE = Number(process.env.FEE_RATE ?? 0.0005);
 const SLIPPAGE_RATE = Number(process.env.SLIPPAGE_RATE ?? 0.0002);
 const MAX_COST_TO_RISK = 0.20;
 const MIN_STOP_DISTANCE_PCT = 0.007;
-const FIXED_SYMBOLS = ["BTC-USDT","ETH-USDT","SOL-USDT","ZEC-USDT","NEAR-USDT","ZRO-USDT","XRP-USDT","1000PEPE-USDT","HYPE-USDT","DYDX-USDT","BOME-USDT","LDO-USDT","STX-USDT","IMX-USDT","CRV-USDT","AAVE-USDT","ETHFI-USDT","LINK-USDT","BANANA-USDT","AVAX-USDT"];
+const FIXED_SYMBOLS = ["BTC-USDT","ETH-USDT","SOL-USDT","ZEC-USDT","NEAR-USDT","ZRO-USDT","XRP-USDT","1000PEPE-USDT","HYPE-USDT","DYDX-USDT","BOME-USDT","LDO-USDT","STX-USDT","IMX-USDT","CRV-USDT","AAVE-USDT","ETHFI-USDT","LINK-USDT","BANANA-USDT","AVAX-USDT","DOGE-USDT","ADA-USDT","LTC-USDT","BCH-USDT","DOT-USDT","SUI-USDT","OP-USDT","ARB-USDT","INJ-USDT","UNI-USDT"];
 const SETUPS = {
   scalp: ["S01_SWEEP_MSS_FVG","S02_BREAKER_RETEST","S03_BOS_DISPLACEMENT","S04_RANGE_DEVIATION","S05_FAILED_BREAKOUT","S06_OB_REACTION"],
   swing: ["W01_HTF_OB_REVERSAL","W02_SUPPLY_DEMAND_REVERSAL","W03_SWEEP_CHOCH","W04_BREAKER_RETEST","W05_RANGE_DEVIATION","W06_CRT","W07_OTE","W08_BOS_CONTINUATION"]
@@ -35,7 +35,7 @@ const ALL_MODEL_KEYS = ENGINES.flatMap(engine =>
 );
 
 if (!Number.isInteger(TARGET_SYMBOLS) || TARGET_SYMBOLS < 1 || TARGET_SYMBOLS > 100) throw new Error("TARGET_SYMBOLS must be 1..100");
-if (WINDOW_DAYS !== 30) throw new Error("WINDOW_DAYS is fixed at 30 for this research run");
+if (WINDOW_DAYS % SEGMENT_DAYS !== 0) throw new Error("WINDOW_DAYS must be divisible by SEGMENT_DAYS");
 if (!Number.isFinite(FEE_RATE) || FEE_RATE < 0 || !Number.isFinite(SLIPPAGE_RATE) || SLIPPAGE_RATE < 0) throw new Error("INVALID_COST_ASSUMPTIONS");
 
 // Fail before any BingX market-data requests if the independent Scalp evaluator is not wired.
@@ -133,14 +133,18 @@ function buildBreakdowns(trades) {
     byTechnicalCombination:groupBy(trades,t=>(t.evidence||[]).join("+")||"NO_EVIDENCE"),
     byScoreBand:groupBy(trades,t=>t.score>=84?"84-100":t.score>=70?"70-83":t.score>=65?"65-69":t.score>=60?"60-64":"0-59"),
     byPair:groupBy(trades,t=>t.symbol),
-    byRegime:groupBy(trades,t=>t.regime||"UNAVAILABLE")
+    byRegime:groupBy(trades,t=>t.regime||"UNAVAILABLE"),
+    byBTCDailyRegime:groupBy(trades,t=>t.btcDailyRegime||"UNAVAILABLE"),
+    byDirectionAndBTCDailyRegime:groupBy(trades,t=>(t.btcDailyRegime||"UNAVAILABLE")+"|"+t.direction)
   };
 }
 function classifyModel(metrics,segmentMetrics) {
   if (metrics.trades < 30) return "INSUFFICIENT_SAMPLE";
+  const requiredProfitableSegments=Math.ceil(segmentMetrics.length*0.75);
   const profitableSegments=segmentMetrics.filter(x=>x.trades>=5 && x.expectancyR>0 && x.profitFactor!==null && x.profitFactor>1).length;
-  if (metrics.expectancyR>0 && metrics.profitFactor>=1.5 && metrics.maxDrawdownPct<=15 && profitableSegments>=2) return "KEEP_CANDIDATE";
-  if (metrics.expectancyR<0 && metrics.profitFactor<1 && segmentMetrics.filter(x=>x.trades>=5 && x.expectancyR<0 && x.profitFactor<1).length>=2) return "ELIMINATION_CANDIDATE";
+  const losingSegments=segmentMetrics.filter(x=>x.trades>=5 && x.expectancyR<0 && x.profitFactor!==null && x.profitFactor<1).length;
+  if (metrics.expectancyR>0 && metrics.profitFactor>=1.5 && metrics.maxDrawdownPct<=15 && profitableSegments>=requiredProfitableSegments) return "KEEP_CANDIDATE";
+  if (metrics.expectancyR<0 && metrics.profitFactor<1 && losingSegments>=requiredProfitableSegments) return "ELIMINATION_CANDIDATE";
   if (metrics.expectancyR>0 && metrics.profitFactor>1) return "FILTER_OR_RETEST";
   return "RETEST_OR_REDESIGN";
 }
@@ -157,6 +161,17 @@ function regimeAt(timeframes, timestamp) {
   if(Math.abs(change)<0.006)return vol>0.012?"RANGE_HIGH_VOL":"RANGE_LOW_VOL";
   return change>0?(vol>0.012?"UPTREND_HIGH_VOL":"UPTREND_LOW_VOL"):(vol>0.012?"DOWNTREND_HIGH_VOL":"DOWNTREND_LOW_VOL");
 }
+function btcDailyRegimeAt(rows,timestamp) {
+  if(!Array.isArray(rows)||rows.length<25)return "UNAVAILABLE";
+  let i=rows.length-1;
+  while(i>=0 && rows[i].timestamp+INTERVAL_MS["1d"]>timestamp)i--;
+  if(i<24)return "UNAVAILABLE";
+  const meanClose=(end)=>rows.slice(end-19,end+1).reduce((sum,c)=>sum+c.close,0)/20;
+  const currentSma=meanClose(i),priorSma=meanClose(i-5),close=rows[i].close;
+  if(close>currentSma && currentSma>priorSma)return "BULL";
+  if(close<currentSma && currentSma<priorSma)return "BEAR";
+  return "SIDEWAYS";
+}
 function candleSlice(timeframes,endTime) {
   return Object.fromEntries(Object.entries(timeframes).map(([tf,rows])=>[
     tf,rows.filter(c=>c.timestamp+INTERVAL_MS[tf]<=endTime)
@@ -165,7 +180,7 @@ function candleSlice(timeframes,endTime) {
 
 // One chronological evaluator pass per symbol/engine/entry timeframe. Each setup+direction
 // has an independent trade stream so one candidate cannot hide another setup's result.
-function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,startTime,endTime,fundingRates,filterVariants}) {
+function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,startTime,endTime,fundingRates,filterVariants,btcDailyRows}) {
   const entryRows=timeframes[entryTimeframe];
   const holdBars=Math.ceil(30*DAY/INTERVAL_MS[entryTimeframe]);
   const pointers=Object.fromEntries(Object.keys(timeframes).map(tf=>[tf,-1]));
@@ -189,6 +204,7 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
     try{candidates=evaluate({symbol,timeframes:sliced,entryTimeframe,historicalBacktest:true,volumeData:{relativeVolume}});}
     catch {for(const state of states.values())state.skipped++;continue;}
     const signalRegime=regimeAt(sliced,signal.timestamp);
+    const btcDailyRegime=btcDailyRegimeAt(btcDailyRows,signal.timestamp);
     for(const candidate of candidates) {
       const key=modelKey(engine,entryTimeframe,candidate.setupId,candidate.direction);
       for(const variant of filterVariants) {
@@ -257,7 +273,7 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
           stopMovedToBreakeven:tp1Hit,target,exit,exitAt,exitReason,grossR:realizedGrossR,
           estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,
           stopDistancePct,projectedCostR,relativeVolume,maeR,mfeR,netR,
-          regime:signalRegime
+          regime:signalRegime,btcDailyRegime
         };
         if(!state.tradesByModel.has(key))state.tradesByModel.set(key,[]);
         state.tradesByModel.get(key).push(trade);
@@ -304,6 +320,8 @@ for(let i=0;i<selectedPairs.length;i++) {
 }
 if(datasets.size!==TARGET_SYMBOLS)throw new Error("DATASET_COLLECTION_INCOMPLETE "+datasets.size+"/"+TARGET_SYMBOLS+" "+JSON.stringify(dataFailures));
 
+const btcDailyRows=datasets.get("BTC-USDT")?.swingData?.["1d"]||[];
+if(!btcDailyRows.length)throw new Error("BTC_DAILY_REGIME_DATA_UNAVAILABLE");
 const segmentReports=[];
 const allTradesByModel=new Map(),allCounters=new Map();
 const compositeKey=(variantId,key)=>variantId+"::"+key;
@@ -327,7 +345,7 @@ for(let segmentIndex=0;segmentIndex<WINDOW_DAYS/SEGMENT_DAYS;segmentIndex++) {
         const sliced=candleSlice(source,segmentEnd);
         const variantResults=runStrategyMatrix({
           engine:engine.name,symbol,timeframes:sliced,evaluate:engine.evaluate,
-          entryTimeframe,startTime:segmentStart,endTime:segmentEnd,fundingRates:data.fundingRates,filterVariants:FILTER_VARIANTS
+          entryTimeframe,startTime:segmentStart,endTime:segmentEnd,fundingRates:data.fundingRates,filterVariants:FILTER_VARIANTS,btcDailyRows
         });
         for(const [variantId,result] of variantResults) {
           for(const [key,rows] of result.tradesByModel) {
@@ -392,14 +410,14 @@ const output={
     generatedAt:new Date().toISOString(),exchange:"BingX USDT-M perpetual public market data",
     filterVariants:FILTER_VARIANTS,filterExecution:"Each filter variant is evaluated at signal qualification and maintains independent seen-candidate, cooldown, and position state. Market candles/funding are fetched once and shared across variants.",
     relativeVolumeUnits:"calculateRelativeVolume returns a ratio: 1.0 = average volume; 1.5 = 50% above average. Filter thresholds are expressed in ratio units.",
-    requestedPairs:TARGET_SYMBOLS,completedPairs:datasets.size,windowDays:WINDOW_DAYS,segmentDays:SEGMENT_DAYS,segments:segmentReports.length,universeSelection:"Fixed 20-symbol sample copied exactly from the preceding baseline run; no current-volume reselection, enabling direct filter comparison.",
+    requestedPairs:TARGET_SYMBOLS,completedPairs:datasets.size,windowDays:WINDOW_DAYS,segmentDays:SEGMENT_DAYS,segments:segmentReports.length,universeSelection:"Fixed 30-symbol sample: prior 20-symbol set plus DOGE, ADA, LTC, BCH, DOT, SUI, OP, ARB, INJ and UNI USDT perpetuals; no current-volume reselection.",
     engineCoverage:{scalp:{setups:SETUPS.scalp,entryTimeframes:["5m"],contextTimeframes:["1h","15m"]},swing:{setups:SETUPS.swing,entryTimeframes:["15m","1h"],contextTimeframes:["1d","4h","1h"]}},
     testedDirections:DIRECTIONS,
     costs:{feeRatePerSide:FEE_RATE,slippageRatePerSide:SLIPPAGE_RATE,maxCostToRisk:MAX_COST_TO_RISK,minStopDistancePct:MIN_STOP_DISTANCE_PCT,funding:"historical BingX settlement records only"},
     riskUnitFraction:RISK_CONFIG.riskUnitFraction,
     candidatePolicy:"Only candidates with QUALIFIED state, score >= 70, valid stop and minimum RR are eligible; entry confirmation required.",
     simulation:"Each setup+direction+entry timeframe is simulated as an independent stream. This isolates model edge; these streams are NOT a combined portfolio and overlapping trades across models/pairs are not netted.",
-    walkForward:"Chronological, non-overlapping 15-day segments inside the same 30-day window. Each filter keeps independent state; no filters are learned from the same segment and no future segment data is used to alter earlier trades.",
+    walkForward:"Chronological, non-overlapping four 15-day segments inside the 60-day window. Each filter keeps independent state; no future segment data is used to alter earlier trades. KEEP/ELIMINATION consistency requires at least 75% of segments with sufficient sample to agree.",
     limitations:[
       "No historical order-book depth or time-varying spread; actual spread and market impact are unavailable from the OHLCV source.",
       "No historical leverage tiers or liquidation simulation; isolated margin/liquidation risk is not inferred.",
@@ -408,6 +426,8 @@ const output={
       "Stop-first assumption when stop and target are touched in the same candle.",
       "Normalized equity index is not an actual VST/USDT account return.",
       "Technical-context groupings are descriptive; sparse groups must not be used as standalone filters.",
+      "BTC daily macro regime is classified causally from the latest completed daily candle: close vs SMA20 and SMA20 slope vs five days earlier. LONG/SHORT results are separately grouped by BULL, BEAR and SIDEWAYS.",
+      "TP simulation remains the existing fixed model: TP1 at 1R closes 50%, remaining 50% moves to breakeven and targets 3.5R. This is not yet the final structural TP2/TP3 validation.",
       "This run ranks and diagnoses strategies; it does not delete or enable strategies in the PAPER runner."
     ]
   },
@@ -424,7 +444,7 @@ const output={
     retestOrRedesign:finalModels.filter(x=>["FILTER_OR_RETEST","RETEST_OR_REDESIGN"].includes(x.decision)).length
   }
 };
-await writeFile("bingx-strategy-matrix-20-pairs-30d-report.json",JSON.stringify(output,null,2)+"\n",{encoding:"utf8"});
+await writeFile("bingx-strategy-matrix-30-pairs-60d-report.json",JSON.stringify(output,null,2)+"\n",{encoding:"utf8"});
 process.stdout.write(JSON.stringify({
   metadata:output.metadata,summary:output.summary,
   models:finalModels.map(({engine,timeframe,setupId,direction,metrics,decision,counters})=>({engine,timeframe,setupId,direction,metrics,decision,counters}))
