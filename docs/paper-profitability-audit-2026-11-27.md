@@ -112,3 +112,11 @@ No production parameters or Cloudflare resources were changed by this audit. The
 - Relative volume is calculated at each entry timestamp from the current closed candle and the preceding 20 closed candles only. It does not use future bars.
 - Historical quote-volume and bid/ask spread are not provided by the selected historical kline endpoint. Both fields are marked `UNAVAILABLE`; the backtest does not invent them. The 50-pair universe is selected using the current quote-volume/spread snapshot, so universe survivorship/selection bias remains.
 - Historical mode uses the causal relative-volume filter; it does not pretend that a current spread measurement was historically available. Fixed slippage remains an explicit assumption. A later production promotion requires separate historical liquidity/spread validation.
+
+## Research-branch update — 2026-11-27
+
+The isolated branch `research/scalp-engine-recovery-2026-11-27` now restores a separately callable Scalp evaluator and shared Scalp/Swing candle acquisition. The dedicated BingX matrix runner is fixed to **20 eligible USDT-M crypto pairs and 30 days**; the earlier 50-pair / 90-day wording above describes the prior proposed validation scope and is superseded for the next run.
+
+The recovered evaluator is based on repository history and is not yet proven byte-for-byte equivalent to the live Cloudflare Worker. The legacy generic single-timeframe and multi-timeframe helper APIs remain Swing-only; their tests are not evidence that the independent Scalp evaluator is disabled. Dedicated Scalp evaluator tests cover its 1H/15M/5M contract.
+
+No GitHub Actions run has been started and no test result or backtest result is claimed here. The research branch remains isolated; no Cloudflare Worker, Durable Object, Paper balance, open position, trade history, or trading-mode setting has been changed. Current spread/quote-volume selection and historical depth/spread limitations remain as described above.
