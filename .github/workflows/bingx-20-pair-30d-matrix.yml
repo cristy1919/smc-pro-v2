@@ -1,0 +1,38 @@
+name: BingX 20-pair 30-day Scalp + Swing matrix backtest
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: bingx-20-pair-30-day-matrix
+  cancel-in-progress: false
+
+jobs:
+  matrix-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/scalp-engine-recovery-2026-11-27
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run complete repository tests
+        run: npm test
+      - name: Run fixed 20-pair 30-day BingX matrix
+        env:
+          FEE_RATE: "0.0005"
+          SLIPPAGE_RATE: "0.0002"
+        run: node scripts/run-bingx-strategy-matrix-backtest.js
+      - name: Upload Scalp + Swing research report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bingx-strategy-matrix-20-pairs-30d-report
+          path: bingx-strategy-matrix-20-pairs-30d-report.json
+          if-no-files-found: error
+          retention-days: 30
