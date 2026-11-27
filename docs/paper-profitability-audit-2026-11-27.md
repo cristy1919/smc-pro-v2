@@ -37,7 +37,7 @@ Profit factor is gross positive net-trade PnL divided by the absolute gross nega
 
 The deployed Worker already contains a W05 SHORT execution quarantine. Its embedded rationale refers to an older 17-trade sample; the current verified ledger cohort has 19 trades and still shows a negative result. Refresh the quarantine rationale from verified rolling data rather than leaving stale fixed statistics.
 
-W07 OTE is negative in both directions in the full ledger, but the LONG side has only two trades. Keep any proposed OTE quarantine as a research candidate until 30/60/90-day tests are run; do not silently convert this short paper sample into a permanent rule.
+W07 OTE SHORT has 16 verified trades and remains negative. The two W07 LONG trades are in the 34 records with unspecified accounting status, so they are not reliable evidence for a LONG-side decision. Keep any proposed OTE quarantine as a research candidate until 30/60/90-day tests are run; do not silently convert this short paper sample into a permanent rule.
 
 ## Score calibration findings
 
@@ -64,7 +64,7 @@ Among the 143 verified trades, 85 have `marketRegime=UNAVAILABLE`. Regime-specif
    - `src/setup-evaluator.js` throws `SCALP_ENGINE_REMOVED`.
    - `src/scoring.js` only defines Swing weights.
    - `src/risk-controller.js` rejects non-Swing candidates.
-   - The deployed Worker bundle contains `ENGINE_CONFIG.SCAlP` / `ENGINE_CONFIG.SWING` and the combined evaluator.
+   - The deployed Worker bundle contains `ENGINE_CONFIG.SCALP` / `ENGINE_CONFIG.SWING` and the combined evaluator.
 2. The deployed Worker response path calls `filterActiveSwingSetups(ledger.setups)`, and its diagnostics/telemetry filters retain only active Swing model IDs. This can hide Scalp candidates and Scalp diagnostics from the dashboard/API even though the scanner code evaluates both engines.
 3. The deployed `makeSetup` calculation awards the full entry-confirmation weight once the boolean confirmation gate passes. That factor therefore adds little ranking information between already-confirmed candidates. The remaining score factors should be checked against verified net outcomes.
 4. The deployed risk multiplier uses countertrend, HTF alignment and score threshold; it does not require the empirical confidence result to be sufficiently sampled before assigning normal risk. This differs from the desired evidence-led risk policy.
