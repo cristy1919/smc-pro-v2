@@ -3,7 +3,8 @@
 Independent price-action Scalp and Swing futures research engines.
 
 ## Safety status
-- PAPER / RESEARCH ONLY. No exchange order adapter is enabled.
+- Current Cloudflare deployment remains Internal Paper only; BingX VST Demo and Live execution are separately integrated but disabled.
+- API keys and secrets are runtime-only and must never be committed to Git.
 - Existing Cloudflare resources are not changed by this repository scaffold.
 - No API keys or secrets belong in Git.
 
@@ -25,4 +26,4 @@ Independent price-action Scalp and Swing futures research engines.
 ## Development
 Requires Node.js 20+. Run `npm test`.
 
-See [research implementation status](docs/research-implementation.md) for implemented modules, remaining integration gates and deployment restrictions. This is not yet a production-ready or exchange-executing trading bot.
+See the [execution-mode runbook](docs/execution-mode-runbook.md) and [research implementation status](docs/research-implementation.md) for implemented modules, remaining integration gates and deployment restrictions. This is not yet a production-ready or exchange-executing trading bot.
