@@ -70,6 +70,7 @@ The live gate must remain disabled during Internal Paper and VST Demo. Do not us
 - Isolated margin only; leverage policy and exchange contract limits are checked before entry.
 - Maximum simultaneous positions: 10, with duplicate engine/symbol/side protection.
 - TP1 closes 50% of original quantity; TP2 closes 52% of the remaining quantity; TP3 closes the remainder.
+- Altcoin breadth is reported only when at least 60% of the eligible universe has fresh structural state; below that threshold it is `UNAVAILABLE`, not `NEUTRAL`.
 - If balance, price, contract rules, position state, protective orders or required market data cannot be verified, fail closed and do not place an order.
 
 ## Secret handling
