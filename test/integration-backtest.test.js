@@ -114,14 +114,14 @@ test("BingX public provider reads historical funding settlements with exact time
  assert.deepEqual(rows,[{fundingTime:600000,fundingRate:0.0001}]);
 });
 
-test("90d Swing dataset fetches only 4H and 1D setup candles", async () => {
+test("90d Swing dataset fetches 1D/4H structure plus 1H/15M confirmation and entry candles", async () => {
   const calls = [];
   const provider = { getCandles: async args => { calls.push(args); return []; } };
   const endTime = Date.UTC(2026, 10, 26), startTime = endTime - 90 * 86400000;
   await fetchEngineDataset({ provider, symbol: "BTC-USDT", engine: "swing", startTime, endTime });
   const byTf = Object.fromEntries(calls.map(x => [x.timeframe, x.limit]));
-  assert.equal(calls.length,2);
-  assert.ok(byTf["4h"] > 500, "4H history must include 90d plus warmup");
+  assert.equal(calls.length,4);
+  assert.ok(byTf["4h"] > 500, "4H history must include 90d plus warmup");\n  assert.ok(byTf["1h"] > 2000, "1H confirmation history must include 90d plus warmup");\n  assert.ok(byTf["15m"] > 8000, "15M entry history must include 90d plus warmup");
   assert.ok(byTf["1d"] >= 120, "daily history must include 90d plus warmup");
 });
 test("walk-forward backtest rejects 1H and lower setup timeframes", () => {
