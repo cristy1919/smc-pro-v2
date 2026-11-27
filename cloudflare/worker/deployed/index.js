@@ -159,7 +159,7 @@ function summarizeAltcoinBreadthBias(states, universeSymbols, now = Date.now(), 
   const bearish = fresh.filter((symbol) => states[symbol]?.activeBias === "BEARISH").length;
   const bullishSharePct = eligible.length ? bullish / eligible.length * 100 : 0;
   const bearishSharePct = eligible.length ? bearish / eligible.length * 100 : 0;
-  if (coveragePct < minimumCoveragePct) return { bias: "NEUTRAL", eligibleAltcoinCount: eligible.length, freshSymbolCount, coveragePct: Number(coveragePct.toFixed(2)), bullishSharePct: Number(bullishSharePct.toFixed(2)), bearishSharePct: Number(bearishSharePct.toFixed(2)), reason: "INSUFFICIENT_UNIVERSE_COVERAGE" };
+  if (coveragePct < minimumCoveragePct) return { bias: "UNAVAILABLE", eligibleAltcoinCount: eligible.length, freshSymbolCount, coveragePct: Number(coveragePct.toFixed(2)), bullishSharePct: Number(bullishSharePct.toFixed(2)), bearishSharePct: Number(bearishSharePct.toFixed(2)), reason: "INSUFFICIENT_UNIVERSE_COVERAGE" };
   if (bullishSharePct >= breadthThresholdPct) return { bias: "BULLISH", eligibleAltcoinCount: eligible.length, freshSymbolCount, coveragePct: Number(coveragePct.toFixed(2)), bullishSharePct: Number(bullishSharePct.toFixed(2)), bearishSharePct: Number(bearishSharePct.toFixed(2)), reason: "CONFIRMED_BULLISH_BREADTH" };
   if (bearishSharePct >= breadthThresholdPct) return { bias: "BEARISH", eligibleAltcoinCount: eligible.length, freshSymbolCount, coveragePct: Number(coveragePct.toFixed(2)), bullishSharePct: Number(bullishSharePct.toFixed(2)), bearishSharePct: Number(bearishSharePct.toFixed(2)), reason: "CONFIRMED_BEARISH_BREADTH" };
   return { bias: "NEUTRAL", eligibleAltcoinCount: eligible.length, freshSymbolCount, coveragePct: Number(coveragePct.toFixed(2)), bullishSharePct: Number(bullishSharePct.toFixed(2)), bearishSharePct: Number(bearishSharePct.toFixed(2)), reason: "NEUTRAL_BREADTH" };
@@ -189,6 +189,7 @@ function closePaperQuantity(ledger, p, qty, executionPrice, now, reason, trigger
   p.slippagePaidUsdt = round((Number(p.slippagePaidUsdt) || 0) + exitSlippage, 8);
   p.grossRealizedPnlUsdt = round((Number(p.grossRealizedPnlUsdt) || 0) + gross, 8);
   p.realizedPnlUsdt = round((p.realizedPnlUsdt ?? 0) + gross - exitFee - exitSlippage, 8);
+  if (/^TP[123]_TAKE_PROFIT$/.test(String(reason))) { const tpStageNumber = Number(stage) || Number(String(reason).match(/^TP([123])_/)?.[1] || 0); const tpDescription = tpStageNumber === 1 ? "TP1: başlangıç pozisyonunun yüzde 50’si kârla kapatıldı; kalan yüzde 50 açık ve yönetimde." : tpStageNumber === 2 ? "TP2: kalan pozisyonun yüzde 52’si kârla kapatıldı; kalan miktarın yüzde 48’i açık." : "TP3: kalan miktarın tamamı kapatıldı; pozisyon kapandı."; const baseReason = String(p.openReasonTr || p.openReason || p.reasonTr || p.reason || p.setupReason || p.executionDecisionReason || "").trim(); const updatedReason = [baseReason, tpDescription].filter(Boolean).join(" | "); p.setupReason = updatedReason; p.openReasonTr = updatedReason; p.reasonTr = updatedReason; p.executionDecisionReason = updatedReason; }
   if (/^TP[123]_TAKE_PROFIT$/.test(String(reason))) { const initialQtyForTp = Number(p.initialQty ?? p.qty); const allocatedEntryFeeForTp = round((Number(p.entryFeeUsdt) || 0) * (initialQtyForTp > 0 ? closeQty / initialQtyForTp : 0), 8); p.tpRealizedPnlUsdt = round((Number(p.tpRealizedPnlUsdt) || 0) + gross - exitFee - exitSlippage - allocatedEntryFeeForTp, 8); }
   ledger.balance = round(ledger.balance + gross - exitFee - exitSlippage, 8);
   ledger.dailyPnl = round(ledger.dailyPnl + gross - exitFee - exitSlippage, 8);
@@ -338,7 +339,7 @@ function updatePositions(ledger, prices, now = Date.now(), _marketStopSymbols = 
       const target = stage === 1 ? first : stage === 2 ? second : third;
       if (!Number.isFinite(target) || !crossed(Number(target))) break;
       const finalTarget = stage === maxStage;
-      const closeQty = finalTarget ? p.qty : Math.min(p.qty, round(Number(p.initialQty) * (stage === 1 ? 0.5 : third ? 0.25 : 0.5), 8));
+      const closeQty = finalTarget ? p.qty : Math.min(p.qty, round(stage === 1 ? Number(p.initialQty) * 0.5 : third ? Number(p.qty) * 0.52 : Number(p.qty) * 0.5, 8));
       if (closeQty <= 0) break;
       p.targetStage = stage;
       p.targetStagesReached = [.../* @__PURE__ */ new Set([...p.targetStagesReached, stage])].sort((a, b) => a - b);
@@ -436,7 +437,7 @@ function summarizeAnalyticsGroup(key, trades) {
   return { key, trades: trades.length, tradesWithProvisionalPnl: provisionalTrades.length, provisionalNetPnlUsdt: round(provisionalNetPnlUsdt, 8), reportedTrades: reportedTrades.length, reportedNetPnlUsdt: round(reportedNetPnlUsdt, 8), provisionalWins, provisionalLosses, averageReturnPct, wins: wins.length, losses: losses.length, breakeven, winRatePct: pnlTrades.length ? round(wins.length / pnlTrades.length * 100, 2) : null, netPnlUsdt: round(netPnlUsdt, 8), expectancyUsdt: pnlTrades.length ? round(netPnlUsdt / pnlTrades.length, 8) : null, grossWinsUsdt: round(grossWinsUsdt, 8), grossLossesUsdt: round(grossLossesUsdt, 8), profitFactor: grossLossesUsdt > 0 ? round(grossWinsUsdt / grossLossesUsdt, 4) : null, feesKnownUsdt: round(feesKnownUsdt, 8), tradesWithKnownFees: feeTrades.length, fundingPaidUsdt: round(fundingPaidUsdt, 8), tradesWithKnownFunding: fundingTrades.length, slippagePaidUsdt: round(slippagePaidUsdt, 8), tradesWithKnownSlippage: slippageTrades.length };
 }
 __name(summarizeAnalyticsGroup, "summarizeAnalyticsGroup");
-function summarizeClosedTradeAnalytics(input) {
+function summarizeClosedTradeAnalytics(input, btcContextCandles = null) {
   const raw = Array.isArray(input) ? input : [];
   const trades = raw.map((value) => {
     const p = value && typeof value === "object" ? value : {};
@@ -449,6 +450,14 @@ function summarizeClosedTradeAnalytics(input) {
     const feeFallback = entryFee !== null && exitFees !== null ? entryFee + exitFees : null;
     const primaryTrend = typeof p.primaryTrend === "string" && p.primaryTrend !== "UNKNOWN" ? p.primaryTrend : typeof p.audit?.htfTrend === "string" ? p.audit.htfTrend : "UNKNOWN";
     const marketPhase = typeof p.marketPhase === "string" && p.marketPhase !== "UNKNOWN" ? p.marketPhase : typeof p.audit?.marketRegime === "string" ? p.audit.marketRegime : "UNKNOWN";
+    const recordedBtcBias = String(p.btcBias ?? p.audit?.btcBias ?? "").toUpperCase();
+    const openedRaw = p.openedAt ?? p.entryTime ?? p.openTime ?? p.createdAt;
+    let openedAt = typeof openedRaw === "number" ? openedRaw : Date.parse(String(openedRaw ?? ""));
+    if (Number.isFinite(openedAt) && openedAt > 0 && openedAt < 1e12) openedAt *= 1e3;
+    const historical4h = (btcContextCandles?.fourHour ?? []).filter((c) => Number.isFinite(c.time) && c.time + 144e5 <= openedAt).slice(-72);
+    const historical1d = (btcContextCandles?.oneDay ?? []).filter((c) => Number.isFinite(c.time) && c.time + 864e5 <= openedAt).slice(-72);
+    const reconstructedBias = historical4h.length >= 24 && historical1d.length >= 24 ? combineStructuralBias(backtestComparableStructuralBias(historical4h), backtestComparableStructuralBias(historical1d)) : "UNAVAILABLE";
+    const btcBias = ["BULLISH", "BEARISH", "NEUTRAL"].includes(recordedBtcBias) ? recordedBtcBias : reconstructedBias;
     const closeSource = typeof p.closeSource === "string" ? p.closeSource : null;
     const closeType = p.closeReason === "MANUAL_CLOSE" || (closeSource && closeSource.startsWith("MANUAL")) ? "MANUAL" : "AUTOMATED";
     const dataQuality = [];
@@ -467,7 +476,9 @@ function summarizeClosedTradeAnalytics(input) {
       marketPhase,
       marketRegime: marketPhase,
       htfTrend: primaryTrend,
-      btcBias: typeof p.audit?.btcBias === "string" ? p.audit.btcBias : "UNAVAILABLE",
+      btcBias,
+      altcoinBreadthBias: String(p.altcoinBreadthBias ?? p.audit?.altcoinBreadthBias ?? "UNAVAILABLE").toUpperCase(),
+      btcAlignment: btcBias === "BULLISH" && String(p.side ?? "").toUpperCase() === "LONG" || btcBias === "BEARISH" && String(p.side ?? "").toUpperCase() === "SHORT" ? "BTC_ALIGNED" : btcBias === "BULLISH" && String(p.side ?? "").toUpperCase() === "SHORT" || btcBias === "BEARISH" && String(p.side ?? "").toUpperCase() === "LONG" ? "BTC_COUNTER" : "BTC_UNAVAILABLE",
       setupTimeframe: typeof p.setupTimeframe === "string" ? p.setupTimeframe : "UNKNOWN",
       pnlStatus,
       pnlAccountingStatus: typeof p.pnlAccountingStatus === "string" ? p.pnlAccountingStatus : "UNKNOWN",
@@ -493,7 +504,7 @@ function summarizeClosedTradeAnalytics(input) {
       closeReason: typeof p.closeReason === "string" ? p.closeReason : null,
       closeSource,
       closeType,
-      btcContextStatus: typeof p.btcContextStatus === "string" ? p.btcContextStatus : typeof p.audit?.btcBias === "string" ? (p.audit.btcBias === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE") : "UNAVAILABLE",
+      btcContextStatus: btcBias === "UNAVAILABLE" ? "UNAVAILABLE" : "AVAILABLE",
       dataQuality
     };
   });
@@ -541,6 +552,9 @@ function summarizeClosedTradeAnalytics(input) {
     byModelSideTimeframeCloseType: group((t) => [t.model, t.side, t.entryTimeframe, t.tradeStyle, t.closeType, t.primaryTrend, t.marketPhase].join(" | ")),
     bySide: group((t) => t.side),
     byMarketPhase: group((t) => t.marketPhase),
+    byBtcAlignment: group((t) => t.btcAlignment),
+    byBtcBias: group((t) => t.btcBias),
+    byAltcoinBreadth: group((t) => t.altcoinBreadthBias),
     byModelSideTimeframe: group((t) => [t.model, t.side, t.entryTimeframe, t.tradeStyle, t.primaryTrend, t.marketPhase].join(" | ")),
     recentTrades: trades.slice().sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0)).slice(0, 100)
   };
@@ -549,6 +563,12 @@ __name(summarizeClosedTradeAnalytics, "summarizeClosedTradeAnalytics");
 
 // src/strategy-allowlist.ts
 var ACTIVE_SWING_MODEL_IDS = [
+  "S01_SWEEP_MSS_FVG",
+  "S02_BREAKER_RETEST",
+  "S03_BOS_DISPLACEMENT",
+  "S04_RANGE_DEVIATION",
+  "S05_FAILED_BREAKOUT",
+  "S06_OB_REACTION",
   "W01_HTF_OB_REVERSAL",
   "W02_SUPPLY_DEMAND_REVERSAL",
   "W03_SWEEP_CHOCH",
@@ -565,7 +585,7 @@ function isActiveSwingModelId(value) {
 }
 __name(isActiveSwingModelId, "isActiveSwingModelId");
 function filterActiveSwingSetups(setups) {
-  return Array.isArray(setups) ? setups.filter((x) => isActiveSwingModelId(x?.model) && x?.tradeStyle === "SWING" && ["4h", "1d"].includes(String(x?.setupTimeframe ?? "").toLowerCase())) : [];
+  return Array.isArray(setups) ? setups.filter((x) => isActiveSwingModelId(x?.model)) : [];
 }
 __name(filterActiveSwingSetups, "filterActiveSwingSetups");
 function filterActiveSwingDiagnostics(diagnostics) {
@@ -575,7 +595,7 @@ function filterActiveSwingDiagnostics(diagnostics) {
     const timeframeDiagnostics = {}, rejectionSummary = { ...(d.rejectionSummary ?? {}) };
     if (!Object.keys(rejectionSummary).length) for (const value of Object.values(td)) for (const [reason, count] of Object.entries(value?.rejections ?? {})) rejectionSummary[reason] = (rejectionSummary[reason] ?? 0) + Math.max(0, Number(count) || 0);
     for (const [key, value] of Object.entries(td)) { if (!isActiveSwingModelId(key)) continue; const count = Math.max(0, Number(value?.setups) || 0); if (count > 0) timeframeDiagnostics[key] = { setups: count }; }
-    const setupDetails = Array.isArray(d.setupDetails) ? d.setupDetails.filter((item) => isActiveSwingModelId(item?.model) && ["4h", "1d"].includes(String(item?.setupTimeframe ?? "").toLowerCase())).map((item) => ({
+    const setupDetails = Array.isArray(d.setupDetails) ? d.setupDetails.filter((item) => isActiveSwingModelId(item?.model)).map((item) => ({
       model: item.model, tradeStyle: item.tradeStyle, entryTimeframe: item.entryTimeframe, setupTimeframe: item.setupTimeframe, side: item.side,
       score: item.score, status: item.status, reason: String(item.reason ?? "").slice(0, 200), entry: item.entry, stopLoss: item.stopLoss, takeProfit: item.takeProfit,
       tp1: item.tp1, tp2: item.tp2, tp3: item.tp3, confidence: item.confidence, confidenceStatus: item.confidenceStatus, confidenceSampleSize: item.confidenceSampleSize, riskReward: item.riskReward
@@ -602,13 +622,29 @@ var SCORE_BANDS = Object.freeze([
   { min: 84, max: 100, label: "HIGH_QUALITY" }
 ]);
 var ENGINE_CONFIG = Object.freeze({
+  SCALP: Object.freeze({
+    id: "SCALP",
+    directionTimeframe: "1h",
+    zoneTimeframe: "15m",
+    setupTimeframe: "5m",
+    entryTimeframe: "5m",
+    scoreWeights: Object.freeze({ htf: 15, liquidity: 20, marketStructure: 20, zone: 15, entryConfirmation: 20, volume: 10 }),
+    setups: Object.freeze([
+      "S01_SWEEP_MSS_FVG",
+      "S02_BREAKER_RETEST",
+      "S03_BOS_DISPLACEMENT",
+      "S04_RANGE_DEVIATION",
+      "S05_FAILED_BREAKOUT",
+      "S06_OB_REACTION"
+    ])
+  }),
   SWING: Object.freeze({
     id: "SWING",
     directionTimeframe: "1d",
     zoneTimeframe: "4h",
-    setupTimeframe: "4h",
-    entryTimeframe: "4h",
-    scoreWeights: Object.freeze({ htf: 15, btcWeekly: 10, btcDaily: 10, dominance: 15, liquidity: 10, marketStructure: 15, zone: 10, entryConfirmation: 5, volume: 10 }),
+    setupTimeframe: "1h",
+    entryTimeframe: "15m",
+    scoreWeights: Object.freeze({ htf: 20, liquidity: 15, marketStructure: 20, zone: 20, entryConfirmation: 15, volume: 10 }),
     setups: Object.freeze([
       "W01_HTF_OB_REVERSAL",
       "W02_SUPPLY_DEMAND_REVERSAL",
@@ -625,6 +661,7 @@ var RISK_CONFIG = Object.freeze({
   normalRiskPercentOfEquity: 2,
   reducedRiskPercentOfEquity: 1,
   minimumRiskReward: 1,
+  maximumRiskReward: 4,
   standardTargetR: 3.5,
   extendedTargetRequiresHighQuality: true,
   extendedTargetRequiresVolumeAndLiquidity: true,
@@ -656,10 +693,6 @@ function calibrateHistoricalConfidence(candidate, history, asOf = Date.now(), mi
     if (t.status !== "CLOSED" || !Number.isFinite(t.closedAt) || Number(t.closedAt) >= asOf || t.tradeStyle !== candidate.engine || t.model !== candidate.setupId || t.symbol !== candidate.symbol || t.side !== candidate.side) return false;
     const audit = t.audit ?? {};
     if (candidate.marketRegime === "UNAVAILABLE" || String(audit.marketRegime ?? "UNAVAILABLE") !== candidate.marketRegime || Boolean(audit.htfAligned) !== candidate.htfAligned) return false;
-    if (candidate.setupTimeframe && String(t.setupTimeframe ?? audit.setupTimeframe ?? "") !== candidate.setupTimeframe) return false;
-    if (candidate.btcWeeklyBias && String(audit.btcWeeklyBias ?? "UNAVAILABLE") !== candidate.btcWeeklyBias) return false;
-    if (candidate.btcDailyBias && String(audit.btcDailyBias ?? "UNAVAILABLE") !== candidate.btcDailyBias) return false;
-    if (candidate.dominanceRegime && String(audit.dominanceRegime ?? "UNAVAILABLE") !== candidate.dominanceRegime) return false;
     const r = Number.isFinite(t.realizedR) ? Number(t.realizedR) : Number(t.initialRiskUsdt ?? t.riskUsdt) > 0 && Number.isFinite(t.pnlUsdt) ? Number(t.pnlUsdt) / Number(t.initialRiskUsdt ?? t.riskUsdt) : NaN;
     return Number.isFinite(r);
   }).map((t) => Number.isFinite(t.realizedR) ? Number(t.realizedR) : Number(t.pnlUsdt) / Number(t.initialRiskUsdt ?? t.riskUsdt));
@@ -721,42 +754,22 @@ function zones(rows, tf) {
   if (equalHigh) out.push(equalHigh);
   if (equalLow) out.push(equalLow);
   const r = rows.slice(-40, -1), hi = Math.max(...r.map((x) => x.high)), lo = Math.min(...r.map((x) => x.low)), cl = last(rows).close;
-  if (r.length >= 20 && cl > 0) {
-    const path = r.slice(1).reduce((sum, c, i) => sum + Math.abs(c.close - r[i].close), 0);
-    const efficiency = path > 0 ? Math.abs(r.at(-1).close - r[0].close) / path : 0;
-    const overlaps = r.slice(1).map((c, i) => {
-      const p = r[i], overlap = Math.max(0, Math.min(c.high, p.high) - Math.max(c.low, p.low));
-      return overlap / Math.max(1e-12, Math.min(c.high - c.low, p.high - p.low));
-    });
-    const overlapRatio = overlaps.reduce((sum, value) => sum + value, 0) / Math.max(1, overlaps.length);
-    const upCloses = r.slice(1).filter((c, i) => c.close > r[i].close).length;
-    const downCloses = r.slice(1).filter((c, i) => c.close < r[i].close).length;
-    const directionalCloses = Math.max(upCloses, downCloses) / Math.max(1, r.length - 1);
-    const widthPct = (hi - lo) / cl;
-    const regime = widthPct <= 0.12 && efficiency <= 0.28 && overlapRatio >= 0.55 ? "RANGE" :
-      efficiency >= 0.38 && directionalCloses >= 0.62 ? "DIRECTIONAL_ORDERFLOW" : "MIXED";
-    if (regime === "RANGE") out.push({ kind: "RANGE", regime, efficiency, overlapRatio, directionalCloses, side: cl < (hi + lo) / 2 ? "LONG" : "SHORT", bottom: lo, top: hi, formedAt: last(r).time, sourceTimeframe: tf });
-    else if (regime === "DIRECTIONAL_ORDERFLOW") out.push({ kind: "ORDERFLOW_REGIME", regime, efficiency, overlapRatio, directionalCloses, side: upCloses > downCloses ? "LONG" : "SHORT", bottom: lo, top: hi, formedAt: last(r).time, sourceTimeframe: tf });
-  }
+  if (r.length >= 20 && (hi - lo) / cl <= 0.12) out.push({ kind: "RANGE", side: cl < (hi + lo) / 2 ? "LONG" : "SHORT", bottom: lo, top: hi, formedAt: last(r).time, sourceTimeframe: tf });
   return out.slice(-60);
 }
 __name(zones, "zones");
 function classifyMarketRegime(structure, candles, timeframeZones) {
   const recentTransition = structure.events.some((event) => (event.type === "CHoCH" || event.type === "MSS") && event.candleIndex >= Math.max(0, candles.length - 3));
   if (recentTransition) return "TRANSITION";
-  const regimeZones = timeframeZones.filter((zone) => zone.kind === "RANGE" || zone.kind === "ORDERFLOW_REGIME").sort((a, b) => Number(a.formedAt ?? 0) - Number(b.formedAt ?? 0));
-  const latestRegime = regimeZones.at(-1);
-  if (latestRegime?.kind === "RANGE") return "RANGE";
-  if (latestRegime?.kind === "ORDERFLOW_REGIME") return "DIRECTIONAL_ORDERFLOW";
   if (structure.trend === "LONG") return "BULLISH";
   if (structure.trend === "SHORT") return "BEARISH";
+  if (timeframeZones.some((zone) => zone.kind === "RANGE")) return "RANGE";
   return "UNAVAILABLE";
 }
 __name(classifyMarketRegime, "classifyMarketRegime");
 function volumePoints(rows, max) {
-  const raw = last(rows)?.volume, v = raw === null || raw === void 0 ? NaN : Number(raw);
-  const base = median(rows.slice(-21, -1).map((x) => x.volume === null || x.volume === void 0 ? NaN : Number(x.volume)).filter(Number.isFinite));
-  if (!Number.isFinite(v) || base === null || base <= 0) return 0;
+  const v = last(rows).volume, base = median(rows.slice(-21, -1).map((x) => Number(x.volume)));
+  if (v === void 0 || base === null || base <= 0) return 0;
   return Math.min(max, v / base >= 1.8 ? max : v / base >= 1.2 ? Math.round(max * 0.7) : v / base >= 0.8 ? Math.round(max * 0.5) : Math.round(max * 0.2));
 }
 __name(volumePoints, "volumePoints");
@@ -783,8 +796,7 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
   const sweep = side === "LONG" ? c.low < lo && c.close > lo || !!equalLow && c.low < equalLow.bottom && c.close > equalLow.top : c.high > hi && c.close < hi || !!equalHigh && c.high > equalHigh.top && c.close < equalHigh.bottom;
   const ev = [...st.events].reverse().find((x) => x.side === side && x.candleIndex >= rows.length - 4);
   const fvg = [...z].reverse().find((x) => x.kind === "FVG" && x.side === side && x.formedAt >= rows[rows.length - 8].time);
-  const breaker = [...z].reverse().find((x) => x.kind === "BREAKER" && x.side === side && (id !== "W04_BREAKER_RETEST" || x.sourceTimeframe === "4h")), ob = [...z].reverse().find((x) => (x.kind === "ORDER_BLOCK" || x.kind === "MITIGATION") && x.side === side), htfOb = [...z].reverse().find((x) => x.kind === "ORDER_BLOCK" && x.side === side && x.sourceTimeframe === "4h"), supplyDemand = [...z].reverse().find((x) => x.kind === "SUPPLY_DEMAND" && x.side === side && x.sourceTimeframe === "4h"), range = z.find((x) => x.kind === "RANGE" && x.regime === "RANGE");
-  const rangeDeviation = range ? side === "LONG" ? c.low < range.bottom && c.close > range.bottom : c.high > range.top && c.close < range.top : false;
+  const breaker = [...z].reverse().find((x) => x.kind === "BREAKER" && x.side === side && (id !== "W04_BREAKER_RETEST" || x.sourceTimeframe === "4h")), ob = [...z].reverse().find((x) => (x.kind === "ORDER_BLOCK" || x.kind === "MITIGATION") && x.side === side), htfOb = [...z].reverse().find((x) => x.kind === "ORDER_BLOCK" && x.side === side && x.sourceTimeframe === "4h"), supplyDemand = [...z].reverse().find((x) => x.kind === "SUPPLY_DEMAND" && x.side === side && x.sourceTimeframe === "4h"), range = z.find((x) => x.kind === "RANGE");
   const retest = /* @__PURE__ */ __name((x) => !!x && hit(c, x), "retest");
   switch (id) {
     case "S01_SWEEP_MSS_FVG":
@@ -799,7 +811,7 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
       return { ok: !!ev && (ev.type === "BOS" || ev.type === "MSB") && ev.displacement, zone: fvg, reason: "Close-confirmed BOS/MSB + displacement" };
     case "S04_RANGE_DEVIATION":
     case "W05_RANGE_DEVIATION":
-      return { ok: !!range && range.regime === "RANGE" && rangeDeviation && sweep, zone: range, reason: "Confirmed horizontal range deviation and close-confirmed re-entry", liquiditySweep: rangeDeviation };
+      return { ok: !!range && sweep, zone: range, reason: "Range deviation and reclaim", liquiditySweep: sweep };
     case "S05_FAILED_BREAKOUT":
       return { ok: sweep && !!ev, zone: range, reason: "Failed breakout reclaim", liquiditySweep: sweep };
     case "S06_OB_REACTION":
@@ -825,109 +837,59 @@ function evaluatePattern(id, side, rows, st, z, htfStructure, htfRows, dailyRows
   }
 }
 __name(evaluatePattern, "evaluatePattern");
-function normalizeBiasSide(value) {
-  const v = String(value ?? "").toUpperCase();
-  return v === "BULLISH" || v === "LONG" || v === "UP" ? "LONG" : v === "BEARISH" || v === "SHORT" || v === "DOWN" ? "SHORT" : null;
-}
-function oppositeSide(side) { return side === "LONG" ? "SHORT" : side === "SHORT" ? "LONG" : null; }
-function dominancePointsForSide(symbol, side, dominance, weight) {
-  if (!dominance) return 0;
-  const btc = normalizeBiasSide(dominance.btcDomDirection);
-  const alt = normalizeBiasSide(dominance.altDomDirection);
-  const usdt = normalizeBiasSide(dominance.usdtDomDirection);
-  const support = [];
-  if (btc) support.push(symbol === "BTC-USDT" ? btc : oppositeSide(btc));
-  if (alt && symbol !== "BTC-USDT") support.push(alt);
-  if (usdt) support.push(oppositeSide(usdt));
-  if (!support.length) return 0;
-  return Math.round(support.filter((x) => x === side).length / support.length * weight);
-}
-function makeSetup(engine, id, symbol, side, entryRows, setupRows, st, z, htfTrend, btcBias, reason, history, marketRegime, liquiditySweep, btcWeeklyBias = "UNAVAILABLE", btcDailyBias = "UNAVAILABLE", dominanceContext = null, setupTimeframe = "4h") {
+function makeSetup(engine, id, symbol, side, entryRows, setupRows, st, z, htfTrend, btcBias, reason, history, marketRegime, liquiditySweep) {
   const c = last(entryRows), w = setupRows.slice(-12), lo = Math.min(...w.map((x) => x.low)), hi = Math.max(...w.map((x) => x.high));
   const stop = side === "LONG" ? Math.min(lo, z?.bottom ?? lo) : Math.max(hi, z?.top ?? hi);
   if (!Number.isFinite(stop) || stop <= 0 || (side === "LONG" ? stop >= c.close : stop <= c.close)) return null;
-  const risk = Math.abs(c.close - stop), weights = ENGINE_CONFIG[engine].scoreWeights, ev = st.events.at(-1), htfAligned = htfTrend === side;
-  const weeklySide = normalizeBiasSide(btcWeeklyBias), dailySide = normalizeBiasSide(btcDailyBias);
-  const btcOpposing = [weeklySide, dailySide].some((value) => value !== null && value !== side);
-  const htfOpposing = htfTrend !== "NEUTRAL" && !htfAligned, countertrend = htfOpposing || btcOpposing;
-  const btcContextStatus = weeklySide === null || dailySide === null ? "PARTIAL_UNAVAILABLE" : btcOpposing ? "OPPOSING" : weeklySide === side && dailySide === side ? "ALIGNED" : "MIXED";
-  const dominanceAvailable = dominanceContext?.available === true;
-  const dominanceRegime = dominanceContext ? [dominanceContext.btcDomDirection ?? "UNAVAILABLE", dominanceContext.altDomDirection ?? "UNAVAILABLE", dominanceContext.usdtDomDirection ?? "UNAVAILABLE"].join("|") : "UNAVAILABLE";
-  const confidenceStats = calibrateHistoricalConfidence({ engine, symbol, setupId: id, side, marketRegime, htfAligned, setupTimeframe, btcWeeklyBias, btcDailyBias, dominanceRegime }, history, c.time);
-  const zoneQuality = z ? z.kind === "FVG" || z.kind === "BREAKER" || z.kind === "ORDER_BLOCK" || z.kind === "OTE" ? 1 : z.kind === "SUPPLY_DEMAND" ? 0.9 : 0.8 : 0;
-  const points = {
-    htf: htfTrend === side ? weights.htf : htfTrend === "NEUTRAL" ? Math.round(weights.htf * 0.5) : 0,
-    btcWeekly: weeklySide === side ? weights.btcWeekly : weeklySide === null ? 0 : 0,
-    btcDaily: dailySide === side ? weights.btcDaily : dailySide === null ? 0 : 0,
-    dominance: dominancePointsForSide(symbol, side, dominanceContext, weights.dominance),
-    liquidity: liquiditySweep ? weights.liquidity : 0,
-    marketStructure: ev?.side === side ? ev.displacement ? weights.marketStructure : Math.round(weights.marketStructure * 0.65) : 0,
-    zone: Math.round(weights.zone * zoneQuality),
-    entryConfirmation: weights.entryConfirmation,
-    volume: volumePoints(entryRows, weights.volume)
-  };
-  const score = Object.values(points).reduce((a, b) => a + b, 0), band = scoreBand(score);
-  const riskMultiplier = countertrend || !htfAligned || score < 80 ? 0.5 : 1;
-  const contextReady = weeklySide !== null && dailySide !== null && dominanceAvailable;
-  const status = !contextReady ? score >= 60 ? "WAIT" : "REJECTED" : countertrend ? score >= 84 ? "READY" : score >= 70 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED" : score >= 70 ? "READY" : score >= 65 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED";
-  const tp1 = c.close + (side === "LONG" ? 1 : -1) * risk, tp2 = c.close + (side === "LONG" ? 2 : -2) * risk, tp3 = c.close + (side === "LONG" ? 3.5 : -3.5) * risk;
-  return { symbol, side, model: id, tradeStyle: engine, entryTimeframe: setupTimeframe, setupTimeframe, setupCandleTime: c.time, score, scoreBreakdown: points, entry: c.close, stopLoss: stop, takeProfit: tp3, tp1, tp2, tp3, riskReward: 3.5, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, reason: id + ": " + reason + "; " + band + "; BTC W " + (btcWeeklyBias ?? "UNAVAILABLE") + " / D " + (btcDailyBias ?? "UNAVAILABLE"), candleTime: c.time, status, riskMultiplier, btcContextStatus, confirmations: [id, "CLOSED_CANDLE_CONFIRMATION", ...z ? [z.kind] : [], ...ev ? [ev.type] : []], audit: { engine, setupId: id, scoreBand: band, riskPercent: riskMultiplier * 2, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, marketRegime, htfAligned, htfTrend, btcBias, btcWeeklyBias: btcWeeklyBias ?? "UNAVAILABLE", btcDailyBias: btcDailyBias ?? "UNAVAILABLE", dominanceRegime, countertrend, structureTrend: st.trend, structureEvent: ev ?? null, zone: z ?? null, closedCandleOnly: true, volume: c.volume === null || c.volume === void 0 || !Number.isFinite(Number(c.volume)) ? "UNAVAILABLE" : "AVAILABLE", funding: latestFundingSnapshots.has(symbol) ? "AVAILABLE" : "UNAVAILABLE", fundingRate: latestFundingSnapshots.get(symbol)?.rate ?? null, fundingNextTime: latestFundingSnapshots.get(symbol)?.nextFundingTime ?? null, openInterest: "UNAVAILABLE", btcDominance: dominanceContext?.btcDomPct ?? "UNAVAILABLE", altcoinDominance: dominanceContext?.altDomPct ?? "UNAVAILABLE", usdtDominance: dominanceContext?.usdtDomPct ?? "UNAVAILABLE", dominanceDataStatus: dominanceAvailable ? "AVAILABLE" : "UNAVAILABLE", aggressorFlow: "UNAVAILABLE" } };
+  const risk = Math.abs(c.close - stop), weights = ENGINE_CONFIG[engine].scoreWeights, ev = st.events.at(-1), htfAligned = htfTrend === side, btcSide = btcBias === "BULLISH" ? "LONG" : btcBias === "BEARISH" ? "SHORT" : null, btcOpposing = btcSide !== null && btcSide !== side, htfOpposing = htfTrend !== "NEUTRAL" && !htfAligned, countertrend = htfOpposing || btcOpposing, btcContextStatus = btcBias === "UNAVAILABLE" ? "UNAVAILABLE" : btcBias === "NEUTRAL" ? "MIXED" : btcOpposing ? "OPPOSING" : "ALIGNED", confidenceStats = calibrateHistoricalConfidence({ engine, symbol, setupId: id, side, marketRegime, htfAligned }, history, c.time);
+  const zoneQuality = z ? z.kind === "FVG" || z.kind === "BREAKER" || z.kind === "ORDER_BLOCK" || z.kind === "OTE" ? 1 : z.kind === "SUPPLY_DEMAND" ? 0.9 : 0.8 : 0, points = { htf: htfTrend === side ? btcOpposing ? Math.round(weights.htf * 0.6) : weights.htf : htfTrend === "NEUTRAL" ? Math.round(weights.htf * 0.7) : Math.round(weights.htf * 0.35), liquidity: liquiditySweep ? weights.liquidity : 0, marketStructure: ev?.side === side ? ev.displacement ? weights.marketStructure : Math.round(weights.marketStructure * 0.65) : 0, zone: Math.round(weights.zone * zoneQuality), entryConfirmation: weights.entryConfirmation, volume: volumePoints(entryRows, weights.volume) };
+  const score = Object.values(points).reduce((a, b) => a + b, 0), band = scoreBand(score), tf = engine === "SCALP" ? "5m" : "1h", etf = engine === "SCALP" ? "5m" : "15m", riskMultiplier = countertrend || !htfAligned || score < 80 ? 0.5 : 1, status = countertrend ? score >= 84 ? "READY" : score >= 70 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED" : score >= 70 ? "READY" : score >= 65 ? "WATCH" : score >= 60 ? "WAIT" : "REJECTED", tp1 = c.close + (side === "LONG" ? 1 : -1) * risk, tp2 = c.close + (side === "LONG" ? 2 : -2) * risk, tp3 = c.close + (side === "LONG" ? 3.5 : -3.5) * risk, tp2RiskReward = risk > 0 ? Math.abs(tp2 - c.close) / risk : 0, rewardRisk = risk > 0 ? Math.abs(tp3 - c.close) / risk : 0;
+  if (!Number.isFinite(rewardRisk) || rewardRisk + 1e-9 < RISK_CONFIG.minRewardRisk || rewardRisk - 1e-9 > RISK_CONFIG.maxRewardRisk) return null;
+  return { symbol, side, model: id, tradeStyle: engine, entryTimeframe: etf, setupTimeframe: tf, setupCandleTime: c.time, score, scoreBreakdown: points, entry: c.close, stopLoss: stop, takeProfit: tp3, tp1, tp2, tp3, riskReward: Number(rewardRisk.toFixed(2)), tp2RiskReward, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, reason: id + ": " + reason + "; " + band + "; BTC " + btcContextStatus, candleTime: c.time, status, riskMultiplier, btcContextStatus, confirmations: [id, "CLOSED_CANDLE_CONFIRMATION", ...z ? [z.kind] : [], ...ev ? [ev.type] : []], audit: { engine, setupId: id, scoreBand: band, riskPercent: riskMultiplier * 2, confidence: confidenceStats.confidence, confidenceStatus: confidenceStats.status, confidenceSampleSize: confidenceStats.sampleSize, confidenceWinRate: confidenceStats.winRate, confidenceAverageR: confidenceStats.averageR, confidenceProfitFactor: confidenceStats.profitFactor, marketRegime, htfAligned, htfTrend, btcBias, countertrend, structureTrend: st.trend, structureEvent: ev ?? null, zone: z ?? null, closedCandleOnly: true, volume: c.volume === void 0 ? "UNAVAILABLE" : "AVAILABLE", funding: latestFundingSnapshots.has(symbol) ? "AVAILABLE" : "UNAVAILABLE", fundingRate: latestFundingSnapshots.get(symbol)?.rate ?? null, fundingNextTime: latestFundingSnapshots.get(symbol)?.nextFundingTime ?? null, openInterest: "UNAVAILABLE", btcDominance: "UNAVAILABLE", altcoinDominance: "UNAVAILABLE", usdtDominance: "UNAVAILABLE", aggressorFlow: "UNAVAILABLE" } };
 }
 __name(makeSetup, "makeSetup");
-function requiresHtfDirectionalAlignment(id) { return false; }
+function requiresHtfDirectionalAlignment(id) {
+  return id === "S02_BREAKER_RETEST" || id === "S03_BOS_DISPLACEMENT" || id === "W04_BREAKER_RETEST" || id === "W08_BOS_CONTINUATION";
+}
 __name(requiresHtfDirectionalAlignment, "requiresHtfDirectionalAlignment");
-function evaluateEngine(engine, symbol, input, btcBias = "UNAVAILABLE", history = [], setupTfOverride = "4h", btcWeeklyBias = "UNAVAILABLE", btcDailyBias = "UNAVAILABLE", dominanceContext = null) {
-  if (engine !== "SWING" || !["4h", "1d"].includes(setupTfOverride)) return { engine, symbol, setups: [], diagnostics: [], structure: {}, zones: [], unavailable: ["SCALP_ENGINE_REMOVED_OR_FORBIDDEN_TIMEFRAME"] };
-  const directionTf = "1d", zoneTf = "4h", setupTf = setupTfOverride, entryTf = setupTf;
-  const frames = [...new Set([directionTf, zoneTf, setupTf])], unavailable = frames.filter((tf) => !valid(input[tf]) || input[tf].length < (tf === "1d" ? 60 : 20));
+function evaluateEngine(engine, symbol, input, btcBias = "UNAVAILABLE", history = []) {
+  const directionTf = engine === "SCALP" ? "1h" : "1d", zoneTf = engine === "SCALP" ? "15m" : "4h", setupTf = engine === "SCALP" ? "5m" : "1h", entryTf = engine === "SCALP" ? "5m" : "15m";
+  const frames = [.../* @__PURE__ */ new Set([directionTf, zoneTf, setupTf, entryTf])], unavailable = frames.filter((tf) => !valid(input[tf]) || input[tf].length < (tf === "1d" ? 60 : 20));
   const structure = {}, allZones = [];
   for (const tf of frames) {
     const rows = input[tf];
-    if (valid(rows)) { structure[tf] = analyzeMarketStructure(rows); allZones.push(...zones(rows, tf)); }
+    if (valid(rows)) {
+      structure[tf] = analyzeMarketStructure(rows);
+      allZones.push(...zones(rows, tf));
+    }
   }
   const setups = [], diagnostics = [];
   if (unavailable.length) return { engine, symbol, setups, diagnostics, structure, zones: allZones, unavailable };
   const direction = structure[directionTf].trend, setupRows = input[setupTf], entryRows = input[entryTf], z = allZones.filter((x) => x.sourceTimeframe === zoneTf || x.sourceTimeframe === setupTf), ids = ENGINE_CONFIG[engine].setups;
-  const rawRecentVolume = last(entryRows)?.volume;
-  const recentVolume = rawRecentVolume === null || rawRecentVolume === void 0 ? NaN : Number(rawRecentVolume);
-  const baseVolume = median(entryRows.slice(-21, -1).map((x) => x.volume === null || x.volume === void 0 ? NaN : Number(x.volume)).filter(Number.isFinite));
-  const relativeVolume = Number.isFinite(recentVolume) && baseVolume > 0 ? recentVolume / baseVolume : NaN;
-  // Relative volume is contextual scoring only; it must never suppress otherwise valid price-action setups.
-  const volumeContext = Number.isFinite(relativeVolume) ? Number(relativeVolume.toFixed(3)) : "UNAVAILABLE";
   for (const side of ["LONG", "SHORT"]) for (const id of ids) {
-    const sig = evaluatePattern(id, side, setupRows, structure[setupTf], z, structure[zoneTf], input[zoneTf], input["1d"]);
-    if (!sig.ok) { diagnostics.push({ setupId: id, side, score: 0, band: "RED", accepted: false, reason: "PATTERN_CONDITIONS_NOT_MET", detail: sig.reason ?? null }); continue; }
-    const weeklySide = normalizeBiasSide(btcWeeklyBias), dailySide = normalizeBiasSide(btcDailyBias);
-    const btcOpposing = [weeklySide, dailySide].some((value) => value !== null && value !== side);
-    const htfOpposing = direction !== "NEUTRAL" && direction !== side;
-    const countertrend = btcOpposing || htfOpposing;
-    if (countertrend) {
-      const shift = [...structure[setupTf].events].reverse().find((event) => event.side === side && (event.type === "CHoCH" || event.type === "MSS") && event.displacement && event.candleIndex >= setupRows.length - 4);
-      const zoneKind = sig.zone?.kind;
-      const structuralZone = ["FVG", "BREAKER", "ORDER_BLOCK", "MITIGATION"].includes(zoneKind);
-      if (sig.liquiditySweep !== true || !shift || !structuralZone || !isEntryConfirmed(last(entryRows), side, sig.zone, true)) {
-        diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: "COUNTERTREND_EXTRA_FILTERS_NOT_CONFIRMED" });
-        continue;
-      }
+    const sig = evaluatePattern(id, side, setupRows, structure[setupTf], z, engine === "SWING" ? structure[zoneTf] : void 0, engine === "SWING" ? input[zoneTf] : void 0, engine === "SWING" ? input["1d"] : void 0);
+    if (!sig.ok) continue;
+    if (requiresHtfDirectionalAlignment(id) && direction !== side) {
+      diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: direction === "NEUTRAL" ? "HTF_DIRECTION_UNCLEAR" : "HTF_DIRECTION_OPPOSING" });
+      continue;
     }
-    const retestRequired = new Set(["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W07_OTE"]).has(id);
+    const retestRequired = (/* @__PURE__ */ new Set(["S01_SWEEP_MSS_FVG", "S02_BREAKER_RETEST", "S04_RANGE_DEVIATION", "S06_OB_REACTION", "W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W07_OTE"])).has(id);
     if (!isEntryConfirmed(last(entryRows), side, sig.zone, retestRequired)) {
       diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: retestRequired ? "ENTRY_RETEST_NOT_CONFIRMED" : "ENTRY_CLOSE_NOT_CONFIRMED" });
       continue;
     }
     const observedRegime = classifyMarketRegime(structure[directionTf], input[directionTf], allZones.filter((x) => x.sourceTimeframe === directionTf));
-    const candidate = makeSetup(engine, id, symbol, side, entryRows, setupRows, structure[setupTf], sig.zone, direction, btcBias, sig.reason, history, observedRegime, sig.liquiditySweep === true, btcWeeklyBias, btcDailyBias, dominanceContext, setupTf);
-    if (!candidate) { diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: "INVALID_STRUCTURAL_STOP" }); continue; }
-    candidate.setupTimeframe = setupTf;
-    candidate.entryTimeframe = setupTf;
-    candidate.audit.setupTimeframe = setupTf;
+    const candidate = makeSetup(engine, id, symbol, side, entryRows, setupRows, structure[setupTf], sig.zone, direction, btcBias, sig.reason, history, observedRegime, sig.liquiditySweep === true);
+    if (!candidate) {
+      diagnostics.push({ setupId: id, side, score: 0, band: "RED", reason: "INVALID_STRUCTURAL_STOP" });
+      continue;
+    }
     setups.push(candidate);
-    diagnostics.push({ setupId: id, side, score: candidate.score, band: scoreBand(candidate.score), accepted: true, reason: sig.reason, relativeVolume: volumeContext });
+    diagnostics.push({ setupId: id, side, score: candidate.score, band: scoreBand(candidate.score), reason: sig.reason });
   }
   return { engine, symbol, setups, diagnostics, structure, zones: allZones, unavailable };
 }
 __name(evaluateEngine, "evaluateEngine");
-
 
 // src/bingx-demo.ts
 var MIN_LEVERAGE = 20;
@@ -1783,6 +1745,9 @@ async function openBingXDemoPosition(apiKey, apiSecret, setup, snapshot, setupKe
     if (!marketTargets) {
       return { ok: false, code: "MARKET_MOVED_OUTSIDE_SL_TP", error: "BingX demo price " + entryReferencePrice + " is on the wrong side of the structural stop; no market order was sent." };
     }
+    if (!Number.isFinite(marketTargets.riskReward) || marketTargets.riskReward + 1e-9 < RISK_CONFIG.minRewardRisk || marketTargets.riskReward - 1e-9 > RISK_CONFIG.maxRewardRisk) {
+      return { ok: false, code: "RR_OUTSIDE_1R_4R", error: "Actual BingX VST market fill would place the setup outside the inclusive 1R–4R range; no order was sent." };
+    }
     const stopDistance = Math.abs(entryReferencePrice - setup.stopLoss);
     const riskMultiplier = Number.isFinite(Number(setup.riskMultiplier)) ? Math.min(1, Math.max(0.5, Number(setup.riskMultiplier))) : 1;
     const allocationBudgetUsdt = round(Number(balance.equity) * 0.02, 8);
@@ -2189,6 +2154,9 @@ async function placeBingXDemoLimitEntry(apiKey, apiSecret, setup, snapshot, setu
     const long = setup.side === "LONG";
     const levelsValid = long ? setup.stopLoss < setup.entry && setup.entry < setup.tp1 && setup.tp2 > setup.tp1 : setup.stopLoss > setup.entry && setup.entry > setup.tp1 && setup.tp2 < setup.tp1;
     if (!levelsValid) return { ok: false, code: "INVALID_SL_TP", error: "Order-flow limit setup has invalid stop/target direction." };
+    const plannedTargets = calculateBingXDemoFilledTargets({ side: setup.side, entry: setup.entry, stopLoss: setup.stopLoss, referenceEntry: setup.entry, targetPrices: [setup.tp1, setup.tp2, setup.tp3, setup.tp4].filter((v) => Number.isFinite(v)) });
+    if (!plannedTargets || !Number.isFinite(plannedTargets.riskReward) || plannedTargets.riskReward + 1e-9 < RISK_CONFIG.minRewardRisk || plannedTargets.riskReward - 1e-9 > RISK_CONFIG.maxRewardRisk)
+      return { ok: false, code: "RR_OUTSIDE_1R_4R", error: "Planned BingX VST limit entry is outside the inclusive 1R–4R range; no order was sent." };
     failureStage = "CONTRACT_METADATA";
     await waitForDemoRateLimit();
     const contractResponse = await fetch(DEMO_BASE + "/openApi/swap/v2/quote/contracts?symbol=" + encodeURIComponent(setup.symbol), {
@@ -2388,7 +2356,7 @@ async function reconcileBingXDemoLimitEntry(apiKey, apiSecret, pending) {
   if (!(qty > 0)) return { status: "WAIT_POSITION_SYNC", pending };
   const setup = pending.setup, long = setup.side === "LONG";
   const filledTargets = calculateBingXDemoFilledTargets({ side: setup.side, entry: actualEntry, stopLoss: setup.stopLoss, referenceEntry: setup.entry, targetPrices: [setup.tp1, setup.tp2, setup.tp3, setup.tp4].filter((v) => Number.isFinite(v)) });
-  const valid2 = filledTargets !== null;
+  const valid2 = filledTargets !== null && Number.isFinite(filledTargets.riskReward) && filledTargets.riskReward + 1e-9 >= RISK_CONFIG.minRewardRisk && filledTargets.riskReward - 1e-9 <= RISK_CONFIG.maxRewardRisk;
   const actualTp1 = filledTargets?.tp1 ?? 0, actualTp2 = filledTargets?.tp2 ?? 0;
   if (!valid2) {
     await closeBingXDemoPosition(apiKey, apiSecret, position, pending.hedgeMode, 1);
@@ -3786,7 +3754,7 @@ var EngineState = class {
     const isPaperScan = request.method === "POST" && path === "/paper/scan";
     const isManualPaperClose = request.method === "POST" && (path === "/paper/close" || path === "/paper/close-all");
     if (isManualPaperClose) this.manualClosePendingCount = (Number(this.manualClosePendingCount) || 0) + 1;
-    const mutatesPaperLedger = request.method === "PUT" && path === "/state" || request.method === "POST" && ["/paper/scan", "/paper/close", "/paper/close-all", "/paper/settings", "/paper/capital-adjustment", "/runner", "/live/idempotency/claim", "/live/idempotency/release", "/live/entry/reserve", "/live/entry/release", "/live/positions", "/live/activation"].includes(path);
+    const mutatesPaperLedger = request.method === "PUT" && path === "/state" || request.method === "GET" && path === "/state" && this.tpDescriptionMigrationComplete !== true || request.method === "POST" && ["/paper/scan", "/paper/close", "/paper/close-all", "/paper/settings", "/paper/capital-adjustment", "/runner", "/live/idempotency/claim", "/live/idempotency/release", "/live/entry/reserve", "/live/entry/release", "/live/positions", "/live/activation"].includes(path);
     if (isPaperScan && (this.scanInProgress || this.manualClosePendingCount > 0)) return Response.json({ ok: true, skipped: true, reason: this.manualClosePendingCount > 0 ? "MANUAL_CLOSE_PRIORITY" : "SCAN_ALREADY_IN_PROGRESS" }, { status: 202, headers: { "cache-control": "no-store" } });
     if (isPaperScan) { this.scanInProgress = true; this.scanStartedAt = Date.now(); }
     try {
@@ -3836,6 +3804,8 @@ var EngineState = class {
     if (request.method === "POST" && url.pathname === "/scheduler/wake") {
       if (AUTOMATION_STOP) return Response.json({ ok: true, runnerEnabled: false, alarmScheduled: false, alarmAt: null, rearmed: false, lastScanAt: null });
       const engine = await this.readEngineState();
+      const migrationLedger = engine?.paperLedger;
+      if (migrationLedger && migrationLedger.tpDescriptionMigrationVersion !== 2) { let changed = 0; const backfillTrade = (trade) => { if (!trade || typeof trade !== "object") return; const stages = new Set(); for (const event of Array.isArray(trade.executionEvents) ? trade.executionEvents : []) { const match = String(event?.closeReason || "").match(/^TP([123])_TAKE_PROFIT$/); const stage = Number(event?.stage || match?.[1] || 0); if (stage >= 1 && stage <= 3 && match) stages.add(stage); } const targetStage = Math.max(0, Math.min(3, Number(trade.targetStage) || 0)); for (let stage = 1; stage <= targetStage; stage++) stages.add(stage); if (!stages.size) return; const baseRaw = String(trade.openReasonTr || trade.openReason || trade.reasonTr || trade.reason || trade.setupReason || trade.executionDecisionReason || "").trim(); const base = baseRaw.split(" | ").filter((part) => !part.startsWith("TP2:")).join(" | ").trim(); const notes = [...stages].sort((x, y) => x - y).map((stage) => stage === 1 ? "TP1: başlangıç pozisyonunun yüzde 50’si kârla kapatıldı; kalan yüzde 50 açık ve yönetimde." : stage === 2 ? "TP2: kalan pozisyonun yüzde 52’si kârla kapatıldı; kalan miktarın yüzde 48’i açık." : "TP3: kalan miktarın tamamı kapatıldı; pozisyon kapandı.").filter((note) => !base.includes(note.slice(0, 4))); if (!notes.length && base === baseRaw) return; const updated = [base, ...notes].filter(Boolean).join(" | "); trade.setupReason = updated; trade.openReasonTr = updated; trade.reasonTr = updated; trade.executionDecisionReason = updated; changed++; }; for (const trade of Array.isArray(migrationLedger.positions) ? migrationLedger.positions : []) backfillTrade(trade); for (const trade of Array.isArray(migrationLedger.closedTrades) ? migrationLedger.closedTrades : []) backfillTrade(trade); migrationLedger.tpDescriptionMigrationVersion = 2; await this.saveEngineState(engine); console.info("Paper TP description migration complete", JSON.stringify({ changed, positions: migrationLedger.positions?.length ?? 0, closedTrades: migrationLedger.closedTrades?.length ?? 0, at: new Date().toISOString() })); }
       const alarm = await this.state.storage.getAlarm();
       const now = Date.now();
       const scanStartedAt = Number(this.scanStartedAt) || Date.parse(engine.lastScanAt ?? "");
@@ -3858,6 +3828,7 @@ var EngineState = class {
         await this.deleteDurableAlarm();
         alarmAt = null;
       }
+      const ledger = engine.paperLedger ?? {}; const scanDiagnostics = Array.isArray(ledger.scanDiagnostics) ? ledger.scanDiagnostics : []; const setups = Array.isArray(ledger.setups) ? ledger.setups : []; const scanSummary = { scanUniverseSize: Number(ledger.scanUniverseSize ?? 0), scanBatchSize: Number(ledger.scanBatchSize ?? PAPER_SCAN_BATCH_NORMAL), scannedSymbols: Array.isArray(ledger.scannedSymbols) ? ledger.scannedSymbols.length : 0, scalpCandidates: setups.filter((x) => String(x.tradeStyle ?? "").toUpperCase() === "SCALP").length, swingCandidates: setups.filter((x) => String(x.tradeStyle ?? "").toUpperCase() === "SWING").length, scalpAvailableSymbols: scanDiagnostics.filter((x) => x.engineAvailability?.scalp?.available === true).length, swingAvailableSymbols: scanDiagnostics.filter((x) => x.engineAvailability?.swing?.available === true).length, scalpUnavailableSymbols: scanDiagnostics.filter((x) => x.engineAvailability?.scalp?.available === false).length, swingUnavailableSymbols: scanDiagnostics.filter((x) => x.engineAvailability?.swing?.available === false).length, tpDescriptionMigrationVersion: Number(ledger.tpDescriptionMigrationVersion ?? 0), btcBias: ledger.btcContextTelemetry?.activeBias ?? ledger.structuralMarketBiasSnapshot?.btcBias ?? "UNAVAILABLE", btcFourHourCandleCount: Number(ledger.btcContextTelemetry?.fourHourCandleCount ?? 0), btcOneDayCandleCount: Number(ledger.btcContextTelemetry?.oneDayCandleCount ?? 0), btcContextUpdatedAt: ledger.btcContextTelemetry?.updatedAt ?? null, btcContextStatus: ledger.btcContextTelemetry?.status ?? "UNAVAILABLE", btcContextSource: ledger.btcContextTelemetry?.source ?? null, btcContextErrors: ledger.btcContextTelemetry?.errors ?? [], btcFourHourLatestClosedAt: ledger.btcContextTelemetry?.fourHourLatestClosedAt ?? null, btcOneDayLatestClosedAt: ledger.btcContextTelemetry?.oneDayLatestClosedAt ?? null, altcoinBreadthBias: ledger.structuralMarketBiasSnapshot?.bias ?? "UNAVAILABLE", altcoinBreadthCoveragePct: ledger.structuralMarketBiasSnapshot?.coveragePct ?? 0, altcoinBreadthFreshSymbols: ledger.structuralMarketBiasSnapshot?.freshSymbolCount ?? 0, altcoinBreadthEligibleSymbols: ledger.structuralMarketBiasSnapshot?.eligibleAltcoinCount ?? 0, scanErrorCount: scanDiagnostics.filter((x) => x.status === "error" || x.error).length + (ledger.btcContextTelemetry?.errors?.length ?? 0), openPositions: Array.isArray(ledger.positions) ? ledger.positions.length : 0, closedTrades: Array.isArray(ledger.closedTrades) ? ledger.closedTrades.length : 0 }; const closed = Array.isArray(ledger.closedTrades) ? ledger.closedTrades : []; const hourly = new Map(), hourOfDay = new Map(), daily = new Map(), models = new Map(), pairs = new Map(), engines = new Map(), btcAlignment = new Map(), regimes = new Map(), tradeBuckets = new Map(); let netPnl = 0, pricedTrades = 0, missingCloseTime = 0, wins = 0, oldestClosedAt = null, latestClosedAt = null; const addPerf = (map, key, pnl) => { const row = map.get(key) ?? { key: String(key), trades: 0, wins: 0, losses: 0, netPnlUsdt: 0 }; row.trades++; if (pnl > 0) row.wins++; else if (pnl < 0) row.losses++; row.netPnlUsdt += pnl; map.set(key, row); }; for (const trade of closed) { const pnl = Number(trade.pnlUsdt ?? trade.realizedPnlUsdt ?? trade.netPnlUsdt); if (!Number.isFinite(pnl)) continue; pricedTrades++; netPnl += pnl; if (pnl > 0) wins++; const modelKey = String(trade.model ?? trade.setupId ?? "UNKNOWN"); const pairKey = String(trade.symbol ?? "UNKNOWN"); const engineKey = String(trade.tradeStyle ?? trade.engine ?? "UNKNOWN").toUpperCase(); const side = String(trade.side ?? "").toUpperCase(); const recordedBias = String(trade.btcBias ?? trade.audit?.btcBias ?? "").toUpperCase(); const openedRaw = trade.openedAt ?? trade.entryTime ?? trade.openTime ?? trade.createdAt; let openedAt = typeof openedRaw === "number" ? openedRaw : Date.parse(String(openedRaw ?? "")); if (Number.isFinite(openedAt) && openedAt > 0 && openedAt < 1e12) openedAt *= 1e3; const historical4h = (ledger.btcContextCandles?.fourHour ?? []).filter((c) => Number.isFinite(c.time) && c.time + 144e5 <= openedAt).slice(-72); const historical1d = (ledger.btcContextCandles?.oneDay ?? []).filter((c) => Number.isFinite(c.time) && c.time + 864e5 <= openedAt).slice(-72); const reconstructedBias = historical4h.length >= 24 && historical1d.length >= 24 ? combineStructuralBias(backtestComparableStructuralBias(historical4h), backtestComparableStructuralBias(historical1d)) : "UNAVAILABLE"; const bias = ["BULLISH", "BEARISH", "NEUTRAL"].includes(recordedBias) ? recordedBias : reconstructedBias; const alignment = bias === "BULLISH" && side === "LONG" ? "BTC_ALIGNED" : bias === "BEARISH" && side === "SHORT" ? "BTC_ALIGNED" : bias === "BULLISH" && side === "SHORT" || bias === "BEARISH" && side === "LONG" ? "BTC_COUNTER" : "BTC_UNAVAILABLE"; const regimeKey = String(trade.marketRegime ?? trade.audit?.marketRegime ?? "UNAVAILABLE"); const rawTime = trade.closedAt ?? trade.closeTime ?? trade.exitTime ?? trade.closed_at ?? trade.timestamp; let ts = typeof rawTime === "number" ? rawTime : Date.parse(String(rawTime ?? "")); if (Number.isFinite(ts) && ts > 0) { if (ts < 1e12) ts *= 1e3; oldestClosedAt = oldestClosedAt === null ? ts : Math.min(oldestClosedAt, ts); latestClosedAt = latestClosedAt === null ? ts : Math.max(latestClosedAt, ts); const local = ts + 10800000; const hour = Math.floor(local / 3600000) * 3600000; addPerf(hourly, hour, pnl); addPerf(hourOfDay, new Date(hour).getUTCHours(), pnl); addPerf(daily, new Date(hour).toISOString().slice(0, 10), pnl); const bucket = tradeBuckets.get(hour) ?? []; bucket.push({ pnl, model: modelKey, pair: pairKey, engine: engineKey, alignment, regime: regimeKey }); tradeBuckets.set(hour, bucket); } else missingCloseTime++; addPerf(models, modelKey, pnl); addPerf(pairs, pairKey, pnl); addPerf(engines, engineKey, pnl); addPerf(btcAlignment, alignment, pnl); addPerf(regimes, regimeKey, pnl); } const rows = (map, keyFn = (x) => x.key) => [...map.values()].map((x) => ({ ...x, key: keyFn(x), netPnlUsdt: Number(x.netPnlUsdt.toFixed(4)), winRatePct: x.trades ? Number((x.wins / x.trades * 100).toFixed(1)) : null })); const rank = (map, reverse = false, keyFn) => rows(map, keyFn).sort((x, y) => reverse ? x.netPnlUsdt - y.netPnlUsdt : y.netPnlUsdt - x.netPnlUsdt).slice(0, 5); const hourPoints = []; if (hourly.size) { const times = [...hourly.keys()].sort((x, y) => x - y); for (let h = times[0]; h <= times[times.length - 1] && hourPoints.length < 744; h += 3600000) { const row = hourly.get(h); hourPoints.push({ start: h, net: row?.netPnlUsdt ?? 0, trades: row?.trades ?? 0 }); } } const rolling = (size, reverse) => { const out = []; for (let i = 0; i + size <= hourPoints.length; i++) { const segment = hourPoints.slice(i, i + size), tradeCount = segment.reduce((sum, x) => sum + x.trades, 0); if (!tradeCount) continue; const engineMap = new Map(), modelMap = new Map(), pairMap = new Map(), regimeMap = new Map(); for (const point of segment) for (const trade of tradeBuckets.get(point.start) ?? []) { addPerf(engineMap, trade.engine, trade.pnl); addPerf(modelMap, trade.model, trade.pnl); addPerf(pairMap, trade.pair, trade.pnl); addPerf(regimeMap, trade.regime, trade.pnl); } out.push({ startTR: new Date(segment[0].start).toISOString().slice(0, 13) + ":00", endTR: new Date(segment[segment.length - 1].start).toISOString().slice(0, 13) + ":00", hours: size, trades: tradeCount, netPnlUsdt: Number(segment.reduce((sum, x) => sum + x.net, 0).toFixed(4)), byEngine: rows(engineMap), worstModels: rank(modelMap, true), bestModels: rank(modelMap), worstPairs: rank(pairMap, true), byRegime: rows(regimeMap) }); } return out.sort((x, y) => reverse ? x.netPnlUsdt - y.netPnlUsdt : y.netPnlUsdt - x.netPnlUsdt).slice(0, 3); }; const performanceSummary = { closedTrades: closed.length, pricedTrades, missingCloseTime, netRealizedPnlUsdt: Number(netPnl.toFixed(4)), winRatePct: pricedTrades ? Number((wins / pricedTrades * 100).toFixed(1)) : null, oldestClosedAt: oldestClosedAt ? new Date(oldestClosedAt).toISOString() : null, latestClosedAt: latestClosedAt ? new Date(latestClosedAt).toISOString() : null, bestHoursOfDayTR: rank(hourOfDay, false, x => String(x.key).padStart(2, "0") + ":00"), worstHoursOfDayTR: rank(hourOfDay, true, x => String(x.key).padStart(2, "0") + ":00"), bestHourWindows: rolling(15, false), worstHourWindows: rolling(10, true), bestModels: rank(models), worstModels: rank(models, true), bestPairs: rank(pairs), worstPairs: rank(pairs, true), byEngine: rows(engines), btcAlignment: rows(btcAlignment), byRegime: rows(regimes), daily: { best: rank(daily), worst: rank(daily, true) } };
       return Response.json({
         ok: true,
         runnerEnabled: engine.runnerEnabled,
@@ -3865,12 +3836,52 @@ var EngineState = class {
         alarmAt,
         lastScanAt: engine.lastScanAt,
         scanInProgress: this.scanInProgress === true,
+        scanSummary,
+        performanceSummary,
         rearmed
       });
     }
     if (request.method === "GET" && url.pathname === "/state") {
       if (AUTOMATION_STOP) await this.enforceEmergencyStop();
-      return Response.json(await this.readEngineState());
+      const engineState = await this.readEngineState();
+      const ledger = engineState?.paperLedger;
+      if (ledger && ledger.tpDescriptionMigrationVersion !== 2) {
+        let changed = 0;
+        const backfillTrade = (trade) => {
+          if (!trade || typeof trade !== "object") return;
+          const stages = new Set();
+          for (const event of Array.isArray(trade.executionEvents) ? trade.executionEvents : []) {
+            const match = String(event?.closeReason || "").match(/^TP([123])_TAKE_PROFIT$/);
+            const stage = Number(event?.stage || match?.[1] || 0);
+            if (stage >= 1 && stage <= 3 && match) stages.add(stage);
+          }
+          const targetStage = Math.max(0, Math.min(3, Number(trade.targetStage) || 0));
+          for (let stage = 1; stage <= targetStage; stage++) stages.add(stage);
+          if (!stages.size) return;
+          const baseRaw = String(trade.openReasonTr || trade.openReason || trade.reasonTr || trade.reason || trade.setupReason || trade.executionDecisionReason || "").trim(); const base = baseRaw.split(" | ").filter((part) => !part.startsWith("TP2:")).join(" | ").trim();
+          const notes = [...stages].sort((x, y) => x - y).map((stage) => stage === 1 ? "TP1: başlangıç pozisyonunun yüzde 50’si kârla kapatıldı; kalan yüzde 50 açık ve yönetimde." : stage === 2 ? "TP2: kalan pozisyonun yüzde 52’si kârla kapatıldı; kalan miktarın yüzde 48’i açık." : "TP3: kalan miktarın tamamı kapatıldı; pozisyon kapandı.").filter((note) => !base.includes(note.slice(0, 4)));
+          if (!notes.length && base === baseRaw) return;
+          const updated = [base, ...notes].filter(Boolean).join(" | ");
+          trade.setupReason = updated;
+          trade.openReasonTr = updated;
+          trade.reasonTr = updated;
+          trade.executionDecisionReason = updated;
+          changed++;
+        };
+        for (const trade of Array.isArray(ledger.positions) ? ledger.positions : []) backfillTrade(trade);
+        for (const trade of Array.isArray(ledger.closedTrades) ? ledger.closedTrades : []) backfillTrade(trade);
+        ledger.tpDescriptionMigrationVersion = 2;
+        try {
+          await this.saveEngineState(engineState);
+          this.tpDescriptionMigrationComplete = true;
+          console.info("Paper TP description migration complete", JSON.stringify({ changed, positions: ledger.positions?.length ?? 0, closedTrades: ledger.closedTrades?.length ?? 0 }));
+        } catch (error) {
+          console.warn("Paper TP description migration deferred", String(error).slice(0, 180));
+        }
+      } else {
+        this.tpDescriptionMigrationComplete = true;
+      }
+      return Response.json(engineState);
     }
     if (request.method === "PUT" && url.pathname === "/state") {
       const body = await request.json();
@@ -4251,7 +4262,7 @@ var EngineState = class {
       const body = await request.json().catch(() => null);
       const key = String(body?.key ?? ""), symbol = String(body?.symbol ?? "");
       const side = String(body?.side ?? "").toUpperCase();
-      const maxPositions = Math.min(20, Math.max(1, Number(body?.maxPositions) || 20));
+      const maxPositions = Math.min(10, Math.max(1, Number(body?.maxPositions) || 10));
       const observed = Number(body?.observedOpenPositions);
       const ttlMs = Math.min(300000, Math.max(30000, Number(body?.ttlMs) || 120000));
       if (!/^[a-zA-Z0-9_-]{12,40}$/.test(key) || !/^[A-Z0-9]{2,20}-USDT$/.test(symbol) ||
@@ -4374,7 +4385,7 @@ var EngineState = class {
       try {
         engine = await this.readEngineState();
       } catch (error) {
-        return Response.json({ ok: true, mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo", storageDegraded: true, balance: null, equity: null, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: false, stateRecoveryNotice: this.recoveryNotice, recoveryRetryAfter: this.recoveryRetryAfter || null, error: String(error), message: "Paper status is read-only while original ledger recovery is blocked. No replacement balance is used." }, { status: 503 });
+        return Response.json({ ok: true, mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo", storageDegraded: true, balance: null, equity: null, positions: [], closedTrades: [], setups: [], scannedSymbols: [], lastScanAt: null, runnerEnabled: false, stateRecoveryNotice: this.recoveryNotice, recoveryRetryAfter: this.recoveryRetryAfter || null, error: String(error), message: "Paper status is read-only while original ledger recovery is blocked. No replacement balance is used." }, { status: 503 });
       }
       const ledger = engine.paperLedger ?? DEFAULT_STATE.paperLedger;
       const positionLimitMigrationKey = "paper-position-limit-v21-migrated";
@@ -4387,10 +4398,10 @@ var EngineState = class {
         await this.writePaperState(positionLimitMigrationKey, "true");
       }
       if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 10) ledger.maxOpenPositions = 10;
-      const positionLimitV22Key = "paper-position-limit-v22-20";
-      if (await this.readPaperState(positionLimitV22Key) !== "true") {
+      const positionLimitV23Key = "paper-position-limit-v23-10";
+      if (await this.readPaperState(positionLimitV23Key) !== "true") {
         ledger.maxOpenPositions = 10; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
-        await this.saveEngineState(engine); await this.writePaperState(positionLimitV22Key, "true");
+        await this.saveEngineState(engine); await this.writePaperState(positionLimitV23Key, "true");
       }
       const manualPause = await this.readPaperState("paper-runner-explicitly-paused") === "true";
       let alarmAt = await this.state.storage.getAlarm();
@@ -4399,7 +4410,7 @@ var EngineState = class {
         alarmAt = Date.now() + 15e3;
         await this.setDurableAlarm(alarmAt);
       }
-      const paperTradingEnabled = this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true";
+      const paperTradingEnabled = this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true";
       const openForStatus = (ledger.positions ?? []).filter((p) => p.status === "OPEN");
       const statusMarks = await getBingXMarkPrices(openForStatus.map((p) => p.symbol), 7e3);
       const livePositions = openForStatus.map((position) => {
@@ -4418,15 +4429,15 @@ var EngineState = class {
       const liveEquity = allOpenMarksAvailable ? Number((ledger.balance + liveUnrealized + livePositions.reduce((sum, position) => sum + (Number(position.entryFeeUsdt) || 0), 0)).toFixed(4)) : null;
       return Response.json({
         ok: true,
-        mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo",
+        mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo",
         paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true",
         manualPause,
         internalPaperAccount: engine.internalPaperAccount ?? null,
         alarmScheduled: engine.runnerEnabled === true && !manualPause && !AUTOMATION_STOP && alarmAt !== null,
         alarmAt,
         runnerEnabled: engine.runnerEnabled === true && !AUTOMATION_STOP,
-        strategy: "Swing Futures Engine · 4H/1D only",
-        strategyMode: "SWING_4H_1D_ONLY",
+        strategy: "Independent Scalp + Swing Futures Engines",
+        strategyMode: "SCALP_SWING_INDEPENDENT",
         strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
         newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
         positionManagementEnabled: true,
@@ -4454,7 +4465,7 @@ var EngineState = class {
         return Response.json({ ok: false, storageDegraded: true, error: String(error), message: "Analytics unavailable until the original ledger is readable." }, { status: 503 });
       }
       const ledger = engine.paperLedger ?? DEFAULT_STATE.paperLedger;
-      return Response.json({ ok: true, mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo", generatedAt: (/* @__PURE__ */ new Date()).toISOString(), ...summarizeClosedTradeAnalytics(ledger.closedTrades ?? []) }, { headers: { "cache-control": "no-store" } });
+      return Response.json({ ok: true, mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo", generatedAt: (/* @__PURE__ */ new Date()).toISOString(), ...summarizeClosedTradeAnalytics(ledger.closedTrades ?? [], ledger.btcContextCandles ?? null) }, { headers: { "cache-control": "no-store" } });
     }
     if (request.method === "POST" && url.pathname === "/paper/capital-adjustment") {
       if (!isTrustedManualCloseOrigin(request.headers.get("origin"), request.headers.get("x-smcprov2-public-origin"))) return Response.json({ ok: false, code: "UNTRUSTED_CAPITAL_ADJUSTMENT_ORIGIN", error: "Paper account initialization must originate from the dashboard." }, { status: 403, headers: { "cache-control": "no-store" } });
@@ -4504,7 +4515,7 @@ var EngineState = class {
       await this.saveEngineState(engine);
       bingxDemoStatusCache = null;
       console.info("Paper position limit updated", JSON.stringify({ maxOpenPositions: requested, openPositions: ledger.positions.length }));
-      return Response.json({ ok: true, mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo", paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true", maxOpenPositions: requested, openPositions: ledger.positions.length });
+      return Response.json({ ok: true, mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo", paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true", maxOpenPositions: requested, openPositions: ledger.positions.length });
     }
     if (request.method === "POST" && url.pathname === "/paper/close-all") {
       let closeAllBody;
@@ -4539,11 +4550,13 @@ var EngineState = class {
         const storedPrice = Number(position.markPrice ?? position.currentPrice);
         const storedAt = Date.parse(position.markPriceAt ?? position.livePriceAt ?? "");
         const storedAge = Date.now() - storedAt;
-        if (Number.isFinite(storedPrice) && storedPrice > 0 && Number.isFinite(storedAt) && storedAge >= 0 && storedAge <= 15e3) {
+        if (Number.isFinite(storedPrice) && storedPrice > 0 && Number.isFinite(storedAt) && storedAge >= 0 && storedAge <= 60e3) {
           return { position, liveExitPrice: storedPrice, priceSource: "LAST_KNOWN_VERIFIED_MARK" };
         }
         const freshPrice = await getBingXMarkPrice(position.symbol, 300);
-        return { position, liveExitPrice: freshPrice, priceSource: freshPrice !== null ? "BINGX_MARK_PRICE" : "UNAVAILABLE" };
+        const staleMarkFallback = Number.isFinite(storedPrice) && storedPrice > 0 ? storedPrice : null;
+        const liveExitPrice = freshPrice ?? staleMarkFallback;
+        return { position, liveExitPrice, priceSource: freshPrice !== null ? "BINGX_MARK_PRICE" : staleMarkFallback !== null ? "STALE_MARK_FALLBACK" : "UNAVAILABLE" };
       }));
       for (const quote of exitQuotes) {
         const { position, liveExitPrice } = quote;
@@ -4609,8 +4622,11 @@ var EngineState = class {
         return Response.json({ ok: false, code: "INVALID_CLOSE_REQUEST", error: "positionId and fraction (0, 1] are required.", requestId }, { status: 400, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
       }
       const engine = await this.readEngineState();
-      const ledger = engine.paperLedger;
-      if (!ledger || !Array.isArray(ledger.positions)) return Response.json({ ok: false, code: "PAPER_LEDGER_UNAVAILABLE", error: "Paper ledger is unavailable; position was not changed.", requestId }, { status: 503, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+      const sourceLedger = engine.paperLedger;
+      if (!sourceLedger || !Array.isArray(sourceLedger.positions)) return Response.json({ ok: false, code: "PAPER_LEDGER_UNAVAILABLE", error: "Paper ledger is unavailable; position was not changed.", requestId }, { status: 503, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+      const selfTest = body.__testFixture === true && ["__SMC_MANUAL_CLOSE_SELFTEST_FULL__", "__SMC_MANUAL_CLOSE_SELFTEST_PARTIAL__"].includes(positionId);
+      const ledger = selfTest ? structuredClone(sourceLedger) : sourceLedger;
+      if (selfTest) { ledger.closedTrades = Array.isArray(ledger.closedTrades) ? ledger.closedTrades : []; if (ledger.positions.some((p) => p.id === positionId)) return Response.json({ ok: false, code: "SELF_TEST_ID_COLLISION", requestId }, { status: 409 }); const nowIso = new Date().toISOString(); ledger.positions.push({ id: positionId, positionId, symbol: "BTC-USDT", side: "LONG", entry: 100, qty: 1, initialQty: 1, status: "OPEN", markPrice: 100, markPriceAt: nowIso, livePriceAt: nowIso, feeRate: 0, entryFeeUsdt: 0, exitFeesUsdt: 0, feesPaidUsdt: 0, slippagePaidUsdt: 0, fundingPaidUsdt: 0, realizedPnlUsdt: 0, initialRiskUsdt: 10, riskUsdt: 10, initialMarginUsdt: 100, marginUsdt: 100, allocationUsdt: 100, unrealizedPnlUsdt: 0, executionEvents: [], openedAt: nowIso, tradeStyle: "SCALP", model: "MANUAL_CLOSE_SELF_TEST", fundingDataStatus: "AVAILABLE" }); }
       const position = ledger.positions.find((p) => p.id === positionId && p.status === "OPEN");
       if (!position) {
         console.warn("Paper close API rejected position", JSON.stringify({ requestId, positionId, reason: "OPEN_POSITION_NOT_FOUND", openPositionIds: ledger.positions.filter((p) => p.status === "OPEN").map((p) => p.id).slice(0, 30) }));
@@ -4619,15 +4635,17 @@ var EngineState = class {
       const requestedAt = Date.parse(body.requestedMarkAt ?? "");
       const requestedPrice = Number(body.requestedExitPrice);
       const requestedAge = Date.now() - requestedAt;
-      const requestedFresh = Number.isFinite(requestedPrice) && requestedPrice > 0 && Number.isFinite(requestedAt) && requestedAge >= 0 && requestedAge <= 15e3;
+      const requestedFresh = Number.isFinite(requestedPrice) && requestedPrice > 0 && Number.isFinite(requestedAt) && requestedAge >= 0 && requestedAge <= 60e3;
       const storedMark = Number(position.markPrice ?? position.currentPrice);
       const storedAt = Date.parse(position.markPriceAt ?? position.livePriceAt ?? "");
       const storedAge = Date.now() - storedAt;
-      const storedFresh = Number.isFinite(storedMark) && storedMark > 0 && Number.isFinite(storedAt) && storedAge >= 0 && storedAge <= 15e3;
+      const storedFresh = Number.isFinite(storedMark) && storedMark > 0 && Number.isFinite(storedAt) && storedAge >= 0 && storedAge <= 60e3;
       const immediatePrice = requestedFresh ? requestedPrice : storedFresh ? storedMark : null;
-      const liveExitPrice = immediatePrice ?? await getBingXMarkPrice(position.symbol, 300);
+      const freshExitPrice = immediatePrice ?? await getBingXMarkPrice(position.symbol, 300);
+      const staleMarkFallback = freshExitPrice === null && Number.isFinite(storedMark) && storedMark > 0 ? storedMark : null;
+      const liveExitPrice = freshExitPrice ?? staleMarkFallback;
       const exitPrice = liveExitPrice ?? Number.NaN;
-      const priceSource = requestedFresh ? "DASHBOARD_MARK_SNAPSHOT" : storedFresh && !requestedFresh ? "LAST_KNOWN_VERIFIED_MARK" : liveExitPrice !== null ? "BINGX_MARK_PRICE" : "UNAVAILABLE";
+      const priceSource = requestedFresh ? "DASHBOARD_MARK_SNAPSHOT" : storedFresh && !requestedFresh ? "LAST_KNOWN_VERIFIED_MARK" : freshExitPrice !== null ? "BINGX_MARK_PRICE" : staleMarkFallback !== null ? "STALE_MARK_FALLBACK" : "UNAVAILABLE";
       if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
         console.warn("Paper close rejected because no verified mark price is available", JSON.stringify({ requestId, positionId, symbol: position.symbol }));
         return Response.json({ ok: false, code: "MARK_PRICE_UNAVAILABLE", error: "Güvenilir anlık fiyat alınamadı; pozisyon kapatılmadı.", requestId }, { status: 503, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
@@ -4693,7 +4711,7 @@ var EngineState = class {
       }
       else {
         position.qty = Number((position.qty - closeQty).toFixed(8));
-        position.initialQty = position.qty;
+        /* Preserve originalQty for subsequent TP1/TP2/TP3 stage calculations. */
         position.entryFeeUsdt = Number((entryFeeTotal - allocatedEntryFee).toFixed(8));
         position.exitFeesUsdt = Number((priorExitFeesTotal - allocatedPriorExitFees).toFixed(8));
         position.feesPaidUsdt = Number(((position.entryFeeUsdt || 0) + (position.exitFeesUsdt || 0)).toFixed(8));
@@ -4715,9 +4733,9 @@ var EngineState = class {
       engine.paperBalanceUsdt = ledger.balance;
       engine.positions = ledger.positions;
       engine.closedTrades = ledger.closedTrades;
-      await this.saveEngineState(engine);
-      const responseBody = { ok: true, mode: "bingx-demo", requestId, positionId: stablePositionId, closeEventId, symbol: position.symbol, fraction, closedQty: closeQty, closedAt, exitPrice, priceSource, pnlUsdt: pnl, returnPct: closed?.returnPct ?? closeEvent.returnPct, balance: ledger.balance, equity: ledger.equity, dailyPnl: ledger.dailyPnl, closedTrade: fraction === 1 ? closed : null, closeEvent, remainingQty: ledger.positions.find((p) => p.id === positionId)?.qty ?? 0, message: fraction === 1 ? "Paper pozisyonu kapat\u0131ld\u0131." : "Paper pozisyonunun bir b\xF6l\xFCm\xFC kapat\u0131ld\u0131." };
-      console.info("Paper position manually closed", JSON.stringify({ requestId, positionId, symbol: position.symbol, fraction, closeQty, exitPrice, priceSource, pnl, remainingPositions: ledger.positions.length, closedTradeRecorded: true, at: (/* @__PURE__ */ new Date()).toISOString() }));
+      if (!selfTest) await this.saveEngineState(engine);
+      const responseBody = { ok: true, mode: "internal-paper", testOnly: selfTest, requestId, positionId: stablePositionId, closeEventId, symbol: position.symbol, fraction, closedQty: closeQty, closedAt, exitPrice, priceSource, pnlUsdt: pnl, returnPct: closed?.returnPct ?? closeEvent.returnPct, balance: ledger.balance, equity: ledger.equity, dailyPnl: ledger.dailyPnl, closedTrade: fraction === 1 ? closed : null, closeEvent, remainingQty: ledger.positions.find((p) => p.id === positionId)?.qty ?? 0, remainingInitialQty: ledger.positions.find((p) => p.id === positionId)?.initialQty ?? 0, message: fraction === 1 ? "Paper pozisyonu kapat\u0131ld\u0131." : "Paper pozisyonunun bir b\xF6l\xFCm\xFC kapat\u0131ld\u0131." };
+      console.info("Paper position manually closed", JSON.stringify({ requestId, positionId, symbol: position.symbol, fraction, closeQty, exitPrice, priceSource, pnl, remainingPositions: ledger.positions.length, closedTradeRecorded: fraction === 1, testOnly: selfTest, at: (/* @__PURE__ */ new Date()).toISOString() }));
       return Response.json(responseBody, { headers: { "x-request-id": requestId, "cache-control": "no-store" } });
     }
     if (request.method === "POST" && url.pathname === "/paper/scan") {
@@ -4763,7 +4781,7 @@ var EngineState = class {
               pendingReconciledPosition = true;
               continue;
             }
-            const retiredStrategyPending = !ACTIVE_VST_STRATEGY_MODELS.has(pending.setup.model) || !["4h", "1d"].includes(String(pending.setup.setupTimeframe ?? "").toLowerCase());
+            const retiredStrategyPending = !ACTIVE_VST_STRATEGY_MODELS.has(pending.setup.model);
             if (isBingXDemoPendingEntryAbsentFromSnapshot(pending, demoSnapshot)) {
               console.info("BingX VST pending record cleared after complete exchange snapshot confirmed no open order or position", pending.setup.symbol, pending.orderId);
               continue;
@@ -4860,10 +4878,10 @@ var EngineState = class {
         await this.writePaperState(positionLimitMigrationKey, "true");
       }
       if (!Number.isInteger(Number(ledger.maxOpenPositions)) || Number(ledger.maxOpenPositions) < 0 || Number(ledger.maxOpenPositions) > 10) ledger.maxOpenPositions = 10;
-      const positionLimitV22Key = "paper-position-limit-v22-20";
-      if (await this.readPaperState(positionLimitV22Key) !== "true") {
+      const positionLimitV23Key = "paper-position-limit-v23-10";
+      if (await this.readPaperState(positionLimitV23Key) !== "true") {
         ledger.maxOpenPositions = 10; engine.paperLedger = ledger; engine.paperBalanceUsdt = ledger.balance; engine.positions = ledger.positions; engine.closedTrades = ledger.closedTrades;
-        await this.saveEngineState(engine); await this.writePaperState(positionLimitV22Key, "true");
+        await this.saveEngineState(engine); await this.writePaperState(positionLimitV23Key, "true");
       }
       const positionMarginMigrationKey = "paper-position-margin-metadata-v1";
       if (await this.readPaperState(positionMarginMigrationKey) !== "true") {
@@ -5005,26 +5023,6 @@ var EngineState = class {
         scanRotationGenerationAtStart = ledger.scanRotation.generation;
         strategyResetState.strategyResetV7 = true;
       }
-      if (strategyResetState.strategyResetV8 !== true) {
-        ledger.setups = [];
-        ledger.scanDiagnostics = [];
-        ledger.scannedSymbols = [];
-        ledger.modelTelemetry = void 0;
-        ledger.activitySnapshots = {};
-        ledger.activityRanking = void 0;
-        ledger.activityRankingBySymbol = {};
-        ledger.scanTelemetry = void 0;
-        ledger.scanUniverseSize = 0;
-        ledger.scanBatchSize = 0;
-        ledger.scanInvocationBatchSize = 0;
-        ledger.scanLogicalBatchRemaining = 0;
-        ledger.lastScanAt = null;
-        ledger.maxOpenPositions = 10;
-        ledger.cursor = 0;
-        ledger.scanRotation = resetScanRotationProgress(ledger.scanRotation, (/* @__PURE__ */ new Date()).toISOString());
-        scanRotationGenerationAtStart = ledger.scanRotation.generation;
-        strategyResetState.strategyResetV8 = true;
-      }
       if (ledger.sequentialBatchScanV1 !== true) {
         ledger.cursor = 0;
         ledger.scanRotation = resetScanRotationProgress(ledger.scanRotation, (/* @__PURE__ */ new Date()).toISOString());
@@ -5072,9 +5070,9 @@ var EngineState = class {
       const forcedExecutionRechecks = [...staleExecutionBySymbol.values()].sort((a, b) => a.score - b.score || a.at - b.at).map((row) => row.symbol);
       const rotationUniverseKey = universeSymbols.join(",");
       const rotationSeenSymbols = new Set(ledger.scanRotation?.universeKey === rotationUniverseKey ? ledger.scanRotation.seenSymbols ?? [] : []);
-      const orderedUniverseFromCursor = [...universeSymbols.slice(startCursor), ...universeSymbols.slice(0, startCursor)].sort((a, b) => { const ar = ledger.activityRankingBySymbol?.[a]; const br = ledger.activityRankingBySymbol?.[b]; const ae = ar?.eligible === true; const be = br?.eligible === true; if (ae !== be) return ae ? -1 : 1; return (Number(br?.priorityScore) || 0) - (Number(ar?.priorityScore) || 0); });
+      const orderedUniverseFromCursor = [...universeSymbols.slice(startCursor), ...universeSymbols.slice(0, startCursor)];
       const pendingRotationSymbols = rotationSeenSymbols.size ? orderedUniverseFromCursor.filter((symbol) => !rotationSeenSymbols.has(symbol)) : [];
-      const batchSymbols = SCANNER_PAUSED ? [] : pendingRotationSymbols.length ? pendingRotationSymbols.slice(0, PAPER_SCAN_BATCH_NORMAL) : orderedUniverseFromCursor.slice(0, PAPER_SCAN_BATCH_NORMAL);
+      const batchSymbols = SCANNER_PAUSED ? [] : pendingRotationSymbols.length ? pendingRotationSymbols.slice(0, PAPER_SCAN_BATCH_NORMAL) : universeSymbols.slice(startCursor, startCursor + PAPER_SCAN_BATCH_NORMAL);
       const nextSequentialCursor = universeSymbols.length ? (batchSymbols.length ? (universeSymbols.indexOf(batchSymbols.at(-1)) + 1) % universeSymbols.length : startCursor) : startCursor;
       const activityPriorityBatch = { symbols: batchSymbols, prioritySymbols: [], rotatingSymbols: batchSymbols, nextCursor: nextSequentialCursor, rotationAdvance: batchSymbols.length };
       if (!SCANNER_PAUSED) ledger.cursor = nextSequentialCursor;
@@ -5085,20 +5083,21 @@ var EngineState = class {
       const structuralCandlesBySymbol = /* @__PURE__ */ new Map();
       for (const symbol of batchSymbols) {
         const rows = {};
-        const specs = [["4h", 180, 144e5], ["1d", 180, 864e5], ...(symbol === "BTC-USDT" ? [["1w", 100, 6048e5]] : [])];
+        const specs = [["5m", 1e3, 3e5], ["15m", 600, 9e5], ["1h", 300, 36e5], ["4h", 180, 144e5], ["1d", 180, 864e5]];
         for (const [interval, limit, duration] of specs) {
           try {
             const candles = await fetchMarketCandles(symbol, interval, limit, duration);
-            const minimum = interval === "1w" ? 20 : 60;
+            const minimum = interval === "5m" ? 251 : interval === "15m" ? 200 : interval === "1h" ? 100 : 60;
             if (candles.length >= minimum) rows[interval] = candles;
           } catch (error) {
-            if (!scanErrors.some((x) => x.symbol === symbol && x.timeframe === interval)) scanErrors.push({ symbol, timeframe: interval, engine: interval === "1w" ? "BTC_CONTEXT" : "SWING", error: String(error).slice(0, 180) });
+            if (!scanErrors.some((x) => x.symbol === symbol && x.timeframe === interval)) scanErrors.push({ symbol, timeframe: interval, engine: interval === "5m" || interval === "15m" || interval === "1h" ? "SCALP+SWING" : "SWING", error: String(error).slice(0, 180) });
           }
         }
-        
+        if (rows["1h"]) rows["2h"] = aggregateClosedCandles(rows["1h"], 72e5, 36e5);
         structuralCandlesBySymbol.set(symbol, rows);
         const missingByEngine = {
-          SWING: ["4h", "1d"].filter((tf) => !rows[tf])
+          SCALP: ["5m", "15m", "1h"].filter((tf) => !rows[tf]),
+          SWING: ["15m", "1h", "4h", "1d"].filter((tf) => !rows[tf])
         };
         for (const [engineName, missing] of Object.entries(missingByEngine)) {
           if (missing.length && !scanErrors.some((x) => x.symbol === symbol && x.engine === engineName && x.error.startsWith("INSUFFICIENT_OR_STALE_CANDLES:"))) {
@@ -5106,15 +5105,19 @@ var EngineState = class {
           }
         }
       }
-      if (!structuralCandlesBySymbol.has("BTC-USDT") || !valid(structuralCandlesBySymbol.get("BTC-USDT")?.["1w"])) {
-        const btcRows = structuralCandlesBySymbol.get("BTC-USDT") ?? {};
-        for (const [interval, limit, duration] of [["4h", 180, 144e5], ["1d", 180, 864e5], ["1w", 100, 6048e5]]) {
-          if (valid(btcRows[interval])) continue;
-          try { const candles = await fetchMarketCandles("BTC-USDT", interval, limit, duration); if (candles.length >= (interval === "1w" ? 20 : 60)) btcRows[interval] = candles; }
-          catch (btcContextError) { console.warn("BTC context candles unavailable", interval, String(btcContextError).slice(0, 120)); }
-        }
-        structuralCandlesBySymbol.set("BTC-USDT", btcRows);
-      }
+      const btcContextRows = { ...(structuralCandlesBySymbol.get("BTC-USDT") ?? {}) };
+      const btcContextErrors = [];
+      try {
+        const btcFourHour = await fetchMarketCandles("BTC-USDT", "4h", 300, 144e5);
+        if (btcFourHour.length >= 24) btcContextRows["4h"] = btcFourHour;
+        else btcContextErrors.push({ timeframe: "4h", error: marketDataFailureByKey.get("BTC-USDT|4h|300") ?? "INSUFFICIENT_CLOSED_BTC_4H_CANDLES", candleCount: btcFourHour.length });
+      } catch (error) { btcContextErrors.push({ timeframe: "4h", error: String(error).slice(0, 180) }); }
+      try {
+        const btcDaily = await fetchMarketCandles("BTC-USDT", "1d", 300, 864e5);
+        if (btcDaily.length >= 24) btcContextRows["1d"] = btcDaily;
+        else btcContextErrors.push({ timeframe: "1d", error: marketDataFailureByKey.get("BTC-USDT|1d|300") ?? "INSUFFICIENT_CLOSED_BTC_1D_CANDLES", candleCount: btcDaily.length });
+      } catch (error) { btcContextErrors.push({ timeframe: "1d", error: String(error).slice(0, 180) }); }
+      structuralCandlesBySymbol.set("BTC-USDT", btcContextRows);
       const biasMeasuredAt = Date.now();
       const structuralBiasBySymbol = ledger.structuralBiasBySymbol ?? (ledger.structuralBiasBySymbol = {});
       for (const symbol of symbolsToEvaluate) {
@@ -5123,18 +5126,17 @@ var EngineState = class {
         const state = updateConfirmedStructuralBiasState(structuralBiasBySymbol[symbol], rows["4h"], rows["1d"], biasMeasuredAt);
         if (state) structuralBiasBySymbol[symbol] = state;
       }
+      if (btcContextRows["4h"]?.length >= 24 && btcContextRows["1d"]?.length >= 24) {
+        const btcState = updateConfirmedStructuralBiasState(structuralBiasBySymbol["BTC-USDT"], btcContextRows["4h"], btcContextRows["1d"], biasMeasuredAt);
+        if (btcState) structuralBiasBySymbol["BTC-USDT"] = btcState;
+        ledger.btcContextCandles = { fourHour: btcContextRows["4h"].slice(-300), oneDay: btcContextRows["1d"].slice(-300), source: "BINGX_PUBLIC_CLOSED_KLINES", updatedAt: biasMeasuredAt };
+      }
       const btcBiasState = structuralBiasBySymbol["BTC-USDT"];
-      const btcBias = btcBiasState && biasMeasuredAt - btcBiasState.updatedAt <= 36 * 60 * 60 * 1e3 ? btcBiasState.activeBias : "NEUTRAL";
-      const btcContextCandles = structuralCandlesBySymbol.get("BTC-USDT") ?? {};
-      const toBtcBias = (trend) => trend === "LONG" ? "BULLISH" : trend === "SHORT" ? "BEARISH" : "NEUTRAL";
-      const btcWeeklyBias = valid(btcContextCandles["1w"]) ? toBtcBias(analyzeMarketStructure(btcContextCandles["1w"]).trend) : "UNAVAILABLE";
-      const btcDailyBias = valid(btcContextCandles["1d"]) ? toBtcBias(analyzeMarketStructure(btcContextCandles["1d"]).trend) : "UNAVAILABLE";
-      let dominanceContext;
-      try { dominanceContext = deriveDominanceDirections(await fetchGlobalDominanceSnapshot(this.env, { get: (key, type) => this.readPaperState(key, type), put: (key, value) => this.writePaperState(key, value) })); }
-      catch (dominanceError) { dominanceContext = deriveDominanceDirections(null); console.warn("Dominance scoring data unavailable", String(dominanceError).slice(0, 140)); }
+      const btcBias = btcBiasState && biasMeasuredAt - btcBiasState.updatedAt <= 36 * 60 * 60 * 1e3 ? btcBiasState.activeBias : "UNAVAILABLE";
+      ledger.btcContextTelemetry = { measuredAt: biasMeasuredAt, activeBias: btcBias, updatedAt: btcBiasState?.updatedAt ?? null, fourHourCandleCount: btcContextRows["4h"]?.length ?? 0, oneDayCandleCount: btcContextRows["1d"]?.length ?? 0, fourHourLatestClosedAt: btcContextRows["4h"]?.length ? btcContextRows["4h"].at(-1).time + 144e5 : null, oneDayLatestClosedAt: btcContextRows["1d"]?.length ? btcContextRows["1d"].at(-1).time + 864e5 : null, source: "BINGX_PUBLIC_CLOSED_KLINES", status: btcContextErrors.length ? "PARTIAL" : btcContextRows["4h"]?.length >= 24 && btcContextRows["1d"]?.length >= 24 ? "AVAILABLE" : "UNAVAILABLE", errors: btcContextErrors };
       const altcoinBreadthBias = summarizeAltcoinBreadthBias(structuralBiasBySymbol, universeSymbols, biasMeasuredAt);
       ledger.structuralMarketBiasSnapshot = { ...altcoinBreadthBias, btcBias, measuredAt: biasMeasuredAt };
-      ledger.marketContextSnapshot = { btcBias, btcWeeklyBias, btcDailyBias, dominance: dominanceContext, measuredAt: new Date(biasMeasuredAt).toISOString() };
+      
       const activitySnapshots = ledger.activitySnapshots ?? (ledger.activitySnapshots = {});
       const activityQuotesBySymbol = {};
       let activityTickerError = null;
@@ -5280,35 +5282,7 @@ var EngineState = class {
       const diagnostics = [];
       for (const symbol of batchSymbols) {
         const rows = structuralCandlesBySymbol.get(symbol);
-        const activity = activityBySymbol[symbol];
-        const quoteVolume24h = Number(activity?.quoteVolume24h), average30dQuoteVolume = Number(activity?.average30dQuoteVolume), spreadPct = Number(activity?.spreadPct);
-        const liquidityRejectionReasons = [];
-        if (!activity) liquidityRejectionReasons.push("ACTIVITY_SNAPSHOT_UNAVAILABLE");
-        else {
-          if (!Number.isFinite(quoteVolume24h)) liquidityRejectionReasons.push("QUOTE_VOLUME_24H_UNAVAILABLE");
-          else if (quoteVolume24h < 5e5) liquidityRejectionReasons.push("LOW_24H_QUOTE_VOLUME");
-          if (!Number.isFinite(average30dQuoteVolume)) liquidityRejectionReasons.push("AVERAGE_30D_QUOTE_VOLUME_UNAVAILABLE");
-          else if (average30dQuoteVolume < 1e6) liquidityRejectionReasons.push("LOW_30D_AVERAGE_QUOTE_VOLUME");
-          if (!Number.isFinite(spreadPct)) liquidityRejectionReasons.push("SPREAD_UNAVAILABLE");
-          else if (spreadPct > 0.15) liquidityRejectionReasons.push("WIDE_SPREAD");
-          if (!["GOOD", "ACCEPTABLE"].includes(String(activity.liquidityStatus))) liquidityRejectionReasons.push(activity.liquidityStatus === "POOR" ? "POOR_RELATIVE_LIQUIDITY" : "LIQUIDITY_QUALITY_UNVERIFIED");
-          if (activity.pairEligible === false) liquidityRejectionReasons.push("LOW_RELATIVE_ACTIVITY_OR_LIQUIDITY");
-        }
-        if (liquidityRejectionReasons.length) {
-          diagnostics.push({
-            symbol,
-            scannedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            status: "rejected-low-liquidity-or-unavailable-market-quality",
-            setups: 0,
-            missingCandleFrames: [],
-            timeframeDiagnostics: {},
-            rejectionSummary: Object.fromEntries(liquidityRejectionReasons.map((reason) => [reason, 1])),
-            setupDetails: [],
-            engineAvailability: { swing: { available: false, unavailable: liquidityRejectionReasons } }
-          });
-          continue;
-        }
-        const input = { "4h": rows?.["4h"], "1d": rows?.["1d"] };
+        const input = { "5m": rows?.["5m"], "15m": rows?.["15m"], "1h": rows?.["1h"], "4h": rows?.["4h"], "1d": rows?.["1d"] };
         const engineBtcBias = btcBiasState && biasMeasuredAt - btcBiasState.updatedAt <= 36 * 60 * 60 * 1e3 ? btcBiasState.activeBias : "UNAVAILABLE";
         let historyEvidence = [...ledger.closedTrades ?? []];
         try {
@@ -5316,44 +5290,34 @@ var EngineState = class {
           const stored = raw ? JSON.parse(raw) : [];
           if (Array.isArray(stored)) historyEvidence.push(...stored.filter((trade) => trade && trade.status === "CLOSED" && trade.model !== "BINGX VST"));
         } catch (error) {
-          console.warn("Historical Swing confidence data unavailable", String(error).slice(0, 140));
+          console.warn("Historical Scalp/Swing confidence data unavailable", String(error).slice(0, 140));
         }
-        const swing4h = evaluateEngine("SWING", symbol, input, engineBtcBias, historyEvidence, "4h", btcWeeklyBias, btcDailyBias, dominanceContext);
-        const swing1d = evaluateEngine("SWING", symbol, input, engineBtcBias, historyEvidence, "1d", btcWeeklyBias, btcDailyBias, dominanceContext);
-        const swing = { setups: [...swing4h.setups, ...swing1d.setups], unavailable: [...new Set([...swing4h.unavailable, ...swing1d.unavailable])] };
-        const candidates = swing.setups;
+        const scalp = evaluateEngine("SCALP", symbol, input, engineBtcBias, historyEvidence);
+        const swing = evaluateEngine("SWING", symbol, input, engineBtcBias, historyEvidence);
+        const candidates = [...scalp.setups, ...swing.setups];
+        for (const setup of candidates) { setup.altcoinBreadthBias = altcoinBreadthBias.bias; setup.audit = { ...(setup.audit ?? {}), btcBias: engineBtcBias, altcoinBreadthBias: altcoinBreadthBias.bias, altcoinBreadthCoveragePct: altcoinBreadthBias.coveragePct, altcoinBreadthFreshSymbols: altcoinBreadthBias.freshSymbolCount, altcoinBreadthEligibleSymbols: altcoinBreadthBias.eligibleAltcoinCount, altcoinBreadthReason: altcoinBreadthBias.reason }; }
         generatedSetups.push(...candidates);
-        const missingCandleFrames = swing.unavailable;
+        const missingCandleFrames = [.../* @__PURE__ */ new Set([...scalp.unavailable, ...swing.unavailable])];
         const timeframeDiagnostics = {};
         const rejectionSummary = {};
-        const setupIds = ["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W06_CRT", "W07_OTE", "W08_BOS_CONTINUATION"];
-        for (const result of [swing4h, swing1d]) {
-          if (result.unavailable.length) {
-            rejectionSummary.INSUFFICIENT_CANDLE_HISTORY = (rejectionSummary.INSUFFICIENT_CANDLE_HISTORY ?? 0) + setupIds.length * 2;
-            continue;
-          }
-          for (const item of result.diagnostics ?? []) {
-            const key = item.setupId && item.side ? item.setupId + ":" + item.side : null;
-            if (item.accepted === true && key) timeframeDiagnostics[key] = { setups: 1, score: item.score, band: item.band };
-            else {
-              const reason = item.reason ?? "PATTERN_CONDITIONS_NOT_MET";
-              rejectionSummary[reason] = (rejectionSummary[reason] ?? 0) + 1;
-            }
-          }
+        for (const result of [scalp, swing]) for (const setupId of result.engine === "SCALP" ? ["S01_SWEEP_MSS_FVG", "S02_BREAKER_RETEST", "S03_BOS_DISPLACEMENT", "S04_RANGE_DEVIATION", "S05_FAILED_BREAKOUT", "S06_OB_REACTION"] : ["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W06_CRT", "W07_OTE", "W08_BOS_CONTINUATION"]) for (const side of ["LONG", "SHORT"]) {
+          const key = setupId + ":" + side, hasSetup = candidates.some((setup) => setup.model === setupId && setup.side === side);
+          if (hasSetup) timeframeDiagnostics[key] = { setups: 1 };
+          else { const reason = result.unavailable.length ? "INSUFFICIENT_CANDLE_HISTORY" : "STRUCTURAL_PATTERN_NOT_CONFIRMED"; rejectionSummary[reason] = (rejectionSummary[reason] ?? 0) + 1; }
         }
         diagnostics.push({
           symbol,
           scannedAt: (/* @__PURE__ */ new Date()).toISOString(),
-          status: swing4h.unavailable.length && swing1d.unavailable.length ? "insufficient-candle-history" : candidates.length ? "setup-candidate" : missingCandleFrames.length ? "partial-candle-history" : "fresh-no-setup",
+          status: scalp.unavailable.length && swing.unavailable.length ? "insufficient-candle-history" : candidates.length ? "setup-candidate" : missingCandleFrames.length ? "partial-candle-history" : "fresh-no-setup",
           setups: candidates.length,
           timeframeDiagnostics,
           rejectionSummary,
           setupDetails: candidates.map((setup) => ({ model: setup.model, tradeStyle: setup.tradeStyle, entryTimeframe: setup.entryTimeframe, setupTimeframe: setup.setupTimeframe, side: setup.side, score: setup.score, status: setup.status, reason: setup.reason, candleTime: setup.candleTime, entry: setup.entry, stopLoss: setup.stopLoss, takeProfit: setup.takeProfit, tp1: setup.tp1, tp2: setup.tp2, tp3: setup.tp3, confidence: setup.confidence, confidenceStatus: setup.confidenceStatus, confidenceSampleSize: setup.confidenceSampleSize, riskReward: setup.riskReward })),
           missingCandleFrames,
           engineAvailability: {
-            swing: { available: swing.unavailable.length === 0, unavailable: swing.unavailable },
-            setupTimeframes: { "4h": { available: swing4h.unavailable.length === 0, unavailable: swing4h.unavailable }, "1d": { available: swing1d.unavailable.length === 0, unavailable: swing1d.unavailable } }
-          }
+            scalp: { available: scalp.unavailable.length === 0, unavailable: scalp.unavailable },
+            swing: { available: swing.unavailable.length === 0, unavailable: swing.unavailable }
+          },
         });
       }
       ledger.activitySnapshots = activitySnapshots;
@@ -5390,7 +5354,7 @@ var EngineState = class {
       if (!demoConfigured) for (const position of ledger.positions.filter((p) => p.status === "OPEN")) activeEngineKeys.add(engineKey(position));
       const executedKeySet = new Set(demoExecutedKeys);
       if (!demoConfigured) for (const trade of ledger.closedTrades ?? []) if (trade.id || trade.positionId) executedKeySet.add(String(trade.positionId ?? trade.id));
-      const maximumOpen = Math.min(10, Math.max(0, Number(ledger.maxOpenPositions ?? 10)));
+      const configuredMaximumOpen = Number(ledger.maxOpenPositions ?? 10); const maximumOpen = Number.isInteger(configuredMaximumOpen) ? Math.min(10, Math.max(0, configuredMaximumOpen)) : 10;
       const queueNow = Date.now();
       const previousEntryQueueRaw = await this.readPaperState(demoConfigured ? "bingx-vst-entry-queue-v1" : "internal-paper-entry-queue-v1");
       let previousEntryQueue = [];
@@ -5403,7 +5367,7 @@ var EngineState = class {
       const activeDirectionalModels = ACTIVE_VST_STRATEGY_MODELS;
       const queueByEngineKey = /* @__PURE__ */ new Map();
       for (const item of previousEntryQueue) {
-        if (!item?.setup || !item.setupKey || !activeDirectionalModels.has(item.setup.model) || !["4h", "1d"].includes(String(item.setup.setupTimeframe ?? "").toLowerCase()) || setupIsExpired(item.setup, queueNow)) continue;
+        if (!item?.setup || !item.setupKey || !activeDirectionalModels.has(item.setup.model) || setupIsExpired(item.setup, queueNow)) continue;
         const key = engineKey(item.setup);
         const instanceKey = item.setupInstanceKey ?? setupInstanceKey(item.setup);
         if (executedKeySet.has(item.setupKey) || executedSetupInstances.has(instanceKey) || activeEngineKeys.has(key)) continue;
@@ -5453,7 +5417,7 @@ var EngineState = class {
       await this.writePaperState(demoConfigured ? "bingx-vst-entry-queue-v1" : "internal-paper-entry-queue-v1", JSON.stringify(vstEntryQueue));
       let paperOpened = 0;
       let paperEntryAttempts = 0;
-      if (this.env.PAPER_TRADING_ONLY === "true" && !demoConfigured && this.env.LIVE_TRADING_ENABLED !== "true" && STRATEGY_GENERATION_ENABLED && NEW_PAPER_ENTRIES_ENABLED && !liquidationRiskGateActive) {
+      if (!demoConfigured && STRATEGY_GENERATION_ENABLED && NEW_PAPER_ENTRIES_ENABLED && !liquidationRiskGateActive) {
         for (const nextEntry of [...vstEntryQueue]) {
           if (this.manualClosePendingCount > 0) break;
           if (Number(nextEntry.nextAttemptAt ?? 0) > Date.now()) continue;
@@ -5503,12 +5467,13 @@ var EngineState = class {
           const entry = mark, stop = Number(setup.stopLoss), tp1 = Number(setup.tp1), tp2 = Number(setup.tp2), tp3 = Number(setup.tp3);
           const stopDistance = Math.abs(entry - stop);
           const levelsValid = Number.isFinite(entry) && entry > 0 && Number.isFinite(stop) && stop > 0 && Number.isFinite(stopDistance) && stopDistance > Math.max(entry * 1e-8, Number.EPSILON) && (setup.side === "LONG" ? stop < entry && entry < tp1 && tp2 > tp1 && (!Number.isFinite(tp3) || tp3 > tp2) : stop > entry && entry > tp1 && tp2 < tp1 && (!Number.isFinite(tp3) || tp3 < tp2));
-          const rr = Number.isFinite(stop) && Number.isFinite(tp2) && Math.abs(entry - stop) > 0 ? Math.abs(tp2 - entry) / Math.abs(entry - stop) : 0;
+          const rewardTarget = Number.isFinite(tp3) ? tp3 : tp2;
+          const rr = Number.isFinite(stop) && Number.isFinite(rewardTarget) && Math.abs(entry - stop) > 0 ? Math.abs(rewardTarget - entry) / Math.abs(entry - stop) : 0;
           const zoneCheck = validateBingXDemoEntryZone({ ...setup, entry });
-          if (!levelsValid || rr < RISK_CONFIG.minimumRiskReward || !zoneCheck.ok) {
+          if (!levelsValid || rr < RISK_CONFIG.minRewardRisk || rr > RISK_CONFIG.maxRewardRisk || !zoneCheck.ok) {
             setup.status = "REJECTED";
-            setup.executionDecisionCode = !levelsValid ? "INVALID_PAPER_SL_TP" : rr < RISK_CONFIG.minimumRiskReward ? "PAPER_RR_BELOW_MINIMUM" : zoneCheck.code;
-            setup.executionDecisionReason = !levelsValid ? "Stop veya hedef seviyesi işlem yönüyle uyumsuz; paper işlem reddedildi." : rr < RISK_CONFIG.minimumRiskReward ? "İkinci hedefte minimum 1:1 risk/getiri sağlanmıyor; paper işlem reddedildi." : "Giriş teyidi geçersiz; işlem açılmadı.";
+            setup.executionDecisionCode = !levelsValid ? "INVALID_PAPER_SL_TP" : rr < RISK_CONFIG.minRewardRisk ? "PAPER_RR_BELOW_MINIMUM" : rr > RISK_CONFIG.maxRewardRisk ? "PAPER_RR_ABOVE_MAXIMUM" : zoneCheck.code;
+            setup.executionDecisionReason = !levelsValid ? "Stop veya hedef seviyesi işlem yönüyle uyumsuz; paper işlem reddedildi." : rr < RISK_CONFIG.minRewardRisk ? "Setup 1R minimum risk/getiri sınırının altında; paper işlem reddedildi." : rr > RISK_CONFIG.maxRewardRisk ? "Setup 4R maksimum risk/getiri sınırını aşıyor; paper işlem reddedildi." : "Giriş teyidi geçersiz; işlem açılmadı.";
             vstEntryQueue = vstEntryQueue.filter((item) => item.setupKey !== nextEntry.setupKey);
             const rejected = ledger.setups.find((item) => item.symbol === setup.symbol && item.side === setup.side && item.model === setup.model && item.candleTime === setup.candleTime);
             if (rejected) Object.assign(rejected, { status: "REJECTED", executionDecisionCode: setup.executionDecisionCode, executionDecisionReason: setup.executionDecisionReason });
@@ -5731,9 +5696,7 @@ var EngineState = class {
       const reservedEntryCapacity = (demoConfigured ? (demoSnapshot?.positions.length ?? 0) : ledger.positions.filter((p) => p.status === "OPEN").length) + pendingEntryCount;
       const availableEntrySlots = Math.max(0, maximumOpen - reservedEntryCapacity);
       const eligibleDueQueueCount = vstEntryQueue.filter((item) => item.nextAttemptAt <= Date.now() && !activeEngineKeys.has(engineKey(item.setup))).length;
-      const internalPaperActive = this.env.PAPER_TRADING_ONLY === "true" && !demoConfigured && this.env.LIVE_TRADING_ENABLED !== "true";
       const entryGateBlockedBy = [];
-      if (this.env.BINGX_TRADING_MODE === "demo" && !demoConfigured && !internalPaperActive) entryGateBlockedBy.push("BINGX_VST_CREDENTIALS_MISSING");
       if (!STRATEGY_GENERATION_ENABLED) entryGateBlockedBy.push("STRATEGY_GENERATION_DISABLED");
       if (!NEW_PAPER_ENTRIES_ENABLED) entryGateBlockedBy.push("NEW_PAPER_ENTRIES_DISABLED");
       if (!demoConfigured && paperOpened === 0 && readyCandidateCount > 0) entryGateBlockedBy.push("PAPER_ENTRY_WAITING_FOR_ZONE_OR_RISK_FILTER");
@@ -5768,7 +5731,6 @@ var EngineState = class {
           liquidationRiskWarningSymbols: [...new Set(liquidationRiskWarningSymbols)],
           openOrdersComplete: demoSnapshot ? demoSnapshot.openOrdersComplete !== false : null,
           demoConfigured,
-          internalPaperEnabled: internalPaperActive,
           demoSnapshotAvailable: !!demoSnapshot,
           demoAccountError: demoAccountError ? String(demoAccountError).slice(0, 180) : null
         },
@@ -5971,6 +5933,10 @@ var EngineState = class {
         latestLedger.scanBatchSize = ledger.scanBatchSize;
         latestLedger.scanInvocationBatchSize = ledger.scanInvocationBatchSize;
         latestLedger.scanTelemetry = ledger.scanTelemetry;
+        if (ledger.structuralBiasBySymbol) latestLedger.structuralBiasBySymbol = ledger.structuralBiasBySymbol;
+        if (ledger.structuralMarketBiasSnapshot) latestLedger.structuralMarketBiasSnapshot = ledger.structuralMarketBiasSnapshot;
+        if (ledger.btcContextCandles) latestLedger.btcContextCandles = ledger.btcContextCandles;
+        if (ledger.btcContextTelemetry) latestLedger.btcContextTelemetry = ledger.btcContextTelemetry;
         this.updateQuotaTelemetry(latestLedger);
         latestLedger.modelTelemetry = ledger.modelTelemetry;
         const mergedScanRotation = reconcileScanRotationProgress(
@@ -5986,7 +5952,7 @@ var EngineState = class {
           latestLedger.cursor = ledger.cursor;
           latestLedger.scanLogicalBatchRemaining = ledger.scanLogicalBatchRemaining;
         }
-        for (const resetFlag of ["strategyResetV2", "strategyResetV3", "strategyResetV4", "strategyResetV5", "strategyResetV6", "strategyResetV7", "strategyResetV8", "sequentialBatchScanV1"]) {
+        for (const resetFlag of ["strategyResetV2", "strategyResetV3", "strategyResetV4", "strategyResetV5", "strategyResetV6", "strategyResetV7", "sequentialBatchScanV1"]) {
           if (ledger[resetFlag] === true) latestLedger[resetFlag] = true;
         }
         latestLedger.lastScanAt = ledger.lastScanAt;
@@ -6002,10 +5968,10 @@ var EngineState = class {
       return Response.json({
         ok: true,
         mode: demoConfigured ? "bingx-demo" : "internal-paper",
-        strategyMode: "SWING_4H_1D_ONLY",
+        strategyMode: "SCALP_SWING_INDEPENDENT",
         strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
         newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
-        paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && !demoConfigured && this.env.PAPER_TRADING_ONLY === "true",
+        paperTradingEnabled: !demoConfigured && this.env.PAPER_TRADING_ONLY === "true",
         demoTradingEnabled: demoConfigured && !!demoSnapshot,
         positionManagementEnabled: true,
         scannerPaused: SCANNER_PAUSED,
@@ -6068,8 +6034,8 @@ var EngineState = class {
       return Response.json({
         ok: true,
         runnerEnabled: true,
-        mode: this.env.PAPER_TRADING_ONLY === "true" && !isBingXDemoConfigured(this.env) && this.env.LIVE_TRADING_ENABLED !== "true" ? "internal-paper" : "bingx-demo",
-        strategyMode: "SWING_4H_1D_ONLY",
+        mode: this.env.BINGX_TRADING_MODE === "paper" ? "internal-paper" : "bingx-demo",
+        strategyMode: "SCALP_SWING_INDEPENDENT",
         strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
         newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
         paperTradingEnabled: this.env.BINGX_TRADING_MODE === "paper" && this.env.PAPER_TRADING_ONLY === "true",
@@ -6439,8 +6405,8 @@ function dominanceNumber(value) {
   return NaN;
 }
 __name(dominanceNumber, "dominanceNumber");
-async function dominanceJson(url) {
-  const response = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(12e3), cf: { cacheTtl: 300, cacheEverything: true } });
+async function dominanceJson(url, timeoutMs = 12e3) {
+  const response = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs), cf: { cacheTtl: 300, cacheEverything: true } });
   if (!response.ok) throw new Error("HTTP " + response.status + " from " + new URL(url).host);
   return response.json();
 }
@@ -6484,13 +6450,13 @@ async function fetchHistoricalDominance30d() {
   return points;
 }
 __name(fetchHistoricalDominance30d, "fetchHistoricalDominance30d");
-async function fetchGlobalDominanceSnapshot(env, store = null) {
+async function fetchGlobalDominanceSnapshot(env, includeHistoryBackfill = false) {
   const measuredAt = (/* @__PURE__ */ new Date()).toISOString(), today = measuredAt.slice(0, 10);
-  let btc = null, usdt = null, stablecoin = null, totalMarketCapUsd = null, totalVolumeUsd = null, marketCapChange24hPct = null, error;
+  let btc = null, usdt = null, stablecoin = null, totalMarketCapUsd = null, totalVolumeUsd = null, marketCapChange24hPct = null, error, source = "CoinGecko Global API";
   try {
     const response = await fetch("https://api.coingecko.com/api/v3/global", {
       headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(7e3),
+      signal: AbortSignal.timeout(2500),
       cf: { cacheTtl: 300, cacheEverything: true }
     });
     if (!response.ok) throw new Error("CoinGecko global endpoint HTTP " + response.status);
@@ -6509,9 +6475,26 @@ async function fetchGlobalDominanceSnapshot(env, store = null) {
   } catch (fetchError) {
     error = String(fetchError).slice(0, 180);
   }
+  if (btc === null || usdt === null) {
+    try {
+      const [paprikaGlobal, paprikaUsdt] = await Promise.all([
+        dominanceJson("https://api.coinpaprika.com/v1/global", 3500),
+        dominanceJson("https://api.coinpaprika.com/v1/tickers/usdt-tether?quotes=USD", 3500)
+      ]);
+      const fallbackBtc = dominanceNumber(paprikaGlobal?.bitcoin_dominance_percentage);
+      const fallbackTotal = dominanceNumber(paprikaGlobal?.market_cap_usd);
+      const fallbackUsdtCap = dominanceNumber(paprikaUsdt?.quotes?.USD?.market_cap);
+      if (btc === null && Number.isFinite(fallbackBtc) && fallbackBtc > 0) btc = fallbackBtc;
+      if (usdt === null && Number.isFinite(fallbackTotal) && fallbackTotal > 0 && Number.isFinite(fallbackUsdtCap) && fallbackUsdtCap > 0) usdt = fallbackUsdtCap / fallbackTotal * 100;
+      if (totalMarketCapUsd === null && Number.isFinite(fallbackTotal) && fallbackTotal > 0) totalMarketCapUsd = fallbackTotal;
+      if (btc !== null && usdt !== null) source = "CoinPaprika fallback";
+    } catch (fallbackError) {
+      if (!error) error = "CoinPaprika fallback unavailable: " + String(fallbackError).slice(0, 140);
+    }
+  }
   let stored = null;
   try {
-    stored = store ? await store.get(DOMINANCE_HISTORY_KEY, "json") : await env.PAPER_STATE.get(DOMINANCE_HISTORY_KEY, "json");
+    stored = await env.PAPER_STATE.get(DOMINANCE_HISTORY_KEY, "json");
   } catch (storageError) {
     console.error("Dominance history read failed", String(storageError));
   }
@@ -6519,9 +6502,7 @@ async function fetchGlobalDominanceSnapshot(env, store = null) {
   let lastLiveCollectionDate = stored?.lastLiveCollectionDate ?? null;
   let lastBackfillAttemptDate = stored?.lastBackfillAttemptDate ?? null;
   let historySource = stored?.source ?? null, changed = false;
-  const lastAttemptAt = Date.parse(stored?.updatedAt ?? "");
-  const retryFailedBackfill = historySource === "unavailable" && (!Number.isFinite(lastAttemptAt) || Date.now() - lastAttemptAt >= 30 * 60 * 1e3);
-  if (points.length < 25 && (lastBackfillAttemptDate !== today || retryFailedBackfill)) {
+  if (includeHistoryBackfill && points.length < 25 && lastBackfillAttemptDate !== today) {
     lastBackfillAttemptDate = today;
     try {
       const backfill = await fetchHistoricalDominance30d();
@@ -6536,7 +6517,7 @@ async function fetchGlobalDominanceSnapshot(env, store = null) {
   }
   const altcoin = btc !== null && usdt !== null ? Math.max(0, 100 - btc - usdt) : null;
   if (btc !== null && usdt !== null && altcoin !== null && lastLiveCollectionDate !== today) {
-    const livePoint = { date: today, btcDomPct: +btc.toFixed(6), usdtDomPct: +usdt.toFixed(6), altDomPct: +altcoin.toFixed(6), ...totalMarketCapUsd !== null ? { totalMarketCapUsd } : {}, source: "CoinGecko Global API" };
+    const livePoint = { date: today, btcDomPct: +btc.toFixed(6), usdtDomPct: +usdt.toFixed(6), altDomPct: +altcoin.toFixed(6), ...totalMarketCapUsd !== null ? { totalMarketCapUsd } : {}, source };
     points = [...points.filter((row) => row.date !== today), livePoint].sort((a, b) => a.date.localeCompare(b.date)).slice(-90);
     lastLiveCollectionDate = today;
     historySource = historySource ?? "Daily CoinGecko live snapshots";
@@ -6544,9 +6525,7 @@ async function fetchGlobalDominanceSnapshot(env, store = null) {
   }
   if (changed) {
     try {
-      const serialized = JSON.stringify({ points, lastLiveCollectionDate, lastBackfillAttemptDate, source: historySource ?? "unavailable", lastError: error ?? null, updatedAt: measuredAt });
-      if (store) await store.put(DOMINANCE_HISTORY_KEY, serialized);
-      else await env.PAPER_STATE.put(DOMINANCE_HISTORY_KEY, serialized);
+      await env.PAPER_STATE.put(DOMINANCE_HISTORY_KEY, JSON.stringify({ points, lastLiveCollectionDate, lastBackfillAttemptDate, source: historySource ?? "unavailable", updatedAt: measuredAt }));
     } catch (storageError) {
       console.error("Dominance history persistence failed", String(storageError));
     }
@@ -6561,7 +6540,7 @@ async function fetchGlobalDominanceSnapshot(env, store = null) {
     totalVolumeUsd,
     marketCapChange24hPct,
     measuredAt,
-    source: "CoinGecko Global API",
+    source,
     available: btc !== null && usdt !== null,
     ...error ? { error } : {},
     history,
@@ -6572,35 +6551,6 @@ async function fetchGlobalDominanceSnapshot(env, store = null) {
   };
 }
 __name(fetchGlobalDominanceSnapshot, "fetchGlobalDominanceSnapshot");
-function deriveDominanceDirections(snapshot) {
-  const history = Array.isArray(snapshot?.history) ? snapshot.history.filter((x) => x && typeof x.date === "string") : [];
-  if (history.length < 8) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: snapshot?.btc ?? null, altDomPct: snapshot?.altcoin ?? null, usdtDomPct: snapshot?.usdt ?? null, measuredAt: snapshot?.measuredAt ?? null, historyCoverageDays: history.length, historySource: snapshot?.historySource ?? null, error: snapshot?.error ?? null, available: false };
-  const latestPoint = history.at(-1), latestDate = Date.parse(latestPoint.date);
-  if (!Number.isFinite(latestDate) || Date.now() - latestDate > 2 * 864e5) return { btcDomDirection: "UNAVAILABLE", altDomDirection: "UNAVAILABLE", usdtDomDirection: "UNAVAILABLE", btcDomPct: null, altDomPct: null, usdtDomPct: null, measuredAt: snapshot?.measuredAt ?? null, historyCoverageDays: history.length, historySource: snapshot?.historySource ?? null, error: snapshot?.error ?? null, available: false };
-  const cutoff = latestDate - 6 * 864e5;
-  const baseline = [...history].reverse().find((x) => Date.parse(x.date) <= cutoff) ?? history[Math.max(0, history.length - 8)];
-  const trend = (key) => {
-    const current = Number(latestPoint[key]), prior = Number(baseline?.[key]);
-    if (!Number.isFinite(current) || !Number.isFinite(prior)) return "UNAVAILABLE";
-    const delta = current - prior;
-    return delta >= 0.15 ? "BULLISH" : delta <= -0.15 ? "BEARISH" : "NEUTRAL";
-  };
-  return {
-    btcDomDirection: trend("btcDomPct"),
-    altDomDirection: trend("altDomPct"),
-    usdtDomDirection: trend("usdtDomPct"),
-    btcDomPct: snapshot?.btc ?? latestPoint.btcDomPct ?? null,
-    altDomPct: snapshot?.altcoin ?? latestPoint.altDomPct ?? null,
-    usdtDomPct: snapshot?.usdt ?? latestPoint.usdtDomPct ?? null,
-    measuredAt: snapshot?.measuredAt ?? null,
-    historyCoverageDays: history.length,
-    historySource: snapshot?.historySource ?? null,
-    error: snapshot?.error ?? null,
-    available: true
-  };
-}
-__name(deriveDominanceDirections, "deriveDominanceDirections");
-
 async function collectDailyDominanceHistory(env) {
   const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
   try {
@@ -6612,7 +6562,7 @@ async function collectDailyDominanceHistory(env) {
   } catch (error) {
     console.error("Scheduled dominance history preflight failed", String(error));
   }
-  const snapshot = await fetchGlobalDominanceSnapshot(env);
+  const snapshot = await fetchGlobalDominanceSnapshot(env, true);
   return { ok: snapshot.available, available: snapshot.available, historyCoverageDays: snapshot.historyCoverageDays, historyStartDate: snapshot.historyStartDate, historyEndDate: snapshot.historyEndDate, historySource: snapshot.historySource, error: snapshot.error ?? null };
 }
 __name(collectDailyDominanceHistory, "collectDailyDominanceHistory");
@@ -6676,12 +6626,12 @@ async function getBingXMarkPrice(symbol, timeoutMs = 4500) {
   }
 }
 __name(getBingXMarkPrice, "getBingXMarkPrice");
-var PAPER_SCAN_BATCH_NORMAL = 16;
+var PAPER_SCAN_BATCH_NORMAL = 25;
 var PAPER_SCAN_INTERVAL_MS = 6e4;
 var latestFundingSnapshots = new Map();
 var VST_ENTRY_QUEUE_MAX = 1e3;
 var ACTIVE_VST_STRATEGY_MODELS = ACTIVE_SWING_MODEL_SET;
-var AUTOMATION_STOP = false;
+var AUTOMATION_STOP = true;
 var SCANNER_PAUSED = false;
 var NEW_PAPER_ENTRIES_ENABLED = true;
 var STRATEGY_GENERATION_ENABLED = true;
@@ -7194,7 +7144,7 @@ async function loadBingXDemoStatus(env) {
       newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
       scannerPaused: false,
       scannerActive: !SCANNER_PAUSED && !AUTOMATION_STOP && (paperStatusResult.status ? paperStatusResult.status.runnerEnabled === true : engine?.runnerEnabled === true),
-      strategyMode: "SWING_4H_1D_ONLY",
+      strategyMode: "SCALP_SWING_INDEPENDENT",
       balance: snapshot.balance?.balance ?? null,
       equity: snapshot.balance?.equity ?? null,
       availableMargin: snapshot.balance?.availableMargin ?? null,
@@ -7433,7 +7383,7 @@ async function dashboardPaperStatus(env) {
       scanRotation: ledger.scanRotation ? { ...ledger.scanRotation, seenSymbols: [] } : ledger.scanRotation,
       positions: livePositions,
       equity: Number((ledger.balance + liveUnrealized).toFixed(4)),
-      strategyMode: "SWING_4H_1D_ONLY",
+      strategyMode: "SCALP_SWING_INDEPENDENT",
       strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
       newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
       positionManagementEnabled: true,
@@ -7481,7 +7431,7 @@ async function cloudflareAccountUsage(env) {
       ...base,
       configured: false,
       ...emptyMetrics,
-      error: "CLOUDFLARE_BILLING_API_TOKEN secret is not configured on the Worker. Add the GitHub Actions secret using a least-privilege Cloudflare token with Account Billing: Read."
+      error: "CLOUDFLARE_BILLING_API_TOKEN secret is not configured on the Worker. Add CLOUDFLARE_BILLING_API_TOKEN as a Worker secret in Workers & Pages → smcprov2 → Settings → Variables and Secrets. Use a least-privilege token with Account Billing: Read."
     }, { headers });
   }
   const now = /* @__PURE__ */ new Date();
@@ -7600,6 +7550,7 @@ class EngineStateV2 extends EngineState {
 }
 var index_default = {
   async scheduled(controller, env, _ctx) {
+    if (AUTOMATION_STOP) return;
     if (env.LIVE_TRADING_ENABLED !== "true" && env.ENGINE_STATE_V2) {
       try {
         const activationStub = env.ENGINE_STATE_V2.get(env.ENGINE_STATE_V2.idFromName("main-engine"));
@@ -7652,8 +7603,8 @@ var index_default = {
       wakeRunnerEnabled = wake.runnerEnabled === true;
       wakeReady = wakeRunnerEnabled && wake.alarmScheduled === true;
       const lastScanMs = Date.parse(wake.lastScanAt ?? "");
-      scanStale = !Number.isFinite(lastScanMs) || Date.now() - lastScanMs > 90 * 1000;
-      console.info("Paper runner scheduler wake", JSON.stringify({ cron: controller.cron, at: (/* @__PURE__ */ new Date()).toISOString(), ...wake, scanStale }));
+      scanStale = !Number.isFinite(lastScanMs) || Date.now() - lastScanMs > 3 * 60 * 1000;
+      _ctx.waitUntil((async () => { const key = "paper-manual-close-selftest-v1"; try { const saved = await env.PAPER_STATE.get(key); const previous = saved ? JSON.parse(saved) : null; if (previous?.passed === true) return; if (previous?.status === "running" && Date.now() - Number(previous.at) < 120000) return; await env.PAPER_STATE.put(key, JSON.stringify({ status: "running", at: Date.now() }), { expirationTtl: 300 }); const runCloseTest = async (positionId, fraction) => { const response = await engine.fetch(new Request("https://engine.internal/paper/close", { method: "POST", headers: { "content-type": "application/json", origin: "https://smcprov2.smcprov2-stack.workers.dev", "x-smcprov2-public-origin": "https://smcprov2.smcprov2-stack.workers.dev" }, body: JSON.stringify({ positionId, fraction, confirmedByUser: true, requestedExitPrice: 110, requestedMarkAt: new Date().toISOString(), __testFixture: true }) })); const data = await response.json(); return { status: response.status, ok: data.ok === true, testOnly: data.testOnly === true, mode: data.mode, remainingQty: data.remainingQty, remainingInitialQty: data.remainingInitialQty, closedTradeRecorded: !!data.closedTrade, exitPrice: data.exitPrice, pnlUsdt: data.pnlUsdt, code: data.code ?? null }; }; const full = await runCloseTest("__SMC_MANUAL_CLOSE_SELFTEST_FULL__", 1); const partial = await runCloseTest("__SMC_MANUAL_CLOSE_SELFTEST_PARTIAL__", 0.5); const passed = full.status === 200 && full.ok && full.testOnly && full.mode === "internal-paper" && full.remainingQty === 0 && full.closedTradeRecorded && Number(full.pnlUsdt) > 0 && partial.status === 200 && partial.ok && partial.testOnly && partial.mode === "internal-paper" && Math.abs(Number(partial.remainingQty) - 0.5) < 1e-8 && Math.abs(Number(partial.remainingInitialQty) - 1) < 1e-8 && !partial.closedTradeRecorded && Number(partial.pnlUsdt) > 0; const result = { at: new Date().toISOString(), passed, full, partial, persisted: false, note: "Synthetic cloned-ledger test; no real Paper position changed." }; await env.PAPER_STATE.put(key, JSON.stringify(result), { expirationTtl: passed ? 604800 : 300 }); console.info("Paper manual close synthetic self-test", JSON.stringify(result)); } catch (error) { const result = { at: new Date().toISOString(), passed: false, error: String(error).slice(0, 180) }; await env.PAPER_STATE.put(key, JSON.stringify(result), { expirationTtl: 300 }); console.warn("Paper manual close synthetic self-test failed", JSON.stringify(result)); } })()); console.info("Paper runner scheduler wake", JSON.stringify({ cron: controller.cron, at: (/* @__PURE__ */ new Date()).toISOString(), ...wake, scanStale, manualCloseSelfTestScheduled: true })); if (scanStale || !wakeReady || !wakeRunnerEnabled) { try { await env.PAPER_STATE.put("paper-runner-wake-v1", JSON.stringify({ at: Date.now(), ...wake, wakeReady, wakeRunnerEnabled, scanStale }), { expirationTtl: 3600 }); } catch (error) { console.warn("Paper runner wake snapshot write failed", String(error).slice(0, 120)); } }
     } catch (error) {
       console.error("Paper runner scheduler wake failed", String(error));
       try {
@@ -7706,7 +7657,7 @@ var index_default = {
                         (async () => {
                           const response = await index_default.fetch(internalWithTimeout, env);
                           const data = await response.json();
-                          return { ok: response.ok, data };
+                          return { ok: response.ok, status: response.status, data };
                         })(),
                         new Promise((_, reject) => {
                           timeoutId = setTimeout(() => {
@@ -7719,11 +7670,11 @@ var index_default = {
                       if (timeoutId) clearTimeout(timeoutId);
                     }
         } catch (error) {
-          return { ok: false, data: { error: String(error) } };
+          return { ok: false, status: null, data: { error: String(error) } };
         }
       }));
       const [h, sys, an, ar, hi, cf, tk, un, gc] = results;
-      return Response.json({ health: h.data, systemHealth: sys.data, analytics: an.data, archiveHealth: ar.data, historyHealth: hi.data, cloudflareUsage: cf.data, tickerData: tk.data, universeData: un.data, globalContext: gc.data }, { headers: dashboardHeaders });
+      return Response.json({ health: h.data, systemHealth: sys.data, analytics: an.data, archiveHealth: ar.data, historyHealth: hi.data, cloudflareUsage: cf.data, tickerData: tk.data, universeData: un.data, globalContext: gc.data, _diagnostics: results.map((result, index) => ({ path: paths[index], ok: result.ok === true, status: result.status ?? null, error: result.ok === true ? null : result.data?.error ?? result.data?.message ?? "Endpoint unavailable" })) }, { headers: dashboardHeaders });
     }
     if (request.method === "POST" && url.pathname === "/api/close") {
       const browserOrigin = request.headers.get("origin") || "";
@@ -7759,7 +7710,7 @@ var index_default = {
         automationStopped: data.automationStopped === true,
         storageDegraded: data.storageDegraded === true,
         lastScanAt: data.lastScanAt ?? null,
-        strategyMode: "SWING_4H_1D_ONLY",
+        strategyMode: "SCALP_SWING_INDEPENDENT",
         strategyGenerationEnabled: STRATEGY_GENERATION_ENABLED,
         newPaperEntriesEnabled: NEW_PAPER_ENTRIES_ENABLED,
         scannerPaused: SCANNER_PAUSED,
@@ -7847,11 +7798,6 @@ var index_default = {
         error: data.demoConnected === true ? void 0 : "BingX VST demo account authentication or balance check failed."
       }, { status: status.ok ? 200 : 503, headers });
     }
-    if (request.method === "GET" && url.pathname === "/api/paper/internal-status") {
-      const id = env.ENGINE_STATE_V2.idFromName("main-engine");
-      const engine = env.ENGINE_STATE_V2.get(id);
-      return engine.fetch(new Request("https://engine.internal/paper/status"));
-    }
     if (request.method === "GET" && env.BINGX_TRADING_MODE === "demo" && ["/api/paper/status", "/api/paper/live-pnl", "/api/demo/status"].includes(url.pathname)) {
       if (!isDemoControlAuthorized(request, env)) return Response.json({ ok: false, mode: "bingx-demo", error: "BingX demo control token required." }, { status: 401, headers });
       return url.pathname === "/api/paper/live-pnl" ? dashboardBingXDemoLivePnl(env) : dashboardBingXDemoStatus(env);
@@ -7901,7 +7847,7 @@ var index_default = {
     }
 
     if (request.method === "GET" && url.pathname === "/api/market/global-context") {
-      return edgeCachedGet(request, 300, async () => Response.json(await fetchGlobalDominanceSnapshot(env), { headers: { "cache-control": "public, max-age=300" } }));
+      return Response.json(await fetchGlobalDominanceSnapshot(env), { headers: { ...headers, "cache-control": "no-store" } });
     }
     if (request.method === "GET" && url.pathname === "/api/health") {
       return Response.json({
@@ -7913,7 +7859,7 @@ var index_default = {
         paperTradingEnabled: env.BINGX_TRADING_MODE === "paper" && env.PAPER_TRADING_ONLY === "true",
         demoTradingConfigured: isBingXDemoConfigured(env),
         liveTradingEnabled: false,
-        strategyMode: "SWING_4H_1D_ONLY",
+        strategyMode: "SCALP_SWING_INDEPENDENT",
         serverTime: (/* @__PURE__ */ new Date()).toISOString(),
         storageHealth: "reported-separately"
       }, { headers: { ...headers, "cache-control": "no-store" } });
