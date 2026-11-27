@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
+import { SCALP_ENGINE_AVAILABLE, evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
 const series=(n=40,step=1)=>Array.from({length:n},(_,i)=>{const close=100+i*step;return {timestamp:i+1,open:close-.2,high:close+.5,low:close-.5,close,volume:100+i,closed:true};});
 const input={symbol:"BTC-USDT",timeframes:{"1d":series(40,2),"4h":series(40,.8),"1h":series(),"15m":series()},marketQuality:{quoteVolume24h:12000000,spreadPct:.04},volumeData:{relativeVolume:1.2},marketContext:{btc:{weekly:"BULLISH",daily:"BULLISH"},dominance:{btc:"BEARISH",altcoin:"BULLISH",usdt:"BEARISH"}}};
-test("Scalp engine is removed",()=>assert.throws(()=>evaluateScalp(input),/SCALP_ENGINE_REMOVED/));
+test("Scalp engine is explicitly unavailable and must not be counted in combined backtests",()=>{assert.equal(SCALP_ENGINE_AVAILABLE,false);assert.throws(()=>evaluateScalp(input),/SCALP_ENGINE_REMOVED/);});
 test("Swing setup scan consumes only 1D and 4H",()=>{const result=evaluateSwing(input);assert.ok(Array.isArray(result));assert.ok(result.every(x=>x.engine==="swing"&&["4h","1d"].includes(x.setupTimeframe)));});
 test("Swing setup scan rejects 1H and all lower setup timeframes",()=>{for(const tf of ["1h","15m","5m","1m","3m"])assert.throws(()=>evaluateSwing({...input,setupTimeframe:tf}),/FORBIDDEN_SETUP_TIMEFRAME/);});
 test("Swing evaluator requires both 1D and 4H",()=>{assert.throws(()=>evaluateSwing({symbol:"BTC-USDT",timeframes:{"1d":series()}}),/MISSING_TIMEFRAME_4h/);});
