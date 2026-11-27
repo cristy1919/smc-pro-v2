@@ -66,3 +66,16 @@ Existing resources were inspected in place. No new repository, Worker, Durable O
 - New internal-paper entries for `W05_RANGE_DEVIATION + SHORT` are temporarily held at `WATCH` with reason `MODEL_SIDE_QUARANTINED`. The last report showed 17 trades, 35.29% win rate, PF 0.28, and -44.69 USDT. This is a targeted paper quarantine, not deletion of W05 or a claim that the model is permanently invalid. W05 LONG remains observable pending sufficient verified sample size.
 - The 26 Nov report contained 97 closed trades: 66 Scalp (5m entry) and 31 Swing (15m entry). It also showed 45 manual closes. Timeframe comparisons remain confounded with engine type; Swing 15m must be compared against controlled 1h-entry variants before declaring the timeframe itself defective.
 - Deployment changed code only. No paper ledger, open position, balance, or trade-history record was reset or rewritten. Public HTTP runtime verification was blocked by the Cloudflare execution environment's network policy; the active deployment and bindings were verified through the Cloudflare API.
+
+
+## Operational readiness update — 2026-11-27
+
+- Active main Worker: `smcprov2`, version 2055, 100% deployment. Dashboard Worker: `smcprov2-dashboard`, version 65, 100% deployment.
+- Execution remains Stage 1 Internal Paper. VST Demo and Live flags remain disabled; no exchange API credentials were added.
+- BTC context now fetches closed BTC-USDT 4H and 1D candles directly (up to 300 each), persists the history, and reconstructs BTC structural direction at each historical trade's opening time for the trade analytics endpoint.
+- Altcoin breadth uses fresh per-symbol 4H/1D structural states. It is `UNAVAILABLE` until at least 60% of the eligible universe is covered; new setup audit records the breadth snapshot and coverage.
+- The Statistics panel displays current BTC structure, BTC candle counts, altcoin breadth coverage and historical BTC alignment.
+- VST Demo order validation checks the inclusive 1R–4R range before market/limit orders and again after actual fills. Live validation supports Scalp 5m and Swing 1h setup timeframes, with independent engine routing and the same 1R–4R limits.
+- GitHub Actions last verified 126 tests passing, 0 failing.
+- Runtime adoption of the newest Durable Object code and live BTC candle counts remain pending the deferred Cloudflare code-update window; do not treat the BTC feed as runtime-verified until the new scheduler telemetry confirms nonzero 4H/1D counts.
+- See [execution-mode runbook](execution-mode-runbook.md) for the staged Internal Paper → VST Demo → Live transition and credential names.
