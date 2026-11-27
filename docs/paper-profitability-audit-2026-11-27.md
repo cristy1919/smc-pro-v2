@@ -94,3 +94,14 @@ No production parameters or Cloudflare resources were changed by this audit. The
 - Test a Swing bearish-regime filter.
 - Preserve the positive Scalp S04 Range Deviation edge while validating it out of sample.
 - Recalibrate score and risk only after the corrected 30/60/90-day matrix is trustworthy.
+
+## Scalp + Swing source recovery work (research branch)
+
+- Recovered the earlier Scalp evaluator implementation into `src/scalp-evaluator.js` and wired `evaluateScalp()` into the current evaluator facade. The live Cloudflare Worker was already confirmed to contain its own active Scalp runtime; this recovery repairs the GitHub research source path and does not deploy anything.
+- Restored the six S01–S06 Scalp setup IDs and 1H / 15M / 5M evaluation contract. Swing evaluation now accepts 1D / 4H context with 1H or 15M entry candles, matching the documented engine contract.
+- Restored independent Scalp and Swing score weights: Scalp 15/20/20/15/20/10 and Swing 20/15/20/20/15/10 (HTF / liquidity / structure / zone / entry / volume). Score bands are RED 0–59, WAIT 60–64, WATCH 65–69, QUALIFIED 70–83, HIGH_QUALITY 84–100.
+- Both scoring paths now use a fixed 100-point denominator. Missing factor values count as zero points and reduce `factorCoveragePct`; available factors are no longer renormalized upward.
+- Restored `enginePlan('scalp')` and the Scalp/Swing dashboard tab configuration on the isolated research branch. The strategy-matrix backtest fetches a shared 1D/4H/1H/15M/5M candle set once per symbol, avoiding duplicate 1H and 15M requests between engines.
+- Updated the strategy matrix eligibility threshold to QUALIFIED / score >= 70, aligned with the approved score bands, and expanded Swing matrix evaluation to 1H / 15M entry frames.
+- Added regression coverage for Scalp evaluator availability, Scalp timeframes, engine score weights, missing-factor penalties, Swing entry frames, and shared market-data fetches.
+- These changes are committed to `research/scalp-engine-recovery-2026-11-27`. GitHub Actions was deliberately not run to conserve quota; therefore the code has not yet passed an executed CI run. No production Worker, Paper account, Durable Object ledger, open position, or trading setting was changed. The existing `runHistoricalBacktest` utility remains Swing-only; the combined Scalp + Swing matrix is the dedicated research runner.
