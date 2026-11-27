@@ -58,8 +58,10 @@ export function validateLiveCandidate(candidate, {
   explicitConfirmation = false, idempotencyKey
 } = {}) {
   const reasons = [];
-  if (!candidate || candidate.engine !== "swing") reasons.push("INVALID_ENGINE");
-  if (!["4h", "1d"].includes(String(candidate?.setupTimeframe ?? "").toLowerCase())) reasons.push("FORBIDDEN_SETUP_TIMEFRAME");
+  if (!candidate || !["scalp", "swing"].includes(candidate.engine)) reasons.push("INVALID_ENGINE");
+  const setupTimeframe = String(candidate?.setupTimeframe ?? "").toLowerCase();
+  const allowedSetupTimeframes = candidate?.engine === "scalp" ? ["5m", "15m"] : ["4h", "1d"];
+  if (!allowedSetupTimeframes.includes(setupTimeframe)) reasons.push("FORBIDDEN_SETUP_TIMEFRAME");
   if (candidate?.status !== "QUALIFIED" || candidate?.entryEligible !== true) reasons.push("CANDIDATE_NOT_ENTRY_READY");
   if (candidate?.entryConfirmation?.status !== "CONFIRMED") reasons.push("ENTRY_CONFIRMATION_REQUIRED");
   if (!SYMBOL_RE.test(candidate?.symbol ?? "")) reasons.push("INVALID_SYMBOL");
