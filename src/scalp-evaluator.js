@@ -2,16 +2,8 @@ import { detectPivots, classifyStructure, detectStructureEvents } from "./market
 import { detectFairValueGaps, detectLiquidityPools, detectLiquiditySweeps } from "./zones.js";
 import { detectOrderBlocks, detectBreakers, detectSupplyDemand, detectRollingRanges, detectRangeDeviations, detectOTE as detectOTEZones, detectCRT, detectMitigations } from "./advanced-zones.js";
 import { validateCandles } from "./market-data.js";
+import { scoreSetup } from "./scoring.js";
 
-export const SCALP_SCORE_WEIGHTS = Object.freeze({ htf: 15, liquidity: 20, structure: 20, zone: 15, entry: 20, volume: 10 });
-export function scoreScalpFactors(factors) {
-  const keys = Object.keys(SCALP_SCORE_WEIGHTS);
-  for (const key of keys) { const value = factors[key]; if (value !== null && value !== undefined && (!Number.isFinite(value) || value < 0 || value > 100)) throw new RangeError("Invalid Scalp factor: " + key); }
-  const coverage = keys.reduce((sum, key) => sum + (Number.isFinite(factors[key]) ? SCALP_SCORE_WEIGHTS[key] : 0), 0);
-  const score = Math.round(keys.reduce((sum, key) => sum + (Number.isFinite(factors[key]) ? factors[key] * SCALP_SCORE_WEIGHTS[key] : 0), 0) / 100);
-  const band = score < 60 ? "RED" : score < 65 ? "WAIT" : score < 70 ? "WATCH" : score < 84 ? "QUALIFIED" : "HIGH_QUALITY";
-  return { score, band, factorCoveragePct: coverage };
-}
 const SETUP_IDS = {
   scalp: { sweep: "S01_SWEEP_MSS_FVG", breaker: "S02_BREAKER_RETEST", bos: "S03_BOS_DISPLACEMENT", range: "S04_RANGE_DEVIATION", failed: "S05_FAILED_BREAKOUT", ob: "S06_OB_REACTION" },
   swing: { ob: "W01_HTF_OB_REVERSAL", supply: "W02_SUPPLY_DEMAND_REVERSAL", sweep: "W03_SWEEP_CHOCH", breaker: "W04_BREAKER_RETEST", range: "W05_RANGE_DEVIATION", crt: "W06_CRT", ote: "W07_OTE", bos: "W08_BOS_CONTINUATION" }
@@ -87,11 +79,11 @@ function makeCandidate({ engine, symbol, direction, setupId, entryCandles, htf, 
   const volumeAvailable = Number.isFinite(volumeData?.relativeVolume) && volumeData.relativeVolume >= 0;
   const volumeScore = volumeAvailable ? Math.max(0, Math.min(100, 50 + (volumeData.relativeVolume - 1) * 35)) : null;
   const factors = { htf: htfScore, liquidity: liquidityScore, structure: structureScore, zone: zoneScore, entry: entryScore, volume: volumeScore };
-  const scored = scoreScalpFactors(factors);
+  const hardFilters = { validStop: risk > 0, minimumRR: rr >= 1, rrAtLeastOne: rr >= 1, rrAtMostFour: rr <= 4, liquid: Number.isFinite(volumeData?.relativeVolume) && volumeData.relativeVolume >= 0.8, candlesValid: last.closed === true, directionConsistent: direction !== "NEUTRAL" };
+  const scored = scoreSetup("scalp", factors, hardFilters);
   const score = scored.score;
-  const hardFilters = { validStop: risk > 0, minimumRR: rr >= 1, liquid: Number.isFinite(volumeData?.relativeVolume) && volumeData.relativeVolume >= 0.8, direction: direction !== "NEUTRAL", candle: last.closed === true };
-  const rejected = Object.values(hardFilters).some(x => !x);
-  const band = rejected ? "REJECTED" : scored.band;
+  const rejected = scored.band === "REJECTED";
+  const band = scored.band;
   const reasons = [
     setupId, `HTF_${htfDirection}`, `STRUCTURE_${midDirection}`,
     ...evidence, zone ? `ZONE_${zone.type}` : "ZONE_NOT_CONFIRMED",
