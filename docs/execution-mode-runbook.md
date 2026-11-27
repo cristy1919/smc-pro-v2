@@ -62,7 +62,7 @@ The live gate must remain disabled during Internal Paper and VST Demo. Do not us
 ## Shared execution contract
 
 - Both Scalp and Swing engines are eligible for each stage.
-- Scalp setup timeframes: 5m/15m; Swing setup timeframes: 4h/1d. Higher-timeframe bias/confirmation data remains part of the engine's independent analysis.
+- Scalp candidate setup/entry timeframe: 5m (1H direction, 15M liquidity/zones). Swing candidate setup/confirmation timeframe: 1h (1D direction, 4H structural zones, 15M entry). Higher-timeframe context remains part of each engine's independent analysis.
 - Reward/risk is inclusive: minimum 1R, maximum 4R.
 - Normal risk unit: 1R = 2% of the current authoritative account equity; reduced-risk setup = 0.5R.
 - Isolated margin only; leverage policy and exchange contract limits are checked before entry.
