@@ -3,6 +3,7 @@ import { BingXLiveClient } from "./src/bingx-live-client.js";
 import { DurableObjectLiveStore } from "./src/live-state-store.js";
 import { manageLivePositions } from "./src/live-position-manager.js";
 import { runLiveSetupQueue } from "./src/live-runner.js";
+import { trackSqlCursor } from "./src/durable-state.js";
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -3555,11 +3556,8 @@ var EngineState = class {
   }
   execSql(query, ...bindings) {
     const result = this.state.storage.sql.exec(query, ...bindings);
-    this.usageCounters.sqlRowsRead += result.rowsRead;
-    this.usageCounters.sqlRowsWritten += result.rowsWritten;
-    if (/^\s*(SELECT|WITH|PRAGMA)\b/i.test(query)) this.usageCounters.reads += result.rowsRead;
-    else this.usageCounters.writes += result.rowsWritten;
-    return result;
+    const isRead = /^\s*(SELECT|WITH|PRAGMA)\b/i.test(query);
+    return trackSqlCursor(result, this.usageCounters, isRead);
   }
   async loadRecoveryBackoff() {
     if (this.recoveryBackoffLoaded) return;
