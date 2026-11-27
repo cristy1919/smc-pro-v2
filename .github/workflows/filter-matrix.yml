@@ -1,6 +1,9 @@
 name: BingX signal-level filter matrix research
 
 on:
+  push:
+    branches:
+      - research/filter-matrix-v1-2026-11-27
   workflow_dispatch:
 
 concurrency:
@@ -15,6 +18,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: research/filter-matrix-v1-2026-11-27
       - uses: actions/setup-node@v4
         with:
           node-version: 20
