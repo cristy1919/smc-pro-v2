@@ -3381,39 +3381,53 @@ var EngineState = class {
       this.paperReadCacheHits++;
       return cached.value;
     }
+    this.paperReadInflight ??= new Map();
+    const pending = this.paperReadInflight.get(key);
+    if (pending) {
+      this.paperReadCoalesced = (this.paperReadCoalesced ?? 0) + 1;
+      return pending;
+    }
     const versionAtReadStart = this.paperValueVersions.get(key) ?? 0;
-    let value = null;
-    if (this.kvWriteFallbackActive === true) {
-      const durable = await this.readStorage("paper-state:" + key);
-      if (durable !== void 0) value = type === "json" ? JSON.parse(durable) : durable;
-      else value = type === "json" ? await this.env.PAPER_STATE.get(key, "json") : await this.env.PAPER_STATE.get(key);
-    } else {
-      try {
-        this.usageCounters.reads++;
-        value = type === "json" ? await this.env.PAPER_STATE.get(key, "json") : await this.env.PAPER_STATE.get(key);
-      } catch (error) {
-        if (!this.isKvQuotaFailure(error)) throw error;
-        this.kvWriteFallbackActive = true;
-        await this.writeStorage("paper-ledger-kv-write-blocked", true);
+    const read = (async () => {
+      let value = null;
+      if (this.kvWriteFallbackActive === true) {
         const durable = await this.readStorage("paper-state:" + key);
-        value = durable === void 0 ? null : type === "json" ? JSON.parse(durable) : durable;
+        if (durable !== void 0) value = type === "json" ? JSON.parse(durable) : durable;
+        else value = type === "json" ? await this.env.PAPER_STATE.get(key, "json") : await this.env.PAPER_STATE.get(key);
+      } else {
+        try {
+          this.usageCounters.reads++;
+          value = type === "json" ? await this.env.PAPER_STATE.get(key, "json") : await this.env.PAPER_STATE.get(key);
+        } catch (error) {
+          if (!this.isKvQuotaFailure(error)) throw error;
+          this.kvWriteFallbackActive = true;
+          await this.writeStorage("paper-ledger-kv-write-blocked", true);
+          const durable = await this.readStorage("paper-state:" + key);
+          value = durable === void 0 ? null : type === "json" ? JSON.parse(durable) : durable;
+        }
       }
-    }
-    if ((this.paperValueVersions.get(key) ?? 0) === versionAtReadStart) {
-      const encoded = value === null ? "__NULL__" : type === "json" ? JSON.stringify(value) ?? "__UNDEFINED__" : String(value);
-      this.lastPaperValues.set(key, encoded);
-      this.paperReadCache.set(key, { expiresAt: Date.now() + 1500, value });
-      if (this.paperReadCache.size > 100) {
-        for (const [cacheKey, entry] of this.paperReadCache) if (entry.expiresAt <= Date.now()) this.paperReadCache.delete(cacheKey);
-        while (this.paperReadCache.size > 100) this.paperReadCache.delete(this.paperReadCache.keys().next().value);
+      if ((this.paperValueVersions.get(key) ?? 0) === versionAtReadStart) {
+        const encoded = value === null ? "__NULL__" : type === "json" ? JSON.stringify(value) ?? "__UNDEFINED__" : String(value);
+        this.lastPaperValues.set(key, encoded);
+        this.paperReadCache.set(key, { expiresAt: Date.now() + 1500, value });
+        if (this.paperReadCache.size > 100) {
+          for (const [cacheKey, entry] of this.paperReadCache) if (entry.expiresAt <= Date.now()) this.paperReadCache.delete(cacheKey);
+          while (this.paperReadCache.size > 100) this.paperReadCache.delete(this.paperReadCache.keys().next().value);
+        }
       }
+      return value;
+    })();
+    this.paperReadInflight.set(key, read);
+    try {
+      return await read;
+    } finally {
+      if (this.paperReadInflight.get(key) === read) this.paperReadInflight.delete(key);
     }
-    return value;
   }
   async writePaperState(key, value) {
     if (key === "engine-state") { const state = JSON.parse(value); if (state?.paperLedger && Array.isArray(state.paperLedger.scanDiagnostics)) state.paperLedger.scanDiagnostics = filterActiveSwingDiagnostics(state.paperLedger.scanDiagnostics); value = JSON.stringify(state); }
     if (this.lastPaperValues.get(key) === value) { this.usageCounters.deduplicatedWrites++; return; }
-    this.paperValueVersions.set(key, (this.paperValueVersions.get(key) ?? 0) + 1); this.usageCounters.writes++;
+    this.paperValueVersions.set(key, (this.paperValueVersions.get(key) ?? 0) + 1); this.paperReadCache.delete(key); this.usageCounters.writes++;
     if (this.kvWriteFallbackActive === true) {
       if (key === "engine-state") await this.writeStorage("engine-state", JSON.parse(value)); else await this.writeStorage("paper-state:" + key, value);
     } else {
