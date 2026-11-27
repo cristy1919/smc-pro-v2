@@ -3753,6 +3753,9 @@ var EngineState = class {
     await this.writeStorage("sql-schema-ready", true);
   }
   async enforceEmergencyStop() {
+    // The global stop is immutable for this deployed build. Enforce its storage
+    // side effects once per Durable Object isolate, not on every dashboard poll.
+    if (this.emergencyStopEnforced === true) return;
     const existing = await this.readEngineState();
     const engine = structuredClone(existing);
     const previousLedger = engine.paperLedger;
@@ -3768,6 +3771,7 @@ var EngineState = class {
     if (processingEnabled !== false) await this.writeStorage("history-processing-enabled", false);
     const alarm = await this.state.storage.getAlarm();
     if (alarm !== null) await this.deleteDurableAlarm();
+    this.emergencyStopEnforced = true;
   }
   async fetch(request) {
     this.usageCounters.requests++;
