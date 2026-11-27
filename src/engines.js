@@ -1,11 +1,16 @@
-import { ENGINE_CONFIG, assertSetupTimeframe } from "./config.js";
-export const SETUPS = Object.freeze({ swing: ["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W06_CRT", "W07_OTE", "W08_BOS_CONTINUATION"] });
+import { ENGINE_CONFIG, assertSupportedTimeframe } from "./config.js";
+export const SETUPS = Object.freeze({
+  scalp: ["S01_SWEEP_MSS_FVG", "S02_BREAKER_RETEST", "S03_BOS_DISPLACEMENT", "S04_RANGE_DEVIATION", "S05_FAILED_BREAKOUT", "S06_OB_REACTION"],
+  swing: ["W01_HTF_OB_REVERSAL", "W02_SUPPLY_DEMAND_REVERSAL", "W03_SWEEP_CHOCH", "W04_BREAKER_RETEST", "W05_RANGE_DEVIATION", "W06_CRT", "W07_OTE", "W08_BOS_CONTINUATION"]
+});
 export function enginePlan(name) {
-  if (name === "scalp") throw new Error("SCALP_ENGINE_REMOVED");
-  const c = ENGINE_CONFIG[name];
-  if (!c) throw new Error("Unknown engine");
-  for (const tf of c.allowed) assertSetupTimeframe(tf);
-  return { ...c, setups: [...SETUPS[name]] };
+  const config = ENGINE_CONFIG[name];
+  if (!config) throw new Error("Unknown engine");
+  for (const timeframe of config.allowed) assertSupportedTimeframe(timeframe);
+  return { ...config, setups: [...SETUPS[name]] };
 }
 const TRANSITIONS = { DETECTED: ["WATCH", "QUALIFIED", "INVALIDATED", "EXPIRED", "REJECTED"], WATCH: ["QUALIFIED", "INVALIDATED", "EXPIRED", "REJECTED"], QUALIFIED: ["ENTRY_PENDING", "INVALIDATED", "EXPIRED", "REJECTED"], ENTRY_PENDING: ["OPEN", "INVALIDATED", "EXPIRED", "REJECTED"], OPEN: ["TP1", "CLOSED"], TP1: ["CLOSED"], CLOSED: [], INVALIDATED: [], EXPIRED: [], REJECTED: [] };
-export function transitionSetup(setup, next) { if (!TRANSITIONS[setup.state]?.includes(next)) throw new Error("Invalid setup transition"); return { ...setup, state: next, updatedAt: Date.now() }; }
+export function transitionSetup(setup, next) {
+  if (!TRANSITIONS[setup.state]?.includes(next)) throw new Error("Invalid setup transition");
+  return { ...setup, state: next, updatedAt: Date.now() };
+}
