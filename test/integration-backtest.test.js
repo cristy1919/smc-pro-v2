@@ -56,12 +56,15 @@ test("BingX provider refuses forbidden 1m/3m trading intervals",async()=>{
   const provider=new BingXPublicKlineProvider({fetchImpl:async()=>{throw new Error("should not fetch");},now:()=>1000000,minRequestIntervalMs:0});
   await assert.rejects(()=>provider.getCandles({symbol:"BTC-USDT",timeframe:"1m",startTime:0,endTime:1000000}),/Forbidden timeframe/);
 });
-test("engine dataset fetch uses only independent approved timeframe sets",async()=>{
+test("engine dataset fetch uses independent Scalp and Swing timeframe contracts",async()=>{
   const calls=[];
   const provider={getCandles:async args=>{calls.push(args.timeframe);return [];}};
-  await assert.rejects(()=>fetchEngineDataset({provider,symbol:"BTC-USDT",engine:"scalp",startTime:0,endTime:1000000}),/SCALP_ENGINE_REMOVED/);
+  await fetchEngineDataset({provider,symbol:"BTC-USDT",engine:"scalp",startTime:0,endTime:1000000});
+  assert.deepEqual(calls,["1h","15m","5m"]);
+  calls.length=0;
   await fetchEngineDataset({provider,symbol:"BTC-USDT",engine:"swing",startTime:0,endTime:1000000});
-  assert.deepEqual(calls,["1d","4h"]);
+  assert.deepEqual(calls,["1d","4h","1h","15m"]);
+  await assert.rejects(()=>fetchEngineDataset({provider,symbol:"BTC-USDT",engine:"unknown",startTime:0,endTime:1000000}),/INVALID_ENGINE/);
 });
 test("walk-forward backtest produces separate trade ledger and refuses missing 90d history",()=>{
   const hour=3600000, day=24*hour, start=Date.UTC(2026,0,1);
@@ -121,7 +124,9 @@ test("90d Swing dataset fetches 1D/4H structure plus 1H/15M confirmation and ent
   await fetchEngineDataset({ provider, symbol: "BTC-USDT", engine: "swing", startTime, endTime });
   const byTf = Object.fromEntries(calls.map(x => [x.timeframe, x.limit]));
   assert.equal(calls.length,4);
-  assert.ok(byTf["4h"] > 500, "4H history must include 90d plus warmup");\n  assert.ok(byTf["1h"] > 2000, "1H confirmation history must include 90d plus warmup");\n  assert.ok(byTf["15m"] > 8000, "15M entry history must include 90d plus warmup");
+  assert.ok(byTf["4h"] > 500, "4H history must include 90d plus warmup");
+  assert.ok(byTf["1h"] > 2000, "1H confirmation history must include 90d plus warmup");
+  assert.ok(byTf["15m"] > 8000, "15M entry history must include 90d plus warmup");
   assert.ok(byTf["1d"] >= 120, "daily history must include 90d plus warmup");
 });
 test("walk-forward backtest rejects 1H and lower setup timeframes", () => {
