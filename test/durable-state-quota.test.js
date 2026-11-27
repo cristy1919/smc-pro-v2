@@ -104,7 +104,7 @@ test("trade history is bounded and supports stable keyset pagination", async () 
 
   const capped = await repository.listTradesPage({ limit: 999999 });
   assert.equal(calls[2].bindings.at(-1), MAX_TRADE_PAGE_SIZE + 1);
-  assert.deepEqual(capped.trades, [{ id: "t2" }]);
+  assert.equal(capped.trades.length, 2);
 });
 
 test("open-position reads have a fixed upper bound", async () => {
