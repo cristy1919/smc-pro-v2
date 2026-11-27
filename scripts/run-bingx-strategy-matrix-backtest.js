@@ -9,8 +9,8 @@ import { calculateExcursionsR } from "../src/excursions.js";
 
 const BASE_URL = "https://open-api.bingx.com";
 const DAY = 86400000;
-const TARGET_SYMBOLS = Number(process.env.TARGET_SYMBOLS ?? 50);
-const WINDOW_DAYS = Number(process.env.WINDOW_DAYS ?? 90);
+const TARGET_SYMBOLS = Number(process.env.TARGET_SYMBOLS ?? 20);
+const WINDOW_DAYS = Number(process.env.WINDOW_DAYS ?? 30);
 const SEGMENT_DAYS = 30;
 const FEE_RATE = Number(process.env.FEE_RATE ?? 0.0005);
 const SLIPPAGE_RATE = Number(process.env.SLIPPAGE_RATE ?? 0.0002);
@@ -34,7 +34,7 @@ const ALL_MODEL_KEYS = ENGINES.flatMap(engine =>
 );
 
 if (!Number.isInteger(TARGET_SYMBOLS) || TARGET_SYMBOLS < 1 || TARGET_SYMBOLS > 100) throw new Error("TARGET_SYMBOLS must be 1..100");
-if (![30,60,90].includes(WINDOW_DAYS) || WINDOW_DAYS % SEGMENT_DAYS !== 0) throw new Error("WINDOW_DAYS must be 30, 60 or 90");
+if (WINDOW_DAYS !== 30) throw new Error("WINDOW_DAYS is fixed at 30 for this research run");
 if (!Number.isFinite(FEE_RATE) || FEE_RATE < 0 || !Number.isFinite(SLIPPAGE_RATE) || SLIPPAGE_RATE < 0) throw new Error("INVALID_COST_ASSUMPTIONS");
 
 // Fail before any BingX market-data requests if the independent Scalp evaluator is not wired.
@@ -355,7 +355,7 @@ finalModels.sort((a,b)=>a.engine.localeCompare(b.engine)||a.timeframe.localeComp
 const output={
   metadata:{
     generatedAt:new Date().toISOString(),exchange:"BingX USDT-M perpetual public market data",
-    requestedPairs:TARGET_SYMBOLS,completedPairs:datasets.size,windowDays:WINDOW_DAYS,segmentDays:SEGMENT_DAYS,segments:segmentReports.length,
+    requestedPairs:TARGET_SYMBOLS,completedPairs:datasets.size,windowDays:WINDOW_DAYS,segmentDays:SEGMENT_DAYS,segments:segmentReports.length,universeSelection:"Top 20 eligible crypto USDT-M perpetuals by current 24h quote volume, with BTC-USDT included; present-day selection bias applies",
     engineCoverage:{scalp:{setups:SETUPS.scalp,entryTimeframes:["5m"],contextTimeframes:["1h","15m"]},swing:{setups:SETUPS.swing,entryTimeframes:["15m","1h"],contextTimeframes:["1d","4h","1h"]}},
     testedDirections:DIRECTIONS,
     costs:{feeRatePerSide:FEE_RATE,slippageRatePerSide:SLIPPAGE_RATE,maxCostToRisk:MAX_COST_TO_RISK,minStopDistancePct:MIN_STOP_DISTANCE_PCT,funding:"historical BingX settlement records only"},
@@ -386,7 +386,7 @@ const output={
     retestOrRedesign:finalModels.filter(x=>["FILTER_OR_RETEST","RETEST_OR_REDESIGN"].includes(x.decision)).length
   }
 };
-await writeFile("bingx-strategy-matrix-50-pairs-90d-report.json",JSON.stringify(output,null,2)+"\n",{encoding:"utf8"});
+await writeFile("bingx-strategy-matrix-20-pairs-30d-report.json",JSON.stringify(output,null,2)+"\n",{encoding:"utf8"});
 process.stdout.write(JSON.stringify({
   metadata:output.metadata,summary:output.summary,
   models:finalModels.map(({engine,timeframe,setupId,direction,metrics,decision,counters})=>({engine,timeframe,setupId,direction,metrics,decision,counters}))
