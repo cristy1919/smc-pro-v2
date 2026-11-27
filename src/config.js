@@ -1,6 +1,6 @@
 export const ENGINE_CONFIG = Object.freeze({
   scalp: Object.freeze({ bias: "1h", liquidity: "15m", entry: "5m", allowed: ["1h", "15m", "5m"], setupTimeframes: ["5m"] }),
-  swing: Object.freeze({ bias: "1d", zone: "4h", confirmation: "1h", entry: "15m", allowed: ["1d", "4h", "1h", "15m"], setupTimeframes: ["4h", "1d"] })
+  swing: Object.freeze({ bias: "1d", zone: "4h", confirmation: "1h", entry: "15m", allowed: ["1d", "4h", "1h", "15m"], setupTimeframes: ["15m", "1h"] })
 });
 export const RISK_CONFIG = Object.freeze({ riskUnitFraction: 0.02, reducedRiskFractionOfR: 0.5, maxOpenPositions: 10, minRewardRisk: 1, maxRewardRisk: 4, normalTargetR: 3.5, highTargetRequiresExtraConfirmation: true, minLeverage: 20, maxLeverage: 50 });
 export const DASHBOARD_TABS = Object.freeze(["Market Overview", "Açık İşlemler", "Scalp Scanner", "Swing Scanner", "Positions", "Statistics", "Candidates (İşlem Adayları)", "Trade History", "Diagnostics", "Grafik"]);
