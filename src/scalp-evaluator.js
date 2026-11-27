@@ -89,7 +89,7 @@ function makeCandidate({ engine, symbol, direction, setupId, entryCandles, htf, 
   const factors = { htf: htfScore, liquidity: liquidityScore, structure: structureScore, zone: zoneScore, entry: entryScore, volume: volumeScore };
   const scored = scoreScalpFactors(factors);
   const score = scored.score;
-  const hardFilters = { validStop: risk > 0, minimumRR: rr >= 1, direction: direction !== "NEUTRAL", candle: last.closed === true };
+  const hardFilters = { validStop: risk > 0, minimumRR: rr >= 1, liquid: Number.isFinite(volumeData?.relativeVolume) && volumeData.relativeVolume >= 0.8, direction: direction !== "NEUTRAL", candle: last.closed === true };
   const rejected = Object.values(hardFilters).some(x => !x);
   const band = rejected ? "REJECTED" : scored.band;
   const reasons = [
@@ -105,7 +105,7 @@ function makeCandidate({ engine, symbol, direction, setupId, entryCandles, htf, 
     entryConfirmation: { status: "PENDING", maxWaitBars: 6, method: zone ? "ZONE_RETEST_CLOSE" : "CLOSE_CONFIRMATION" },
     confidence: "INSUFFICIENT_DATA", factors, factorCoveragePct: scored.factorCoveragePct,
     hardFilters, evidence: reasons, createdAt: last.timestamp,
-    dataStatus: { relativeVolume: volumeAvailable ? "AVAILABLE" : "UNAVAILABLE" }
+    dataStatus: { relativeVolume: volumeAvailable ? "AVAILABLE" : "UNAVAILABLE", quoteVolume24h: "UNAVAILABLE", spreadPct: "UNAVAILABLE" }
   };
 }
 function validateInput(input, engine) {
