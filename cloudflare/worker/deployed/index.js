@@ -3315,6 +3315,8 @@ var EngineState = class {
   recoveryBackoffLoaded = false;
   // Read the legacy SQL fallback marker once per isolate, not on every scan/status request.
   kvWriteFallbackActive = null;
+  // Coalesce concurrent reads of the large fallback ledger within one DO isolate.
+  engineStateReadInFlight = null;
   constructor(state, env) {
     this.state = state;
     this.env = env;
@@ -3635,7 +3637,33 @@ var EngineState = class {
       }
     }
     if (this.kvWriteFallbackActive) {
-      const durable = await this.readStorage("engine-state");
+      // The fallback path must use the same short read-through cache as the KV path.
+      // Previously it bypassed paperReadCache and re-read the full chunked ledger
+      // for every alarm, scan, status, and dashboard request.
+      const cached = this.paperReadCache.get("engine-state");
+      let durable;
+      if (cached && cached.expiresAt > Date.now()) {
+        this.paperReadCacheHits++;
+        durable = cached.value;
+      } else if (this.engineStateReadInFlight) {
+        durable = await this.engineStateReadInFlight;
+      } else {
+        const versionAtReadStart = this.paperValueVersions.get("engine-state") ?? 0;
+        const readPromise = (async () => {
+          const value = await this.readStorage("engine-state");
+          if ((this.paperValueVersions.get("engine-state") ?? 0) === versionAtReadStart && value !== void 0) {
+            this.lastPaperValues.set("engine-state", JSON.stringify(value) ?? "__UNDEFINED__");
+            this.paperReadCache.set("engine-state", { expiresAt: Date.now() + 1500, value });
+          }
+          return value;
+        })();
+        this.engineStateReadInFlight = readPromise;
+        try {
+          durable = await readPromise;
+        } finally {
+          if (this.engineStateReadInFlight === readPromise) this.engineStateReadInFlight = null;
+        }
+      }
       if (!durable || !durable.paperLedger) {
         throw new Error("KV writes are blocked and the durable paper ledger is unavailable; refusing to trade on stale KV state.");
       }
