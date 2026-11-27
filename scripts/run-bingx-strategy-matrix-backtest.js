@@ -4,6 +4,7 @@ import { evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
 import { advanceEntryConfirmation } from "../src/entry-confirmation.js";
 import { RISK_CONFIG } from "../src/config.js";
 import { selectCryptoPerpetualUniverse } from "../src/backtest-universe.js";
+import { calculateExcursionsR } from "../src/excursions.js";
 
 const BASE_URL = "https://open-api.bingx.com";
 const DAY = 86400000;
@@ -34,6 +35,17 @@ const ALL_MODEL_KEYS = ENGINES.flatMap(engine =>
 if (!Number.isInteger(TARGET_SYMBOLS) || TARGET_SYMBOLS < 1 || TARGET_SYMBOLS > 100) throw new Error("TARGET_SYMBOLS must be 1..100");
 if (![30,60,90].includes(WINDOW_DAYS) || WINDOW_DAYS % SEGMENT_DAYS !== 0) throw new Error("WINDOW_DAYS must be 30, 60 or 90");
 if (!Number.isFinite(FEE_RATE) || FEE_RATE < 0 || !Number.isFinite(SLIPPAGE_RATE) || SLIPPAGE_RATE < 0) throw new Error("INVALID_COST_ASSUMPTIONS");
+
+// Fail before any BingX market-data requests: the repository Scalp evaluator is intentionally removed.
+// A matrix report that silently skips every Scalp signal would be misleading.
+try {
+  evaluateScalp({});
+} catch (error) {
+  if (String(error?.message ?? error).includes("SCALP_ENGINE_REMOVED")) {
+    throw new Error("BACKTEST_BLOCKED_SCALP_EVALUATOR_UNAVAILABLE: restore and test the independent Scalp evaluator before running the combined matrix");
+  }
+  throw error;
+}
 
 async function publicData(path) {
   const response = await fetch(new URL(path, BASE_URL));
@@ -210,6 +222,7 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
       const fundingR=settlements.reduce((sum,x)=>sum+x.fundingRate*sign*(tp1At&&x.fundingTime>tp1At?0.5:1),0)*entry/risk;
       const costR=feeSlippageR+fundingR,netR=realizedGrossR-costR;
       const evidence=candidate.evidence||[];
+      const {maeR,mfeR}=calculateExcursionsR({adverseMove:adverse,favorableMove:favorable,risk});
       const trade={
         symbol,engine,setupId:candidate.setupId,direction:candidate.direction,timeframe:entryTimeframe,
         score:candidate.score,band:candidate.band,factors:candidate.factors||{},factorCoveragePct:candidate.factorCoveragePct,
@@ -219,8 +232,7 @@ function runStrategyMatrix({engine,symbol,timeframes,evaluate,entryTimeframe,sta
         signalAt:signal.timestamp,entryAt:confirmation.confirmedAt,entry,stop,tp1,tp1At,tp1Hit,
         stopMovedToBreakeven:tp1Hit,target,exit,exitAt,exitReason,grossR:realizedGrossR,
         estimatedCostR:costR,feeSlippageR,fundingR,fundingSettlements:settlements.length,
-        stopDistancePct,projectedCostR,maeR:Number(adverse/risk.toFixed?risk: risk),
-        mfeR:Number(favorable/risk.toFixed?risk: risk),netR,
+        stopDistancePct,projectedCostR,maeR,mfeR,netR,
         regime:regimeAt(sliced,signal.timestamp)
       };
       if(!tradesByModel.has(key))tradesByModel.set(key,[]);
