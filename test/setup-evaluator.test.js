@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SCALP_ENGINE_AVAILABLE, evaluateScalp, evaluateSwing } from "../src/setup-evaluator.js";
+import { scoreScalpFactors, SCALP_SCORE_WEIGHTS } from "../src/scalp-evaluator.js";
 const series=(n=40,step=1)=>Array.from({length:n},(_,i)=>{const close=100+i*step;return {timestamp:i+1,open:close-.2,high:close+.5,low:close-.5,close,volume:100+i,closed:true};});
-const input={symbol:"BTC-USDT",timeframes:{"1d":series(40,2),"4h":series(40,.8),"1h":series(),"15m":series()},marketQuality:{quoteVolume24h:12000000,spreadPct:.04},volumeData:{relativeVolume:1.2},marketContext:{btc:{weekly:"BULLISH",daily:"BULLISH"},dominance:{btc:"BEARISH",altcoin:"BULLISH",usdt:"BEARISH"}}};
-test("Scalp engine is explicitly unavailable and must not be counted in combined backtests",()=>{assert.equal(SCALP_ENGINE_AVAILABLE,false);assert.throws(()=>evaluateScalp(input),/SCALP_ENGINE_REMOVED/);});
+const input={symbol:"BTC-USDT",timeframes:{"1d":series(40,2),"4h":series(40,.8),"1h":series(),"15m":series(),"5m":series(40,.05)},marketQuality:{quoteVolume24h:12000000,spreadPct:.04},volumeData:{relativeVolume:1.2},marketContext:{btc:{weekly:"BULLISH",daily:"BULLISH"},dominance:{btc:"BEARISH",altcoin:"BULLISH",usdt:"BEARISH"}}};
+test("Scalp evaluator is restored and consumes 1H/15M/5M independently",()=>{assert.equal(SCALP_ENGINE_AVAILABLE,true);const rows=evaluateScalp(input);assert.ok(Array.isArray(rows));assert.ok(rows.every(x=>x.engine==="scalp"&&x.timeframe==="5m"));});
+test("Scalp evaluator rejects missing 5M candles instead of substituting another timeframe",()=>{assert.throws(()=>evaluateScalp({...input,timeframes:{"1h":series(),"15m":series()}}),/MISSING_TIMEFRAME_5m/);});
+test("Scalp score weights and bands match the approved independent model",()=>{assert.deepEqual(SCALP_SCORE_WEIGHTS,{htf:15,liquidity:20,structure:20,zone:15,entry:20,volume:10});assert.equal(scoreScalpFactors({htf:100,liquidity:100,structure:100,zone:100,entry:100,volume:100}).band,"HIGH_QUALITY");const missing=scoreScalpFactors({htf:100,liquidity:100,structure:100,zone:100,entry:100,volume:null});assert.equal(missing.factorCoveragePct,90);assert.equal(missing.score,90);});
 test("Swing setup scan consumes only 1D and 4H",()=>{const result=evaluateSwing(input);assert.ok(Array.isArray(result));assert.ok(result.every(x=>x.engine==="swing"&&["4h","1d"].includes(x.setupTimeframe)));});
 test("Swing setup scan rejects 1H and all lower setup timeframes",()=>{for(const tf of ["1h","15m","5m","1m","3m"])assert.throws(()=>evaluateSwing({...input,setupTimeframe:tf}),/FORBIDDEN_SETUP_TIMEFRAME/);});
 test("Swing evaluator requires both 1D and 4H",()=>{assert.throws(()=>evaluateSwing({symbol:"BTC-USDT",timeframes:{"1d":series()}}),/MISSING_TIMEFRAME_4h/);});
