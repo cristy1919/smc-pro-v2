@@ -3381,39 +3381,53 @@ var EngineState = class {
       this.paperReadCacheHits++;
       return cached.value;
     }
+    this.paperReadInflight ??= new Map();
+    const pending = this.paperReadInflight.get(key);
+    if (pending) {
+      this.paperReadCoalesced = (this.paperReadCoalesced ?? 0) + 1;
+      return pending;
+    }
     const versionAtReadStart = this.paperValueVersions.get(key) ?? 0;
-    let value = null;
-    if (this.kvWriteFallbackActive === true) {
-      const durable = await this.readStorage("paper-state:" + key);
-      if (durable !== void 0) value = type === "json" ? JSON.parse(durable) : durable;
-      else value = type === "json" ? await this.env.PAPER_STATE.get(key, "json") : await this.env.PAPER_STATE.get(key);
-    } else {
-      try {
-        this.usageCounters.reads++;
-        value = type === "json" ? await this.env.PAPER_STATE.get(key, "json") : await this.env.PAPER_STATE.get(key);
-      } catch (error) {
-        if (!this.isKvQuotaFailure(error)) throw error;
-        this.kvWriteFallbackActive = true;
-        await this.writeStorage("paper-ledger-kv-write-blocked", true);
+    const read = (async () => {
+      let value = null;
+      if (this.kvWriteFallbackActive === true) {
         const durable = await this.readStorage("paper-state:" + key);
-        value = durable === void 0 ? null : type === "json" ? JSON.parse(durable) : durable;
+        if (durable !== void 0) value = type === "json" ? JSON.parse(durable) : durable;
+        else value = type === "json" ? await this.env.PAPER_STATE.get(key, "json") : await this.env.PAPER_STATE.get(key);
+      } else {
+        try {
+          this.usageCounters.reads++;
+          value = type === "json" ? await this.env.PAPER_STATE.get(key, "json") : await this.env.PAPER_STATE.get(key);
+        } catch (error) {
+          if (!this.isKvQuotaFailure(error)) throw error;
+          this.kvWriteFallbackActive = true;
+          await this.writeStorage("paper-ledger-kv-write-blocked", true);
+          const durable = await this.readStorage("paper-state:" + key);
+          value = durable === void 0 ? null : type === "json" ? JSON.parse(durable) : durable;
+        }
       }
-    }
-    if ((this.paperValueVersions.get(key) ?? 0) === versionAtReadStart) {
-      const encoded = value === null ? "__NULL__" : type === "json" ? JSON.stringify(value) ?? "__UNDEFINED__" : String(value);
-      this.lastPaperValues.set(key, encoded);
-      this.paperReadCache.set(key, { expiresAt: Date.now() + 1500, value });
-      if (this.paperReadCache.size > 100) {
-        for (const [cacheKey, entry] of this.paperReadCache) if (entry.expiresAt <= Date.now()) this.paperReadCache.delete(cacheKey);
-        while (this.paperReadCache.size > 100) this.paperReadCache.delete(this.paperReadCache.keys().next().value);
+      if ((this.paperValueVersions.get(key) ?? 0) === versionAtReadStart) {
+        const encoded = value === null ? "__NULL__" : type === "json" ? JSON.stringify(value) ?? "__UNDEFINED__" : String(value);
+        this.lastPaperValues.set(key, encoded);
+        this.paperReadCache.set(key, { expiresAt: Date.now() + 1500, value });
+        if (this.paperReadCache.size > 100) {
+          for (const [cacheKey, entry] of this.paperReadCache) if (entry.expiresAt <= Date.now()) this.paperReadCache.delete(cacheKey);
+          while (this.paperReadCache.size > 100) this.paperReadCache.delete(this.paperReadCache.keys().next().value);
+        }
       }
+      return value;
+    })();
+    this.paperReadInflight.set(key, read);
+    try {
+      return await read;
+    } finally {
+      if (this.paperReadInflight.get(key) === read) this.paperReadInflight.delete(key);
     }
-    return value;
   }
   async writePaperState(key, value) {
     if (key === "engine-state") { const state = JSON.parse(value); if (state?.paperLedger && Array.isArray(state.paperLedger.scanDiagnostics)) state.paperLedger.scanDiagnostics = filterActiveSwingDiagnostics(state.paperLedger.scanDiagnostics); value = JSON.stringify(state); }
     if (this.lastPaperValues.get(key) === value) { this.usageCounters.deduplicatedWrites++; return; }
-    this.paperValueVersions.set(key, (this.paperValueVersions.get(key) ?? 0) + 1); this.usageCounters.writes++;
+    this.paperValueVersions.set(key, (this.paperValueVersions.get(key) ?? 0) + 1); this.paperReadCache.delete(key); this.usageCounters.writes++;
     if (this.kvWriteFallbackActive === true) {
       if (key === "engine-state") await this.writeStorage("engine-state", JSON.parse(value)); else await this.writeStorage("paper-state:" + key, value);
     } else {
@@ -3497,6 +3511,32 @@ var EngineState = class {
     try { return await work(); } finally { release(); }
   }
   async readStorage(key) {
+    // The large engine-state record is read by several status paths. Cache it
+    // briefly per isolate and coalesce concurrent reads; every write invalidates it.
+    const cacheable = key === "engine-state" || key === "paper-state:engine-state";
+    if (!cacheable) return this.readStorageUncached(key);
+    this.storageReadCache ??= new Map();
+    this.storageReadInflight ??= new Map();
+    const cached = this.storageReadCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      this.usageCounters.storageCacheHits = (this.usageCounters.storageCacheHits ?? 0) + 1;
+      return cached.value;
+    }
+    const pending = this.storageReadInflight.get(key);
+    if (pending) {
+      this.usageCounters.storageReadCoalesced = (this.usageCounters.storageReadCoalesced ?? 0) + 1;
+      return pending;
+    }
+    const read = this.readStorageUncached(key).then((value) => {
+      this.storageReadCache.set(key, { value, expiresAt: Date.now() + 2000 });
+      return value;
+    }).finally(() => {
+      if (this.storageReadInflight.get(key) === read) this.storageReadInflight.delete(key);
+    });
+    this.storageReadInflight.set(key, read);
+    return read;
+  }
+  async readStorageUncached(key) {
     this.usageCounters.reads++;
     let value;
     const chunkable = key === "engine-state" || key === "paper-state:engine-state";
@@ -3525,6 +3565,7 @@ var EngineState = class {
   async writeStorage(key, value) {
     const encoded = JSON.stringify(value) ?? "__UNDEFINED__";
     if (this.lastStorageValues.get(key) === encoded) { this.usageCounters.deduplicatedWrites++; return; }
+    if (key === "engine-state" || key === "paper-state:engine-state") this.storageReadCache?.delete(key);
     this.usageCounters.writes++;
     const chunkable = key === "engine-state" || key === "paper-state:engine-state";
     if (chunkable) {
@@ -3753,21 +3794,34 @@ var EngineState = class {
     await this.writeStorage("sql-schema-ready", true);
   }
   async enforceEmergencyStop() {
-    const existing = await this.readEngineState();
-    const engine = structuredClone(existing);
-    const previousLedger = engine.paperLedger;
-    const ledger = previousLedger ?? structuredClone(DEFAULT_STATE.paperLedger);
-    const needsEngineSave = !existing || engine.runnerEnabled !== false || !previousLedger || previousLedger.runnerEnabled !== false;
-    engine.runnerEnabled = false;
-    ledger.runnerEnabled = false;
-    engine.paperLedger = ledger;
-    if (needsEngineSave) await this.saveEngineState(engine);
-    const runnerConfigured = await this.readPaperState("runner-configured");
-    if (runnerConfigured !== "true") await this.writePaperState("runner-configured", "true");
-    const processingEnabled = await this.readStorage("history-processing-enabled");
-    if (processingEnabled !== false) await this.writeStorage("history-processing-enabled", false);
-    const alarm = await this.state.storage.getAlarm();
-    if (alarm !== null) await this.deleteDurableAlarm();
+    // The global stop is immutable for this deployed build. Enforce its storage
+    // side effects once per Durable Object isolate, not on every dashboard poll.
+    if (this.emergencyStopEnforced === true) return;
+    // Coalesce concurrent dashboard requests so they share the same storage reads.
+    if (this.emergencyStopPromise) return this.emergencyStopPromise;
+    this.emergencyStopPromise = (async () => {
+      const existing = await this.readEngineState();
+      const engine = structuredClone(existing);
+      const previousLedger = engine.paperLedger;
+      const ledger = previousLedger ?? structuredClone(DEFAULT_STATE.paperLedger);
+      const needsEngineSave = !existing || engine.runnerEnabled !== false || !previousLedger || previousLedger.runnerEnabled !== false;
+      engine.runnerEnabled = false;
+      ledger.runnerEnabled = false;
+      engine.paperLedger = ledger;
+      if (needsEngineSave) await this.saveEngineState(engine);
+      const runnerConfigured = await this.readPaperState("runner-configured");
+      if (runnerConfigured !== "true") await this.writePaperState("runner-configured", "true");
+      const processingEnabled = await this.readStorage("history-processing-enabled");
+      if (processingEnabled !== false) await this.writeStorage("history-processing-enabled", false);
+      const alarm = await this.state.storage.getAlarm();
+      if (alarm !== null) await this.deleteDurableAlarm();
+      this.emergencyStopEnforced = true;
+    })();
+    try {
+      await this.emergencyStopPromise;
+    } finally {
+      this.emergencyStopPromise = null;
+    }
   }
   async fetch(request) {
     this.usageCounters.requests++;
